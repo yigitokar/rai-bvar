@@ -53,6 +53,8 @@ filterwarnings = ["error::RuntimeWarning"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Code blocks in SPEC.md / README.md are illustrative sketches, not formatted source.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "NPY", "RUF"]
