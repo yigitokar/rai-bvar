@@ -37,8 +37,29 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --group dev
+      # Persistent XLA compilation cache (DESIGN §9.10 budgets the PR tier with it): a warm cache
+      # makes the MCMC tests about 3x faster and changes no result (a hit loads the executable the
+      # same program compiles to). The key carries the CPU model, so an executable built for one
+      # instruction set is never loaded on another; a new key per run keeps the cache current.
+      - name: CPU model
+        id: cpu
+        run: echo "model=$(grep -m1 'model name' /proc/cpuinfo | md5sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/jax-xla
+          key: xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-
       - name: Fast suite (unit, contract, integration)
-        run: uv run pytest -m "not slow and not network"
+        env:
+          JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-xla
+          JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+        run: uv run pytest -m "not slow and not network" --durations=30
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ runner.temp }}/jax-xla
+          key: xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
 
   macos:  # weekly: macOS minutes bill at 10x; local development runs on macOS anyway
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
