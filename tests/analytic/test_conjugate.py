@@ -694,12 +694,22 @@ def _gamma_by_mode_sd(mode: float, sd: float):
 
 
 def _beta_by_mode_sd(mode: float, sd: float):
-    def equations(ab):
-        a, b = ab
-        return [(a - 1.0) / (a + b - 2.0) - mode, a * b / ((a + b) ** 2 * (a + b + 1.0)) - sd**2]
+    """Beta(a, b) with the given mode ``(a − 1)/(a + b − 2)`` and standard deviation.
 
-    a, b = optimize.fsolve(equations, [4.0, 2.0], xtol=1e-14)
-    return stats.beta(a, b)
+    Independent of the library's parametrisation: ``b`` follows from the mode as a function of
+    ``a``, and the variance equation is solved for ``a`` by bracketing (no fsolve, whose
+    convergence warnings differ across platforms).
+    """
+
+    def b_of(a: float) -> float:
+        return (a - 1.0) * (1.0 - mode) / mode + 1.0
+
+    def excess(a: float) -> float:
+        b = b_of(a)
+        return a * b / ((a + b) ** 2 * (a + b + 1.0)) - sd**2
+
+    a = optimize.brentq(excess, 1.0 + 1e-12, 1e12, xtol=1e-14, rtol=1e-15)
+    return stats.beta(a, b_of(a))
 
 
 def test_log_posterior_adds_the_glp_hyperpriors():
