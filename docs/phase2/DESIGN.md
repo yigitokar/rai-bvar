@@ -609,6 +609,12 @@ key's `d` is the kept-draw index (§5.6, §7.1). (3) In-loop forecasts select ex
 (4) The §8.2 cost figure is restated from measurements. (5) `fit.summary()`'s implied reduced-form `Σ` under SV
 is the plug-in at `λ_i = exp(b_μ)` (RW: `exp(m_0)`) and says so in a `vol_mean` field.
 
+**Stage 4 amendments (orchestrator, 2026-10-22):** (1) WP21's SV-t PR criterion is met by the exact
+importance-sampling SV-t oracle (4 observations, max |z| ≈ 1.8): stochvol 3.2.1's Student-t sampler does not
+target the standardized-t SV posterior (`tests/parity/SV_PARAMETRIZATION.md` §3.2), so the `stochvol_v_t5` row
+stays a strict xfail (`raises=OracleDeviation`) until a fixture from stochvol ≥ 3.2.5 (ideally 3.2.9) is built.
+(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it.
+
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 
 Mapping from the SPEC §4.2 sketch (settled here, open question Q12): `MeanBlock.sample(target, weights, glob)` →
