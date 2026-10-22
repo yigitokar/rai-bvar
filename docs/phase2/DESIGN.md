@@ -399,7 +399,7 @@ class EngineData:              # one estimation window; shared by chains (in_axe
 @register_dataclass
 class FitCache:                # computed once per fit by the jitted prepare(); per Geweke iteration in validation
     F:       f64[T_pad, q] | Empty     # structural δ-design [X | X M_c − Y_{:, :n−1}]
-    FF:      f64[T_pad, P] | Empty     # packed products F[:, iu]·F[:, ju]   (gram="packed")
+    FF:      f64[T_pad, P] | Empty     # packed products F[:, iu]·F[:, ju]   (gram="packed", const_path="weighted")
     XX:      f64[T_pad, P_x] | Empty   # packed products of X (reduced form, gram="packed")
     G_const: f64[q, q] | Empty         # Fᵀ D_m F       (Constant paths)
     FtY:     f64[q, n] | Empty         # Fᵀ D_m Y       (Constant paths)
@@ -597,6 +597,11 @@ PathDraw:     h: f64[n, T_pad+1]; log_scale2: f64[n, T_pad]           2 log o + 
   Field validation of `MeanStatic` requires `gram_tile > 0` exactly when `gram == "packed_tiled"`.
 
 ---
+
+**Stage 1 amendments (orchestrator, 2026-10-22):** `FitCache.FF` exists only for `gram="packed"` with
+`const_path="weighted"` (its only consumer); `contemp_arrays` takes `scaling=` (keyword-only, required) because
+Mode I and Mode II/iw_equivalent need different contemporaneous prior scales; §9.3's eigen-vs-Cholesky tolerance
+is conditioning-aware (see §9.3 item 1).
 
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 
@@ -1711,7 +1716,10 @@ nightly `n = 3`, `p = 2`, `T_eff = 50`, fixed stored presample.
 1. **Dense oracles with injected noise** (N07 §13.1): `precision_draw` vs dense `solve`/`chol` (1e-10); padding
    exactness (padded vs unpadded with `z[:q_i]`, 1e-12); packed and tiled Gram vs dense `Fᵀ diag(w) F` (1e-13
    relative); eigen and fixed-factor draws vs the `cholesky_const` path: identical mean and covariance to 1e-12
-   (deterministic) plus a KS test on 10⁴ draws; tridiagonal sampler vs dense `Q` and `slogdet` (1e-12); SV `Q̃, b̃`
+   on well-conditioned posteriors (cond(sKs) ≲ 1e3) — on Minnesota level data both paths are only accurate to
+   O(ε·cond(sKs)) with constants up to ~150 (WP4 review), so compare each path with a high-precision reference
+   or use ≈ 2e-12 + 300ε·cond(sKs) path-vs-path; plus a KS test on 10⁴ draws; a weighted-path oracle builds its own
+   cache with `const_path="weighted"` (only that path carries `FF`); tridiagonal sampler vs dense `Q` and `slogdet` (1e-12); SV `Q̃, b̃`
    builder vs `HᵀS⁻¹H + GᵀV⁻¹G` including masks and `T_eff`; CCCM vs the SUR oracle on the N04 §9.1 table
    (rtol 1e-10) and 20 random problems; A-row gradient/Hessian and sign check (N04 §9.4).
 2. **Density-ratio identities** (Grosse & Duvenaud eq. 1; N06 §5.1) at 20 random states per block:
@@ -2376,7 +2384,7 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
   class WindowScales: psi: np.ndarray; own_means: np.ndarray; freq: str; notes: tuple[str, ...]
   def window_scales(data: VARData, prior: Minnesota, lags: int, deterministic: str,
                     psi: np.ndarray | None = None) -> WindowScales
-  def contemp_arrays(scales: WindowScales, prior: Minnesota, n: int) -> ContempPriorArrays       # λ-free P̃_a
+  def contemp_arrays(scales: WindowScales, prior: Minnesota, n: int, *, scaling: Scaling) -> ContempPriorArrays  # scaling = StructStatic.contemp_scaling (Mode I vs Mode II/iw_equivalent); WP16 and WP18 pass it
   def structural_arrays(scales, prior, hyper: Mapping[str, float], *, n: int, lags: int, n_det: int,
                         mode: Literal["I", "II"]) -> tuple[CoefPriorArrays, SharedPrior]       # δ prior, M_c
   def constant_prior(scales: WindowScales, n: int) -> ConstantPrior                             # IG(1 + ι/2, ψ/2)

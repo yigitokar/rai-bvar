@@ -96,7 +96,9 @@ class FitCache:
     """Computed once per fit by the jitted ``prepare()`` (per Geweke iteration in validation)."""
 
     F: Array | Empty  # f64[T_pad, q]: structural δ-design [X | X M_c − Y_{:, :n−1}]
-    FF: Array | Empty  # f64[T_pad, P]: packed products F[:, iu]·F[:, ju] (gram="packed")
+    FF: (
+        Array | Empty
+    )  # f64[T_pad, P]: packed products F[:, iu]·F[:, ju] (gram="packed", const_path="weighted")
     XX: Array | Empty  # f64[T_pad, P_x]: packed products of X (reduced form)
     G_const: Array | Empty  # f64[q, q]: Fᵀ D_m F (Constant paths)
     FtY: Array | Empty  # f64[q, n]: Fᵀ D_m Y (Constant paths)
