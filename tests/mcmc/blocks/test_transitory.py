@@ -30,6 +30,7 @@ from scipy import stats
 
 from rai_bvar.components.vol import transitory as TR
 from rai_bvar.engines.mcmc import protocols as P
+from rai_bvar.engines.mcmc import random as RND
 from rai_bvar.engines.mcmc import registry
 from rai_bvar.engines.mcmc.config import VolStatic
 from rai_bvar.engines.mcmc.keys import Sub, sub_key
@@ -760,6 +761,123 @@ def test_extract_and_vmap_over_equations():
     np.testing.assert_array_equal(
         np.asarray(d.nu), np.asarray(GRID, float)[np.asarray(batched.nu_idx)]
     )
+
+
+# --------------------------------------------------------------------------- sub-keys (DESIGN §5.6)
+
+
+def _o_draw(kk, logits, live):
+    """``o_step``'s draw from the key ``kk``: one uniform per row, inverse CDF (D-4)."""
+    u = jr.uniform(kk, live.shape, dtype=jnp.float64)
+    return jnp.where(live, RND.categorical_inverse_cdf(u, logits), 0)
+
+
+def _p_draw(kk, a, b):
+    """``p_step``'s ``(log p, log(1 − p))`` from the key ``kk`` (two log-gamma draws)."""
+    return jnp.stack(RND.log_beta(kk, a, b))
+
+
+def _nu_draw(kk, logits):
+    """``nu_step``'s grid index from the key ``kk`` (one uniform)."""
+    return RND.categorical_inverse_cdf(jr.uniform(kk, (), dtype=jnp.float64), logits)
+
+
+def _tau_draw(kk, shape, log_scale, live):
+    """``tau_step``'s ``log τ`` from the key ``kk`` (one log-gamma per row)."""
+    return jnp.where(live, log_scale - RND.loggamma(kk, shape, log_scale.shape), 0.0)
+
+
+def _over_keys(fn):
+    """``fn`` jitted and mapped over a stack of keys (the other arguments shared)."""
+    return jax.jit(lambda keys, *args: jax.vmap(lambda kk: fn(kk, *args))(keys))
+
+
+@pytest.mark.parametrize("kind", ["outlier", "t", "outlier_t"])
+def test_each_step_draws_from_its_own_sub_key(kind):
+    """One consumer per key (DESIGN §3.1 rule 5, §5.6; module docstring). From the equation key
+    ``k`` that ``sample`` receives, ``o`` reads ``sub_key(k, Sub.O)`` (one uniform per row), ``p``
+    ``Sub.P`` (two log-gamma draws), ``ν`` ``Sub.NU`` (one uniform) and ``τ`` ``Sub.TAU`` (one
+    log-gamma per row): each step is reproduced exactly from its own sub-key and the conditionals
+    of this module. On the same inputs, the step fed any other key (another transitory step's
+    sub-key, a core's — the SV core's ``S … NC_MS_ACC``, the Constant core's ``H`` — or ``k``
+    itself) gives a different draw for at least one of the six keys, so a step that shares a key
+    fails here. ``jax.debug_key_reuse`` cannot see such a mutant: every ``fold_in`` returns a
+    fresh key."""
+    T_pad, T_eff = 48, 44
+    tm, Te = tmask_of(T_eff, T_pad), jnp.int32(T_eff)
+    live = tm > 0
+    kern = registry.load(kind)(vstatic(kind), T_pad)
+    pr = eq_prior()
+    tp = pr.transitory
+    e = np.random.default_rng(31).standard_t(5, size=T_pad) * math.sqrt(3 / 5)
+    e[[4, 17, 30]] = [7.0, -9.0, 12.0]  # planted outliers: rows with an uncertain o_t
+    log_e2 = jnp.where(live, jnp.log(jnp.asarray(e) ** 2), 0.0)
+    lvp = jnp.full(T_pad, -0.2)  # the current persistent log variance
+    log_z2 = TR.masked_log_z2(log_e2, lvp, tm)
+    ts0 = kern.init(tm, pr)  # p at its prior mean, ν at its prior median
+    nu, log_c, _ = (jnp.asarray(a) for a in TR.nu_constants(GRID, "standardized"))
+    run = jax.jit(lambda k: kern.sample(k, ts0, log_e2, lvp, tm, Te, pr))
+    draws = {"o": _over_keys(_o_draw), "p": _over_keys(_p_draw), "nu": _over_keys(_nu_draw),
+             "tau": _over_keys(_tau_draw)}  # fmt: skip
+    power: dict[tuple[str, str], bool] = {}
+
+    def check(step, own, k, args, got):
+        """``got`` is the step's draw from ``sub_key(k, own)``; record which of the wrong keys
+        would have changed it."""
+        wrong = {sub.name: sub_key(k, sub) for sub in Sub if sub != own} | {"eq_key": k}
+        drawn = np.asarray(draws[step](jnp.stack([sub_key(k, own), *wrong.values()]), *args))
+        got = np.asarray(got)
+        if got.dtype.kind == "i":
+            np.testing.assert_array_equal(got, drawn[0], err_msg=step)
+        else:
+            np.testing.assert_allclose(got, drawn[0], rtol=1e-13, atol=0.0, err_msg=step)
+        for name, alt in zip(wrong, drawn[1:], strict=True):
+            hit = not np.allclose(alt.astype(np.float64), got, rtol=1e-12, atol=0.0)
+            power[(step, name)] = power.get((step, name), False) or hit
+
+    for r in range(6):
+        k = key(300 + r)
+        out = run(k)
+        log_r2 = log_z2
+        if kind != "t":
+            nu_c = (nu[ts0.nu_idx], log_c[ts0.nu_idx]) if kind == "outlier_t" else ()
+            lg_o = TR.outlier_logits(log_z2, ts0.log_p, ts0.log1m_p, K20, *nu_c)
+            check("o", Sub.O, k, (lg_o, live), out.o_idx)
+            ab = TR.p_conditional(out.o_idx, tm, Te, tp.a_p, tp.b_p)
+            check("p", Sub.P, k, ab, jnp.stack([out.log_p, out.log1m_p]))
+            log_o2 = 2.0 * jnp.log(out.o_idx.astype(jnp.float64) + 1.0)
+            log_r2 = jnp.where(live, log_z2 - log_o2, 0.0)
+        if kind != "outlier":
+            lg_nu = TR.nu_logits(log_r2, tm, Te, tp.log_nu_w, GRID, "standardized")
+            check("nu", Sub.NU, k, (lg_nu,), out.nu_idx)
+            shape, log_scale = TR.tau_conditional(log_r2, nu[out.nu_idx], log_c[out.nu_idx])
+            check("tau", Sub.TAU, k, (shape, log_scale, live), out.log_tau)
+    assert power and all(power.values()), sorted(sk for sk, hit in power.items() if not hit)
+
+
+def test_ahead_draws_o_and_tau_from_their_own_sub_keys():
+    """``OutlierTScale.ahead`` (N03 §5.2; module docstring): ``2 log o`` from
+    ``sub_key(k, Sub.O)`` (one uniform per step: ``o = 1`` if ``u ≥ p``, else
+    ``2 + ⌊(u/p)(K − 1)⌋``) plus ``log τ = log(c(ν)/2) − loggamma(ν/2)`` from
+    ``sub_key(k, Sub.TAU)``, reproduced exactly: the two parts never share a key."""
+    H, nu = 64, 7.0
+    kern = TR.OutlierTScale(vstatic("outlier_t"), 8)
+    td = OutlierTDraw(jnp.log(0.3), jnp.log1p(-0.3), jnp.float64(nu))
+    p = float(jnp.exp(td.log_p))
+    ahead = jax.jit(lambda k: kern.ahead(k, td, H))
+    parts = jax.jit(
+        lambda k: (
+            jr.uniform(sub_key(k, Sub.O), (H,), dtype=jnp.float64),
+            RND.loggamma(sub_key(k, Sub.TAU), jnp.float64(nu / 2), (H,)),
+        )
+    )
+    for r in range(3):
+        k = key(320 + r)
+        u, lg = (np.asarray(x) for x in parts(k))
+        o = np.where(u < p, np.minimum(2.0 + np.floor(u / p * (K20 - 1)), K20), 1.0)
+        assert 0 < np.sum(o > 1) < H  # both branches of the o draw are exercised
+        ref = 2.0 * np.log(o) + math.log((nu - 2.0) / 2.0) - lg
+        np.testing.assert_allclose(np.asarray(ahead(k)), ref, rtol=1e-13, atol=1e-13)
 
 
 # --------------------------------------------------------------------------- override seam

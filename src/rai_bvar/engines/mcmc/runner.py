@@ -14,14 +14,16 @@ no recompile across ``burn``, ``warm_burn`` or piece sizes; D-27). ``sample`` sc
 kept draws, each after ``thin`` sweeps (``it0 + j·thin + r``, all uint32; E7), and keeps ``snap``,
 the exact state at kept draw ``stop`` (D-27). Keys depend only on ``(seed, salt, chain, it,
 block, equation, sub-draw)``, so kept draws and the final state are bitwise independent of the
-chunk size, the burn piece size and thinning alignment (DESIGN §5.1, §5.6). Independence of the
-chain count and of the device layout (``shard_map``, §5.2) additionally needs per-chain
-arithmetic that does not depend on the batch size: XLA CPU may lower a batched product of a
-different batch size differently (observed for the Phase 2 SV and CCCM kernels at the last bit),
-so ``chains="vmap"`` (the default) guarantees it for batch-size-invariant kernels only, while
-``chains="map"`` (:func:`chain_map`) makes chain-count prefixes bitwise by construction. Across
-device layouts the production SV kernels agree to ~1e-12 but not bitwise in either mode (open
-orchestrator decision on DESIGN §5.2/§5.6; ``fit.metadata`` records devices and chain method).
+chunk size, the burn piece size, thinning alignment and fused vs unfused plan execution (DESIGN
+§5.1, §5.6). Across chain-count prefixes and ``vmap`` vs ``shard_map`` (§5.2) they agree **to
+rounding** (Stage 2 amendment of §5.2, §5.6): chain ``c`` consumes the same random numbers
+whatever ``C`` is, but XLA vectorises the reductions of the production SV and CCCM kernels
+differently for different per-device batch sizes, so last bits differ (``rtol 1e-9`` on short
+runs, tested; over long runs a last-bit difference can flip an accept/reject decision, after
+which chains are equal only in distribution). Batch-size-invariant kernels (the test toys) and
+``chains="map"`` (:func:`chain_map`, one identical one-chain program per chain) keep chain-count
+prefixes bitwise. ``Runtime.devices`` therefore defaults to one device; the device count and the
+chain method are recorded in ``fit.metadata`` (``device_count``, ``chain_method``).
 
 Host driver ``run_chains`` (DESIGN §5.1): prepare → init (or a warm state) → burn in pieces of
 ``min(remaining, chunk·thin)`` sweeps → zero every ``acc_*``/``rb_*`` leaf at the boundary →
@@ -34,14 +36,18 @@ deterministically from the saved host copy of the call's start state (D-18, §5.
 ``conditional_j`` for every ``j``, which also locates the failing equation of a global step).
 
 In-loop forecasts (DESIGN §5.8; ``StoreStatic.in_loop_forecast = H > 0`` with a ``FitPlan``):
-``sample`` takes three more arguments ``(fkeys[C], d0: u32[], stride: u32[])`` and calls the
-forecast core ``engines.mcmc.forecast.forecast_core`` (WP17, §7.2) on the parameters of every kept
-draw ``d = d0 + j`` with ``d ≡ 0 (mod stride)``, ``stride = ⌈C·D/S⌉`` (:func:`in_loop_stride`),
-under a ``lax.cond`` whose predicate is shared by all chains (so it stays a branch under ``vmap``).
-Its shocks come from :func:`forecast_shocks`: ``key(fseed) → Stream.FORECAST → c → d →
-Ahead.{VOL, SHOCK, MEAN, GLOBAL} → i`` (§5.6), ``d`` the kept-draw index (the stored-draw index of
-the post-hoc forecast when ``store_thin = 1``), ``fseed`` from ``FitPlan.seed`` as in §7.1. The
-records go to the host store's ``forecast`` stream (``MCMCFit.in_loop_forecast``).
+``sample`` takes four more arguments ``(fkeys[C], d0: u32[], sel: bool[chunk], D: u32[])`` and a
+static keyword ``reps`` (default 1), and calls the forecast core
+``engines.mcmc.forecast.forecast_core`` (WP17, §7.2) on the parameters of kept draw ``d = d0 + j``
+when ``sel[j]``, under a ``lax.cond`` whose predicate is shared by all chains (so it stays a branch
+under ``vmap``). The host precomputes ``sel`` from :func:`storage.forecast_selection`: exactly the
+draws §7.1 selects post hoc (``⌈S/C⌉`` stored draws per chain, evenly spaced; when that exceeds the
+stored draws, every stored draw with ``reps = ⌈S/(C·D_s)⌉`` paths), so the run yields at least
+``S = FitPlan.draws`` paths (fewer than ``C`` extra in the first case). Shocks come from
+:func:`forecast_shocks`: ``key(fseed) → Stream.FORECAST → c → d → Ahead.{VOL, SHOCK, MEAN, GLOBAL}
+→ i`` (§5.6), ``d`` the kept-draw index (the ``draw`` coordinate of ``fit.posterior``, whatever
+``store_thin`` is; path ``q`` of a draw uses ``d + q·D``), ``fseed`` from ``FitPlan.seed`` as in
+§7.1. The records go to the host store's ``forecast`` stream (``MCMCFit.in_loop_forecast``).
 """
 
 from __future__ import annotations
@@ -87,7 +93,7 @@ from rai_bvar.engines.mcmc.state import (
     tree_where,
     zero_accumulators,
 )
-from rai_bvar.engines.mcmc.storage import HostStore, StoragePlan, in_loop_stride, plan_storage
+from rai_bvar.engines.mcmc.storage import HostStore, StoragePlan, forecast_selection, plan_storage
 from rai_bvar.engines.mcmc.sweep import (
     EQUATION_STEPS,
     empty_env,
@@ -177,7 +183,7 @@ def forecast_chain_keys(fseed: int, C: int) -> Array:
 
 
 def forecast_shocks(chain_fkey: Array, d: Array, H: int, n: int) -> Any:
-    """The shocks of kept (stored) draw ``d`` of the chain whose forecast key is ``chain_fkey``
+    """The shocks of kept draw ``d`` of the chain whose forecast key is ``chain_fkey``
     (DESIGN §5.6, §7.2): with ``k(X, i) = fold_in(fold_in(fold_in(chain_fkey, d), Ahead.X), i)``,
     ``eps[:, i] = N(0, I_H)`` from ``k(SHOCK, i)``, ``vol_keys[i] = k(VOL, i)``, ``mean_keys[i] =
     k(MEAN, i)``, ``glob_key = k(GLOBAL, 0)``; equal to ``keys.forecast_key(fseed, c, d, X, i)``.
@@ -393,17 +399,28 @@ def _bodies(program: Program) -> ChainBodies:
 
         return lax.fori_loop(0, n, body, st)
 
-    def in_loop(params, data, fkey, d, stride):
-        """The forecast of kept draw ``d`` when ``d ≡ 0 (mod stride)``, zeros otherwise; the
-        predicate does not depend on the chain, so ``vmap`` keeps the branch (no wasted work)."""
-        shape = jax.eval_shape(forecast_one, params, data, fkey, d)
+    def in_loop(params, data, fkey, d, pred, dstride, reps):
+        """The ``reps`` forecast paths (leading axis) of kept draw ``d`` when ``pred`` (the draw is
+        selected), zeros otherwise; path ``q`` is keyed by ``d + q·dstride`` (``dstride = D``).
+        ``pred`` does not depend on the chain, so ``vmap`` keeps the branch (no wasted work)."""
+
+        def paths(params, data, fkey, d, dstride):
+            if reps == 1:
+                return jax.tree.map(lambda x: x[None], forecast_one(params, data, fkey, d))
+            q = jnp.arange(reps, dtype=jnp.uint32)
+            return jax.vmap(lambda qq: forecast_one(params, data, fkey, d + qq * dstride))(q)
+
+        shape = jax.eval_shape(paths, params, data, fkey, d, dstride)
 
         def zeros(*_: Any) -> Any:
             return jax.tree.map(lambda s: jnp.zeros(s.shape, s.dtype), shape)
 
-        return lax.cond(d % stride == 0, forecast_one, zeros, params, data, fkey, d)
+        return lax.cond(pred, paths, zeros, params, data, fkey, d, dstride)
 
-    def sample_one(ckey, st, data, prior, cache, it0, thin, stop, fkey=None, d0=None, stride=None):
+    def sample_one(
+        ckey, st, data, prior, cache, it0, thin, stop, fkey=None, d0=None, sel=None, dstride=None,
+        *, reps: int = 1,
+    ):  # fmt: skip
         def keep(carry, j):
             st, snap = carry
             base = it0 + j * thin  # uint32 throughout (E7)
@@ -415,7 +432,7 @@ def _bodies(program: Program) -> ChainBodies:
             snap = tree_where(j == stop.astype(jnp.uint32), st, snap)
             rec = extract_one(st, data, prior, cache)
             if forecast_one is not None:  # DESIGN §5.8: (monitor, params, paths, forecast)
-                rec = (*rec, in_loop(rec[1], data, fkey, d0 + j, stride))
+                rec = (*rec, in_loop(rec[1], data, fkey, d0 + j, sel[j], dstride, reps))
             return (st, snap), rec
 
         (st, snap), out = lax.scan(keep, (st, st), jnp.arange(chunk, dtype=jnp.uint32))
@@ -447,12 +464,12 @@ def chain_map(
     """Batch ``f`` over the chain axis (``in_axes``: 0 for batched arguments, ``None`` shared).
 
     ``"vmap"`` (default; DESIGN §5.2): one program for all chains, the equation-chain GEMMs of
-    §10.3. ``"map"``: ``lax.map`` over chains, each chain running the identical one-chain program,
-    so every chain's draws are bitwise independent of the chain count by construction (XLA may
-    lower a batched product differently for different batch sizes, so the ``vmap`` path
-    guarantees this only when the kernels' arithmetic is batch-size independent; measured: not
-    for the Phase 2 SV and CCCM kernels). Neither mode makes the production SV kernels bitwise
-    across device layouts (``shard_map`` on 4 CPU devices agrees to ~1e-12, not bitwise).
+    §10.3. Chain-count prefixes agree to rounding with the production SV and CCCM kernels (XLA
+    vectorises their reductions differently for different batch sizes; §5.6 Stage 2 amendment,
+    ``rtol 1e-9`` on short runs, tested) and bitwise with batch-size-invariant kernels.
+    ``"map"``: ``lax.map`` over chains, each chain running the identical one-chain program, so
+    every chain's draws are bitwise independent of the chain count by construction. Across device
+    layouts (``shard_map``) both modes agree with one device to rounding only.
     """
     if chains == "vmap":
         return jax.vmap(f, in_axes=in_axes)
@@ -476,7 +493,7 @@ _CHAIN_AXES = {
     "init": (0, None, None, None),
     "burn": (0, 0, None, None, None, None, None),
     "sample": (0, 0, None, None, None, None, None, None),
-    "forecast": (0, None, None),  # (fkeys[C], d0, stride) of the in-loop forecast (§5.8)
+    "forecast": (0, None, None, None),  # (fkeys[C], d0, sel, D) of the in-loop forecast (§5.8)
 }
 
 
@@ -496,14 +513,21 @@ def _make_runner(
     prepare = b.prepare
     init = chain_map(b.init, _CHAIN_AXES["init"], chains)
     burn = chain_map(b.burn, _CHAIN_AXES["burn"], chains)
-    sample = chain_map(b.sample, _sample_axes(static), chains)
+    fc_fit = (0, None, None, None) if static.store.in_loop_forecast else ()
+
+    @functools.cache
+    def sample_paths(reps: int) -> Callable[..., Any]:
+        """The batched ``sample`` body with ``reps`` in-loop forecast paths per selected draw."""
+        f = chain_map(functools.partial(b.sample, reps=reps), _sample_axes(static), chains)
+        if fit_axis:
+            f = jax.vmap(f, in_axes=(0, 0, 0, 0, 0, None, None, None, *fc_fit))
+        return f
+
     if fit_axis:  # one more vmap over a leading fit axis F (DESIGN §5.2)
         prepare = jax.vmap(prepare)
         init = jax.vmap(init, in_axes=(0, 0, 0, 0))
         burn = jax.vmap(burn, in_axes=(0, 0, 0, 0, 0, None, None))
-        fc_axes = (0, None, None) if static.store.in_loop_forecast else ()
-        sample = jax.vmap(sample, in_axes=(0, 0, 0, 0, 0, None, None, None, *fc_axes))
-    p, i, bu, s = prepare, init, burn, sample
+    p, i, bu = prepare, init, burn
 
     def mcmc_prepare(data, prior):
         return p(data, prior)
@@ -514,7 +538,8 @@ def _make_runner(
     def mcmc_burn(ckeys, state, data, prior, cache, it0, n):
         return bu(ckeys, state, data, prior, cache, it0, n)
 
-    def mcmc_sample_chunk(ckeys, state, data, prior, cache, it0, thin, stop, *forecast):
+    def mcmc_sample_chunk(ckeys, state, data, prior, cache, it0, thin, stop, *forecast, reps=1):
+        s = sample_paths(int(reps))
         return s(ckeys, state, data, prior, cache, it0, thin, stop, *forecast)
 
     def mcmc_extract(state, data, prior, cache):
@@ -524,7 +549,7 @@ def _make_runner(
         prepare=jax.jit(mcmc_prepare),
         init=jax.jit(mcmc_init),
         burn=jax.jit(mcmc_burn, donate_argnums=(1,)),
-        sample=jax.jit(mcmc_sample_chunk, donate_argnums=(1,)),
+        sample=jax.jit(mcmc_sample_chunk, donate_argnums=(1,), static_argnames=("reps",)),
         extract=jax.jit(mcmc_extract),
         program=program,
         fit_axis=bool(fit_axis),
@@ -550,7 +575,8 @@ def make_runner(
     ``chains`` (an addition to the DESIGN signature) selects the chain batching of
     :func:`chain_map`; ``fit_axis`` adds a leading fit axis (``vmap``; DESIGN §5.2). With
     ``static.store.in_loop_forecast > 0`` the ``sample`` executable carries the in-loop forecast
-    hook (DESIGN §5.8; three more arguments, see the module docstring) and building it raises
+    hook (DESIGN §5.8; four more arguments and the static ``reps``, see the module docstring;
+    each ``reps`` compiles once) and building it raises
     ``NotImplementedError`` while ``engines.mcmc.forecast.forecast_core`` (WP17) is missing.
     """
     if overrides:
@@ -574,8 +600,11 @@ def clear_caches() -> None:
 
 @functools.lru_cache(maxsize=16)
 def _sharded(
-    bodies: ChainBodies, D: int, chains: ChainBatching = "vmap"
+    bodies: ChainBodies, D: int, chains: ChainBatching = "vmap", reps: int = 1
 ) -> tuple[Callable[..., Any], Callable[..., Any], Any, Any]:
+    """``burn`` and ``sample`` under ``shard_map`` over ``D`` devices (DESIGN §5.2; equal to the
+    one-device executables to rounding with the production kernels), and the chain-sharded and
+    replicated ``NamedSharding``s. ``reps``: in-loop forecast paths per selected draw (§5.8)."""
     from jax.sharding import NamedSharding
     from jax.sharding import PartitionSpec as P
 
@@ -583,9 +612,11 @@ def _sharded(
     in_loop = bodies.forecast is not None
     fc_axes = _CHAIN_AXES["forecast"] if in_loop else ()
     burn_v = chain_map(bodies.burn, _CHAIN_AXES["burn"], chains)
-    sample_v = chain_map(bodies.sample, (*_CHAIN_AXES["sample"], *fc_axes), chains)
+    sample_v = chain_map(
+        functools.partial(bodies.sample, reps=reps), (*_CHAIN_AXES["sample"], *fc_axes), chains
+    )
     c, r = P("chain"), P()
-    fc_specs = (c, r, r) if in_loop else ()
+    fc_specs = (c, r, r, r) if in_loop else ()
     burn_s = jax.shard_map(
         burn_v, mesh=mesh, in_specs=(c, c, r, r, r, r, r), out_specs=c, check_vma=False
     )
@@ -609,9 +640,11 @@ def _sharded(
 
 
 def resolve_devices(devices: int | str, chains: int, fit_axis: bool = False) -> int:
-    """Number of devices the chains run on (DESIGN §5.2): ``"auto"`` uses every local device when
-    there are at least two and they divide ``chains``; otherwise one device (with a warning when an
-    explicit request cannot be met)."""
+    """Number of devices the chains run on (DESIGN §5.2). ``Runtime.devices`` defaults to ``1``
+    (Stage 2 amendment: sharded draws equal one-device draws only to rounding, so sharding is
+    opt-in). ``"auto"`` uses every local device when there are at least two and they divide
+    ``chains``; an integer ``D`` must divide ``chains`` and falls back to one device (with a
+    warning) when fewer than ``D`` devices exist; a fit axis always runs on one device."""
     avail = jax.local_device_count()
     if devices == "auto":
         D = avail if avail >= 2 and chains % avail == 0 else 1
@@ -659,9 +692,10 @@ class RunOutput:
     chain_method: str
     plan: StoragePlan
     timing: dict[str, float] = field(default_factory=dict)
-    forecast: dict[str, Any] | None = (
-        None  # in-loop forecast plan: horizon, draws, seed, fseed, stride
-    )
+    forecast: dict[str, Any] | None = None
+    """In-loop forecast plan (DESIGN §5.8): ``horizon``, ``draws``, ``seed``, ``fseed``,
+    ``per_chain`` (selected draws per chain), ``paths_per_draw`` and ``index`` (their kept-draw
+    indices, :func:`storage.forecast_selection`)."""
 
     @property
     def sweeps(self) -> int:
@@ -936,9 +970,17 @@ def run_chains(
                     f"in_loop_forecast ({H}): the horizon is compiled into the sample executable"
                 )
             fseed = forecast_seed(plan.seed)
+            st = settings.store_thin
+            stored = np.arange(-(-draws // st), dtype=np.int64) * st  # the params stream (§5.3)
+            index, reps = forecast_selection(C, stored, int(plan.draws))
+            if reps * draws > _U32:
+                raise ValueError(
+                    f"FitPlan.draws ({plan.draws}) needs {reps} paths per kept draw: the forecast "
+                    f"key index d + q·draws exceeds the uint32 counter (DESIGN §5.6)"
+                )
             fc_meta = {
                 "horizon": H, "draws": int(plan.draws), "seed": int(plan.seed), "fseed": fseed,
-                "stride": in_loop_stride(C, draws, int(plan.draws)),
+                "per_chain": int(index.size), "paths_per_draw": int(reps), "index": index,
             }  # fmt: skip
         elif plan is not None:
             raise ValueError(
@@ -994,10 +1036,14 @@ def run_chains(
         store = HostStore.allocate(splan, static)
 
         single = (ckeys, data, prior, cache)
-        burn_fn, sample_fn, place = fns.burn, fns.sample, (lambda x: x)
+        reps = 1 if fc_meta is None else fc_meta["paths_per_draw"]
+        if fc_meta is not None:  # the plan and the run select the same draws (§7.1)
+            assert np.array_equal(splan.streams["forecast"].index, fc_meta["index"])
+        burn_fn, place = fns.burn, (lambda x: x)
+        sample_fn = fns.sample if reps == 1 else functools.partial(fns.sample, reps=reps)
         chain_method = "vmap" if fns.chains == "vmap" else "map"
         if D > 1:
-            burn_fn, sample_fn, chain_sh, repl = _sharded(fns.chain, D, fns.chains)
+            burn_fn, sample_fn, chain_sh, repl = _sharded(fns.chain, D, fns.chains, reps)
             chain_method = f"shard_map({D})" + ("" if fns.chains == "vmap" else "+map")
             ckeys = jax.device_put(ckeys, chain_sh)
             if fkeys is not None:
@@ -1031,11 +1077,16 @@ def run_chains(
         t_host = 0.0
         compile_before = ct.seconds
         snap_host = host_state
+        if fc_meta is not None:  # the §7.1 selection as a mask over kept draws (§5.8)
+            selected = np.zeros(n_chunks * chunk, dtype=bool)
+            selected[fc_meta["index"]] = True
         for c in range(n_chunks):
             it0 = burn + c * chunk * thin
             stop = min(chunk, draws - c * chunk) - 1
             start = host_state if runtime.replay else None
-            fc_args = () if fc_meta is None else (fkeys, _u32(c * chunk), _u32(fc_meta["stride"]))
+            fc_args = () if fc_meta is None else (
+                fkeys, _u32(c * chunk), selected[c * chunk : (c + 1) * chunk], _u32(draws)
+            )  # fmt: skip
             state, snap, out = jax.block_until_ready(
                 sample_fn(
                     ckeys, state, data, prior, cache, _u32(it0), _u32(thin), _i32(stop), *fc_args
@@ -1063,7 +1114,9 @@ def run_chains(
                 "chains": C, "draws": draws, "burn": burn, "thin": thin, "warm_start": int(warm),
                 "devices": D, "chain_method": chain_method, "chunk": chunk,
                 "it_first": 0, "it_last": burn + draws * thin - 1,
-                **({} if fc_meta is None else {f"in_loop_forecast_{k}": v for k, v in fc_meta.items()}),
+                **({} if fc_meta is None else {
+                    f"in_loop_forecast_{k}": v for k, v in fc_meta.items() if k != "index"
+                }),
             },
         )  # fmt: skip
         t_host += time.perf_counter() - th

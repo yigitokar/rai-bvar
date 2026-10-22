@@ -30,10 +30,11 @@ def _meta(static, T_eff, **kw):
     )
 
 
-def _fit(static, settings, T_eff=20, seed=0, salt=1, overrides=None, **kw):
+def _fit(static, settings, T_eff=20, seed=0, salt=1, overrides=None, prior=None, **kw):
     ov = toys.toy_overrides(static) if overrides is None else overrides
+    prior = toys.toy_prior(static) if prior is None else prior
     return fit_mcmc(
-        static, toys.toy_data(static, T_eff, 4), toys.toy_prior(static), settings,
+        static, toys.toy_data(static, T_eff, 4), prior, settings,
         Runtime(chunk=static.chunk), seed=seed, salt=salt, meta=_meta(static, T_eff), _overrides=ov, **kw,
     )  # fmt: skip
 
@@ -128,6 +129,10 @@ def test_fit_mcmc_with_toys():
                 "exact", "ordering", "chain_method", "it_last", "package_version"):  # fmt: skip
         assert key in attrs, key
     assert attrs["it_last"] == 4 + 9 * 2 - 1 and attrs["prng_impl"] == "threefry2x32"
+    # DESIGN §5.2, §5.6 (Stage 2 amendment): one device by default; the layout is recorded
+    md = fit.metadata
+    assert md["device_count"] == md["devices"] == 1 and md["chain_method"] == "vmap"
+    assert "local_device_count" in md and "to rounding" in md["reproducibility"]
     # B = (A⁻¹Γ)' per stored draw
     B = fit.reduced_form_draws()
     assert B.dims == ("chain", "draw", "regressor", "variable") and B.shape == (2, 3, 3, 2)
@@ -285,21 +290,39 @@ def test_real_monitor_with_toy_kernels(monkeypatch, transitory):
 
 def test_summary_reports_implied_reduced_form_moments():
     """``fit.summary()`` carries the implied reduced-form prior moments (R8; DESIGN §8.4) of the
-    fit's prior arrays at the composition's mode, with E[λ_i] the prior mean of λ_i."""
+    fit's prior arrays at the composition's mode, with λ_i the IG prior mean (Constant) or, under
+    SV, the plug-in ``exp(b_μ)`` (RW: ``exp(m₀)``) named by ``vol_mean`` (Stage 2 amendment). The
+    SV priors have ``m₀ ≠ b_μ``, so the AR and RW levels cannot be confused."""
     from rai_bvar.priors.structural import implied_reduced_form_moments
 
-    for mode, persistent in (("I", "constant"), ("II", "constant"), ("I", "sv")):
-        static = toys.toy_static("linear_structural", persistent, mode=mode, n=3, T_eff=20, chunk=5)
-        fit = _fit(static, MCMCSettings(chains=2, draws=3, burn=1))
+    cases = (
+        ("I", "constant", False, "C/(c-1) prior mean (Constant)"),
+        ("II", "constant", False, "C/(c-1) prior mean (Constant)"),
+        ("I", "sv", False, "exp(b_mu) plug-in (SV)"),
+        ("I", "sv", True, "exp(m0) plug-in (SV, RW)"),
+    )
+    for mode, persistent, rw, label in cases:
+        static = toys.toy_static(
+            "linear_structural", persistent, mode=mode, n=3, T_eff=20, chunk=5, rw=rw
+        )
         prior = toys.toy_prior(static)
+        if persistent == "sv":
+            core = dataclasses.replace(
+                prior.eq.vol_core, b_mu=np.array([-0.3, 0.2, 0.5]), m0=np.array([0.7, -0.4, 1.1])
+            )
+            prior = dataclasses.replace(prior, eq=dataclasses.replace(prior.eq, vol_core=core))
+        fit = _fit(static, MCMCSettings(chains=2, draws=3, burn=1), prior=prior)
         vol = prior.eq.vol_core
-        lam = vol.scale / (vol.shape - 1.0) if persistent == "constant" else np.exp(vol.b_mu)
+        if persistent == "constant":
+            lam = vol.scale / (vol.shape - 1.0)
+        else:
+            lam = np.exp(vol.m0 if rw else vol.b_mu)
         np.testing.assert_allclose(fit.prior_vol_mean(), lam, rtol=1e-15)
         exp = implied_reduced_form_moments(
             prior.eq.coef, prior.eq.contemp, prior.shared, lam, mode=mode
         )
         im = fit.summary().attrs["implied_reduced_form"]
-        assert im["method"] == "closed_form"
+        assert im["method"] == "closed_form" and im["vol_mean"] == label
         regs = ["const", "v0.L1", "v1.L1", "v2.L1"]
         for c, v in enumerate(fit.ordering):
             for r, reg in enumerate(regs):

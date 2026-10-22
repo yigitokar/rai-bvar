@@ -10,7 +10,8 @@ monitor    ``monitor.monitor_values`` (WP15): primary and secondary     every ke
 params     ``ParamDraw``: γ or Π, ``a``, ``VolDraw``                    ``d ≡ 0 (mod store_thin)``,
                                                                         ``store_thin = ⌈draws/store_max⌉``
 paths      ``PathDraw``: ``h`` and ``2 log o + log τ`` (``store="paths"``)  ``d ≡ 0 (mod store_thin·path_thin)``
-forecast   in-loop ``ForecastOut`` (``FitPlan``; DESIGN §5.8)             ``d ≡ 0 (mod ⌈C·D/S⌉)``
+forecast   in-loop ``ForecastOut`` (``FitPlan``; DESIGN §5.8), ``R`` paths  the §7.1 selection
+           per selected draw                                            (:func:`forecast_selection`)
 =========  ==========================================================  ============================
 
 Latent moments (``rb_*``) and acceptance rates (``acc_*``) come once per run from the final
@@ -49,7 +50,7 @@ __all__ = [
     "StorageBudgetError",
     "StoragePlan",
     "StreamSpec",
-    "in_loop_stride",
+    "forecast_selection",
     "plan_storage",
     "regressor_names",
 ]
@@ -59,19 +60,33 @@ STREAMS: tuple[str, ...] = ("monitor", "params", "paths", "forecast")
 (``forecast`` only with an in-loop forecast plan, DESIGN §5.8)."""
 
 
-def in_loop_stride(chains: int, draws: int, forecast_draws: int) -> int:
-    """Kept-draw stride of the in-loop forecasts (DESIGN §5.8): ``⌈C·D/S⌉``, so each chain
-    forecasts from kept draws ``0, s, 2s, …`` (``⌈D/s⌉`` per chain, ``≥ S`` in all). One path per
-    kept state: ``S > C·D`` raises (post-hoc forecasting replicates paths instead, §7.1)."""
-    C, D, S = int(chains), int(draws), int(forecast_draws)
+def forecast_selection(
+    chains: int, stored_index: Sequence[int] | np.ndarray, forecast_draws: int
+) -> tuple[np.ndarray, int]:
+    """The draws a forecast of ``S = forecast_draws`` paths uses (DESIGN §7.1; in-loop §5.8).
+
+    ``stored_index`` holds the kept-draw indices of the ``D_s`` stored parameter draws of a chain
+    (``0, st, 2st, …``, ``st = store_thin``). Every chain uses the same ``m = ⌈S/C⌉`` of them,
+    evenly spaced from the first: stored positions ``⌊j·D_s/m⌋``, ``j = 0..m−1``, one path each
+    (``C·m ≥ S`` paths in all, the excess below ``C``). When ``m > D_s`` every stored draw is
+    used with ``R = ⌈S/(C·D_s)⌉`` paths with independent shocks. Returns ``(kept-draw indices of
+    the selected draws (ascending), R)``. Each path is keyed by ``(fseed, c, d)`` with ``d`` the
+    kept-draw index (DESIGN §5.6); path ``q`` of a draw with ``R > 1`` uses ``d + q·D`` (``D``
+    kept draws per chain), so path ``0`` is the single-path key and every path has its own key.
+    """
+    C, S = int(chains), int(forecast_draws)
+    idx = np.asarray(stored_index, dtype=np.int64).reshape(-1)
+    if C < 1:
+        raise ValueError(f"chains must be positive, got {C}")
     if S < 1:
         raise ValueError(f"FitPlan.draws must be positive, got {S}")
-    if S > C * D:
-        raise ValueError(
-            f"FitPlan.draws ({S}) exceeds the {C}·{D} = {C * D} kept draws: in-loop forecasting "
-            "computes one path per kept state; lower FitPlan.draws or raise MCMCSettings.draws"
-        )
-    return -(-C * D // S)
+    D_s = idx.size
+    if D_s == 0:
+        raise ValueError("no stored draws to forecast from")
+    m = -(-S // C)
+    if m <= D_s:
+        return idx[(np.arange(m, dtype=np.int64) * D_s) // m], 1
+    return idx.copy(), -(-S // (C * D_s))
 
 
 _GIB = 1024**3
@@ -87,8 +102,9 @@ class StreamSpec:
 
     name: str
     record: Any  # pytree of jax.ShapeDtypeStruct
-    every: int  # kept draws per stored record
+    every: int  # kept draws per stored record (0 when ``index`` selects them)
     count: int  # stored records per chain (and fit)
+    index: np.ndarray | None = field(default=None, compare=False)  # explicit kept-draw indices
 
     @property
     def bytes_per_record(self) -> int:
@@ -101,7 +117,23 @@ class StreamSpec:
 
     def draw_index(self) -> np.ndarray:
         """Kept-draw indices of the stored records."""
+        if self.index is not None:
+            return np.asarray(self.index, dtype=np.int64).copy()
         return np.arange(self.count, dtype=np.int64) * self.every
+
+    def select(self, d0: int, stop: int) -> tuple[np.ndarray, np.ndarray]:
+        """Of kept draws ``d0 .. d0+stop``: the record positions ``j`` (``d = d0 + j``) this
+        stream keeps and their slots in the store."""
+        j = np.arange(int(stop) + 1, dtype=np.int64)
+        d = d0 + j
+        if self.index is None:
+            hit = d % self.every == 0
+            return j[hit], d[hit] // self.every
+        idx = np.asarray(self.index, dtype=np.int64)
+        pos = np.searchsorted(idx, d)
+        hit = pos < idx.size
+        hit[hit] = idx[pos[hit]] == d[hit]
+        return j[hit], pos[hit]
 
 
 @dataclass(frozen=True)
@@ -168,8 +200,9 @@ def plan_storage(
     pytrees of ``jax.ShapeDtypeStruct`` (the runner passes the shapes of its own ``extract`` and
     forecast); by default it is derived from the production ``make_runner(static)`` with
     ``jax.eval_shape``. ``lead`` defaults to ``(settings.chains,)``. ``plan`` (a ``FitPlan``,
-    needed when ``static.store.in_loop_forecast > 0``) sizes the ``forecast`` stream: every
-    :func:`in_loop_stride`-th kept draw.
+    needed when ``static.store.in_loop_forecast > 0``) sizes the ``forecast`` stream:
+    the draws of :func:`forecast_selection` over the stored parameter draws, each record with a
+    leading axis of ``R`` paths.
     """
     if record is None:
         record = _record_from_runner(static)
@@ -177,16 +210,22 @@ def plan_storage(
     draws, st = settings.draws, settings.store_thin
     every = {"monitor": 1, "params": st, "paths": st * settings.path_thin}
     names = ["monitor", "params"] + (["paths"] if static.store.paths else [])
-    if static.store.in_loop_forecast:
-        if plan is None:
-            raise ValueError("an in-loop forecast (StoreStatic.in_loop_forecast) needs its FitPlan")
-        every["forecast"] = in_loop_stride(settings.chains, draws, plan.draws)
-        names.append("forecast")
     streams = {
         name: StreamSpec(name, record[k], every[name], -(-draws // every[name]))
         for k, name in enumerate(STREAMS)
         if name in names
     }
+    if static.store.in_loop_forecast:
+        if plan is None:
+            raise ValueError("an in-loop forecast (StoreStatic.in_loop_forecast) needs its FitPlan")
+        index, reps = forecast_selection(
+            settings.chains, streams["params"].draw_index(), plan.draws
+        )
+        fc_record = jax.tree.map(
+            lambda x: jax.ShapeDtypeStruct((reps, *x.shape), x.dtype),
+            record[STREAMS.index("forecast")],
+        )
+        streams["forecast"] = StreamSpec("forecast", fc_record, 0, int(index.size), index)
     n, T1 = static.shapes.n, static.shapes.T_pad + 1
     per_lead = math.prod(lead)
     sizes = {name: per_lead * s.count * s.bytes_per_record for name, s in streams.items()}
@@ -231,10 +270,12 @@ def _empty_arrays(
 class HostStore:
     """Stored draws on the host: one array ``(*lead, D, …)`` per record leaf and stream.
 
-    ``append(out, stop)`` takes one ``sample`` output (``out = (monitor, params, paths)`` with
-    host leaves ``(*lead, chunk, …)``) and keeps the records ``0..stop`` that the stream's thinning
-    selects; the kept-draw counter advances by ``stop + 1``. :meth:`finalize` attaches the
-    once-per-run quantities, :meth:`to_datatree` builds ``fit.posterior``.
+    ``append(out, stop)`` takes one ``sample`` output (``out = (monitor, params, paths[,
+    forecast])`` with host leaves ``(*lead, chunk, …)``) and keeps the records ``0..stop`` that
+    the stream's thinning (or, for ``forecast``, its explicit kept-draw index) selects
+    (:meth:`StreamSpec.select`); the kept-draw counter advances by ``stop + 1``.
+    :meth:`finalize` attaches the once-per-run quantities, :meth:`to_datatree` builds
+    ``fit.posterior``.
     """
 
     plan: StoragePlan
@@ -272,11 +313,9 @@ class HostStore:
         d0 = self.kept
         for name, spec in self.plan.streams.items():
             leaves = jax.tree.leaves(out[STREAMS.index(name)])
-            j = np.arange(stop + 1)
-            sel = j[(d0 + j) % spec.every == 0]
+            sel, pos = spec.select(d0, stop)
             if sel.size == 0:
                 continue
-            pos = (d0 + sel) // spec.every
             for dst, src in zip(self.arrays[name], leaves, strict=True):
                 src = np.asarray(src)
                 idx_dst = (slice(None),) * axis + (pos,)
@@ -365,8 +404,9 @@ class HostStore:
                 data_vars["p_outlier"] = xr.DataArray(np.exp(arr), dims=(*base, "variable"))
                 continue
             name = key if key in _POSTERIOR_NAMES else path.replace(".", "_")
+            equation = path.split(".")[0] in _EQUATION_PARTS  # glob.* leaves are not per equation
             data_vars[name] = xr.DataArray(
-                arr, dims=(*base, *names.dims(name, arr.shape[len(base) :]))
+                arr, dims=(*base, *names.dims(name, arr.shape[len(base) :], equation=equation))
             )
         coords = {**self._lead_coords(names), "draw": draw, **names.coords}
         return _dataset(data_vars, coords)
@@ -449,7 +489,10 @@ class HostStore:
             arr = np.asarray(value)
             if arr.dtype == object:
                 continue
-            dims = names.dims(key, arr.shape, lead_variable=True) if arr.ndim else ()
+            equation = (
+                True if key.startswith("prior_eq_") else False if key.startswith("prior_") else None
+            )  # prior.eq leaves lead with the equation; prior.shared leaves do not
+            dims = names.dims(key, arr.shape, equation=equation) if arr.ndim else ()
             data_vars[key] = xr.DataArray(arr, dims=dims)
         for key, value in (meta.hyper or {}).items():
             if (
@@ -462,7 +505,7 @@ class HostStore:
             if arr.dtype == object or not np.issubdtype(arr.dtype, np.number):
                 attrs[f"hyper_{key}"] = str(value)
                 continue
-            dims = names.dims(f"hyper_{key}", arr.shape, lead_variable=True) if arr.ndim else ()
+            dims = names.dims(f"hyper_{key}", arr.shape) if arr.ndim else ()
             data_vars[f"hyper_{key}"] = xr.DataArray(arr, dims=dims)
         ds = _dataset(data_vars, names.coords)
         ds.attrs.update(_clean_attrs(attrs))
@@ -506,6 +549,7 @@ class _Names:
     pairs: tuple[str, ...]
     T: int | None  # real rows (None with a fit axis: ragged windows are not trimmed)
     periods: tuple[str, ...] | None
+    nu: tuple[int, ...] = ()  # the static ν grid (coordinate of the ν prior weights)
 
     @classmethod
     def of(cls, store: HostStore, meta: FitMeta) -> _Names:
@@ -531,7 +575,8 @@ class _Names:
                 periods = tuple(str(p) for p in meta.periods)
             else:
                 periods = tuple(str(t) for t in range(T))
-        return cls(lead_dims, n, k, variables, regs, pairs, T, periods)
+        nu = tuple(static.vol.nu_grid) if static is not None else ()
+        return cls(lead_dims, n, k, variables, regs, pairs, T, periods, nu)
 
     @property
     def T1(self) -> int | None:
@@ -545,6 +590,8 @@ class _Names:
             out["pair"] = list(self.pairs)
         if self.k:
             out["regressor"] = list(self.regressors)
+        if self.nu:
+            out["nu"] = list(self.nu)
         return out
 
     @property
@@ -554,18 +601,30 @@ class _Names:
         return {"time": list(self.periods), "h_index": ["h_0", *self.periods]}
 
     def _sizes(self) -> dict[str, int]:
-        return {"variable": self.n, "variable_": self.n - 1, "regressor": self.k}
+        return {
+            "variable": self.n,
+            "variable_": self.n - 1,
+            "regressor": self.k,
+            "nu": len(self.nu),
+        }
 
     def dims(
-        self, name: str, shape: tuple[int, ...], *, lead_variable: bool = False
+        self, name: str, shape: tuple[int, ...], *, equation: bool | None = None
     ) -> tuple[str, ...]:
         """Dimension names of a record leaf's trailing ``shape``.
 
         Leaves with a known layout are named by their name (:data:`_NAMED_DIMS`: ``gamma`` and the
-        δ prior arrays ``(variable, regressor)``, ``Pi`` ``(regressor, variable)``, …), never by
-        their shape alone, so ``k = n`` (``deterministic="n"``, one lag) cannot transpose a label.
-        Other leaves are named by shape only when exactly one known layout fits; otherwise
-        (ambiguous or unknown) they get generic ``<name>_dim<j>`` names."""
+        δ prior arrays ``(variable, regressor)``, ``Pi`` ``(regressor, variable)``, the ν prior
+        weights ``(variable, nu)``, …), never by their shape alone, so ``k = n``
+        (``deterministic="n"``, one lag) or ``k = |ν grid|`` cannot mislabel an axis.
+
+        ``equation`` says whether the leaf leads with the equation axis: ``True`` (per-equation
+        leaves: ``prior.eq``, the ``mean``/``vol``/``struct`` parts of a draw), ``False``
+        (``prior.shared``, ``glob``), ``None`` (decided by the name: the per-equation names of
+        :data:`_EQUATION_NAMES`, else unknown). Only per-equation leaves have their trailing axes
+        named by shape, when exactly one per-equation layout fits (:data:`_EQUATION_DIMS`).
+        Every other axis gets a generic ``<name>_dim<j>`` name, except that an unknown leaf whose
+        leading axis has ``n`` entries keeps the ``variable`` label for it."""
         if shape == ():
             return ()
         sizes = self._sizes()
@@ -575,13 +634,16 @@ class _Names:
         named = _NAMED_DIMS.get(name.replace(".", "_"), _NAMED_DIMS.get(last))
         if named is not None and self._fits(named, shape, sizes):
             return named
-        fits = [d for d in _SHAPE_DIMS if self._fits(d, shape, sizes)]
-        if len(fits) == 1:
-            return fits[0]
+        if equation is None and last in _EQUATION_NAMES:
+            equation = True
+        if equation:
+            fits = [d for d in _EQUATION_DIMS if self._fits(d, shape, sizes)]
+            if len(fits) == 1:
+                return fits[0]
         base = name.replace(".", "_")
         dims = [f"{base}_dim{j}" for j in range(len(shape))]
-        if lead_variable and shape[0] == self.n:
-            dims[0] = "variable"  # prior arrays and hyperparameters lead with the equation
+        if equation is not False and shape[0] == self.n and self.n > 0:
+            dims[0] = "variable"
         return tuple(dims)
 
     def _fits(
@@ -603,17 +665,28 @@ _NAMED_DIMS: dict[str, tuple[str, ...]] = {
     "prior_eq_contemp_prec0": ("variable", "variable_"),
     "prior_eq_contemp_cmask": ("variable", "variable_"),
     "prior_shared_Mc": ("regressor", "variable_"),
+    "prior_eq_transitory_log_nu_w": ("variable", "nu"),
 }
-"""Layouts of the leaves whose shape alone can be ambiguous (``k = n``); keys are a leaf's full
-underscored path or its last path component."""
+"""Layouts of the leaves whose shape alone can be ambiguous (``k = n``, ``k = |ν grid|``); keys
+are a leaf's full underscored path or its last path component."""
 
-_SHAPE_DIMS: tuple[tuple[str, ...], ...] = (
+_EQUATION_DIMS: tuple[tuple[str, ...], ...] = (
     ("variable",),
     ("variable", "variable_"),
     ("variable", "regressor"),
-    ("regressor", "variable"),
+    ("variable", "nu"),
 )
-"""Layouts tried by shape for leaves without a named layout (used only when exactly one fits)."""
+"""Layouts tried by shape for per-equation leaves without a named layout (used only when exactly
+one fits, so a trailing axis of ``k = n − 1`` or ``k = |ν grid|`` entries stays generic)."""
+
+_EQUATION_PARTS = frozenset({"mean", "struct", "vol"})
+"""Top-level parts of a ``ParamDraw`` / ``PathDraw`` whose leaves lead with the equation."""
+
+_EQUATION_NAMES = frozenset({
+    "mu", "phi", "sigma", "h_T", "log_lam", "nu", "log_p", "log1m_p", "p_outlier", "B_own1",
+    "h_1", "h_mid", "intercept", "outlier_share", "outlier_at_max",
+})  # fmt: skip
+"""Per-equation stored, monitored and latent quantities (DESIGN §5.3, §8.1)."""
 
 
 def _meta_attrs(meta: FitMeta) -> dict[str, Any]:

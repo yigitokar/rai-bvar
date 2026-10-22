@@ -13,9 +13,9 @@ protocols of ``engines/mcmc/protocols.py`` with the Phase 2 state classes:
 * :class:`ToyReducedMean` + :class:`ToyCCCM`: a non-fusing mean and a pre-phase global step
   (column-wise ``Π`` draw; mechanics only, not an exact sampler);
 * :class:`ToyZeroMean`; :class:`ToyFixedDiagonal`;
-* :class:`ToyVol`: Constant core (exact IG conditional with coupling) or an "SV-like" core that
-  exercises ``h`` paths, ``acc_*`` and ``rb_*`` accumulators and outlier indices (not a valid
-  sampler of anything; mechanics only);
+* :class:`ToyVol`: Constant core (exact IG conditional with coupling) or an "SV-like" core (AR
+  or random walk) that exercises ``h`` paths, ``acc_*`` and ``rb_*`` accumulators and outlier
+  indices (not a valid sampler of anything; mechanics only);
 * :class:`DriftMean`: a deterministic mean whose prior precision turns negative at sweep 7
   (failure injection), and invariant-violating global steps.
 
@@ -79,6 +79,8 @@ from rai_bvar.engines.mcmc.state import (
     SVDraw,
     SVEq,
     SVPrior,
+    SVRWDraw,
+    SVRWEq,
     TransitoryPrior,
     VolDraw,
     VolEq,
@@ -515,6 +517,10 @@ class ToyVol(KernelBase):
         return self.static.persistent == "sv"
 
     @property
+    def rw(self) -> bool:
+        return self.sv and self.static.rw
+
+    @property
     def outliers(self) -> bool:
         return self.static.transitory == "outlier"
 
@@ -528,7 +534,14 @@ class ToyVol(KernelBase):
     def init_eq(self, key, resid0, tmask, T_eff, prior_i):
         T = self.shapes.T_pad
         lv = jnp.log(jnp.sum(tmask * resid0**2) / T_eff)
-        if self.sv:
+        if self.rw:
+            z, iz = jnp.zeros(()), jnp.zeros((), jnp.int32)
+            core = SVRWEq(
+                h=jnp.full(T + 1, lv), sigma=jnp.asarray(0.3), acc_h=z, acc_cs2=z, acc_ncms=z,
+                acc_fold=z, acc_floor=z, acc_rej_run=iz, acc_rej_run_max=iz,
+                rb_h_sum=jnp.zeros(T + 1), rb_h_sq=jnp.zeros(T + 1),
+            )  # fmt: skip
+        elif self.sv:
             z = jnp.zeros(())
             core = SVEq(
                 h=jnp.full(T + 1, lv), mu=lv, phi=jnp.asarray(0.5), sigma=jnp.asarray(0.3),
@@ -574,6 +587,17 @@ class ToyVol(KernelBase):
         level = jnp.sum(tmask * log_e2) / T_eff
         z = random.normal(keys.sub_key(key, Sub.H), (T + 1,))
         accept = random.uniform(keys.sub_key(key, Sub.H_ACC), ()) < 0.8
+        if self.rw:  # random walk: no level, no persistence
+            prop = jnp.where(jnp.arange(T + 1) <= T_eff, c.h + c.sigma * z, z)
+            h = jnp.where(accept, prop, c.h)
+            acc = accept.astype(F64)
+            rej = (c.acc_rej_run + 1) * (1 - accept.astype(jnp.int32))
+            core = dataclasses.replace(
+                c, h=h, acc_h=c.acc_h + acc, acc_cs2=c.acc_cs2 + 0.5, acc_rej_run=rej,
+                acc_rej_run_max=jnp.maximum(c.acc_rej_run_max, rej),
+                rb_h_sum=c.rb_h_sum + h, rb_h_sq=c.rb_h_sq + h**2,
+            )  # fmt: skip
+            return VolEq(core=core, trans=trans), StepInfo.success()
         prop = c.mu + c.phi * (c.h - c.mu) + c.sigma * z
         prop = jnp.where(jnp.arange(T + 1) <= T_eff, prop, z)  # padded states: N(0, 1) dummies
         h = jnp.where(accept, prop, c.h)
@@ -613,7 +637,11 @@ class ToyVol(KernelBase):
         return log_lam_prev
 
     def extract_eq(self, vs, T_eff):
-        if self.sv:
+        if self.rw:
+            c = vs.core
+            h_T = jax.lax.dynamic_index_in_dim(c.h, T_eff, keepdims=False)
+            core = SVRWDraw(h_T=h_T, sigma=c.sigma)
+        elif self.sv:
             c = vs.core
             core = SVDraw(h_T=jax.lax.dynamic_index_in_dim(c.h, T_eff, keepdims=False), mu=c.mu, phi=c.phi,
                           sigma=c.sigma)  # fmt: skip
@@ -717,8 +745,9 @@ def toy_static(
     chunk: int = 50,
     paths: bool = False,
     batching: str = "vmap",
+    rw: bool = False,
 ) -> StaticConfig:
-    vol = VolStatic(persistent=persistent, transitory=transitory, coupled=mode != "I")
+    vol = VolStatic(persistent=persistent, rw=rw, transitory=transitory, coupled=mode != "I")
     return StaticConfig(
         shapes=Shapes.of(n, lags, n_det, bucket(T_eff, 32)),
         struct=StructStatic(contemp_scaling="none" if mode == "I" else "lambda"),

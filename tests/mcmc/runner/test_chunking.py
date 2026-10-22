@@ -1,5 +1,9 @@
-"""Bitwise invariances of the runner (DESIGN §5.1, §5.6, §9.3 item 4): chunk size and burn piece
-size, thinning with aligned sweeps, chain-count prefixes, the exact final state."""
+"""Invariances of the runner (DESIGN §5.1, §5.6, §9.3 item 4). Bitwise: chunk size and burn piece
+size, thinning with aligned sweeps, the exact final state, and chain-count prefixes with
+``chains="map"``. To rounding (Stage 2 amendment of §5.6): chain-count prefixes under
+``chains="vmap"``, where the batch size changes how XLA vectorises reductions (``rtol 1e-12``
+with the toy kernels, which differ in the last bit on x86 Linux; ``rtol 1e-9`` with the
+production kernels on short runs)."""
 
 from __future__ import annotations
 
@@ -38,6 +42,18 @@ def _same(a, b):
         np.testing.assert_array_equal(np.asarray(x), np.asarray(y))
 
 
+def _close(a, b):
+    """Floats to rounding, integers (indicators, counters) exactly."""
+    la, lb = jax.tree.leaves(a), jax.tree.leaves(b)
+    assert len(la) == len(lb)
+    for x, y in zip(la, lb, strict=True):
+        x, y = np.asarray(x), np.asarray(y)
+        if np.issubdtype(x.dtype, np.floating):
+            np.testing.assert_allclose(x, y, rtol=1e-12, atol=1e-14)
+        else:
+            np.testing.assert_array_equal(x, y)
+
+
 def _streams(out):
     return out.store.stream("monitor"), out.store.stream("params")
 
@@ -65,12 +81,13 @@ def test_thinning_with_aligned_sweeps():
 
 
 def test_chain_prefix_invariance():
-    """The first 3 of 5 chains equal a 3-chain run (prefix-stable keys; DESIGN §9.3 item 4)."""
+    """The first 3 of 5 chains equal a 3-chain run with the toy kernels (prefix-stable keys;
+    DESIGN §9.3 item 4): bitwise on macOS, to rounding on x86 Linux (another vmap batch size)."""
     settings = MCMCSettings(chains=5, draws=6, burn=3)
     a, *_ = _run(BASE, settings)
     b, *_ = _run(BASE, dataclasses.replace(settings, chains=3))
-    _same(jax.tree.map(lambda x: x[:3], _streams(a)), _streams(b))
-    _same(jax.tree.map(lambda x: x[:3], a.final_state), b.final_state)
+    _close(jax.tree.map(lambda x: x[:3], _streams(a)), _streams(b))
+    _close(jax.tree.map(lambda x: x[:3], a.final_state), b.final_state)
 
 
 def test_chain_prefix_invariance_with_mapped_chains():
@@ -168,9 +185,21 @@ def test_accumulators_with_thinning_cover_every_sampling_sweep():
     _same(thinned.final_state, every.final_state)
 
 
-def _production_prefix(name, chains, C, C_ref):
+def _close(a, b, rtol=1e-9, atol=1e-12):
+    """Equal to rounding: floating leaves to ``rtol``/``atol``, integer leaves exactly."""
+    la, lb = jax.tree.leaves(a), jax.tree.leaves(b)
+    assert len(la) == len(lb)
+    for x, y in zip(la, lb, strict=True):
+        x, y = np.asarray(x), np.asarray(y)
+        if np.issubdtype(x.dtype, np.floating):
+            np.testing.assert_allclose(x, y, rtol=rtol, atol=atol)
+        else:
+            np.testing.assert_array_equal(x, y)
+
+
+def _production_prefix(name, chains, C, C_ref, *, bitwise):
     """Burn 4 sweeps with ``C`` and ``C_ref`` chains of a production composition and compare the
-    first ``C`` chains bit for bit."""
+    first ``C`` chains: bit for bit, or to rounding (DESIGN §5.6 Stage 2 amendment)."""
     from rai_bvar.engines.mcmc.compose import compose
     from rai_bvar.engines.mcmc.runner import make_runner
     from rai_bvar.validation.joint import joint_spec
@@ -194,25 +223,24 @@ def _production_prefix(name, chains, C, C_ref):
         out[c] = jax.device_get(
             fns.burn(ck, st, data, spec.prior, cache, np.uint32(0), np.int32(4))
         )
-    _same(jax.tree.map(lambda x: x[:C], out[C_ref]), out[C])
+    (_same if bitwise else _close)(jax.tree.map(lambda x: x[:C], out[C_ref]), out[C])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="known gap (WP14 report, orchestrator decision pending): XLA CPU lowers the batched "
-    "products of the production SV kernels differently for different chain counts, so with "
-    "chains='vmap' a 1-chain run differs from the first chain of a 3-chain run in the last bits "
-    "(DESIGN §5.6 promises bitwise chain-count prefixes)",
-)
-def test_production_chain_prefix_with_vmapped_chains_known_gap():
-    _production_prefix("structural_sv", "vmap", 1, 3)
+def test_production_chain_prefix_with_vmapped_chains_to_rounding():
+    """DESIGN §5.6 (Stage 2 amendment): with ``chains="vmap"`` the production SV kernels give the
+    first chain of a 3-chain run to rounding (XLA vectorises their reductions differently for
+    different batch sizes), not necessarily bit for bit."""
+    _production_prefix("structural_sv", "vmap", 1, 3, bitwise=False)
+
+
+def test_production_chain_prefix_with_vmapped_reduced_form_to_rounding():
+    """The same for the CCCM (reduced-form) kernels."""
+    _production_prefix("reduced_sv", "vmap", 1, 3, bitwise=False)
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason="known gap: the DESIGN §9.3 item 4 case (first 3 of 5 chains) differs at ~1e-12 for "
-    "the production SV + outlier + Student-t kernels with chains='vmap'",
-)
-def test_production_chain_prefix_3_of_5_with_vmapped_chains_known_gap():
-    _production_prefix("structural_sv_outliers_t", "vmap", 3, 5)
+def test_production_chain_prefix_3_of_5_with_vmapped_chains_to_rounding():
+    """The DESIGN §9.3 item 4 case (first 3 of 5 chains) with the SV + outlier + Student-t
+    kernels: to rounding with ``chains="vmap"``, bit for bit with ``chains="map"``."""
+    _production_prefix("structural_sv_outliers_t", "vmap", 3, 5, bitwise=False)
+    _production_prefix("structural_sv_outliers_t", "map", 3, 5, bitwise=True)

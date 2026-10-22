@@ -48,7 +48,7 @@ from rai_bvar.engines.mcmc.config import (
 from rai_bvar.engines.mcmc.keys import Block, Sub
 from rai_bvar.engines.mcmc.linalg import stable_ar1_regression, tridiag_precision_sample
 from rai_bvar.engines.mcmc.protocols import KernelBase, PersistentCore
-from rai_bvar.engines.mcmc.random import TINY
+from rai_bvar.engines.mcmc.random import TINY, loggamma
 from rai_bvar.engines.mcmc.state import (
     EqPrior,
     StepInfo,
@@ -639,11 +639,13 @@ def test_state_structure_dtypes_and_init(rw):
 @pytest.mark.parametrize("rw", [False, True], ids=["ar", "rw"])
 def test_nc_accept_uses_w_of_the_post_h_step_state(rw, accept, table):
     """Pilot §3.4 stale-``w`` regression, deterministic (the PR-size Geweke lacks the power: the
-    coarse-table mutant fails only at ~10× chain length). With the exact-``h`` accept forced
-    (``+∞``) or refused (``−∞``), :meth:`SVCore.h_move` returns ``w`` of the ``h`` it returns, and
-    inside :meth:`SVCore.sample_core` the NC step receives that ``h`` (the centred step does not
-    move it) and its accept compares against that ``w``, recomputed here without the reused
-    ``log g`` (N01 §10.3)."""
+    coarse-table mutant passes at ``M_c = 100``, is borderline at 10× and fails reliably only from
+    20× that chain length; ``test_block_geweke_power_against_stale_w_nightly`` has the
+    measurements). With the exact-``h`` accept forced (``+∞``) or refused (``−∞``),
+    :meth:`SVCore.h_move` returns ``w`` of the ``h`` it returns, and inside
+    :meth:`SVCore.sample_core` the NC step receives that ``h`` (the centred step does not move it)
+    and its accept compares against that ``w``, recomputed here without the reused ``log g``
+    (N01 §10.3)."""
     k, cs, le2, tmask, Te, sp = setup(rw=rw)
     seen: dict[str, jax.Array] = {}
 
@@ -717,16 +719,52 @@ def test_vmap_equals_loop():
     assert np.all(np.asarray(info.ok))
 
 
-def test_key_derivation_uses_one_sub_key_per_consumer():
-    k = core(8)
-    n = k.draw_noise(KEY, 8, jnp.int32(6), prior())
-    np.testing.assert_array_equal(
-        np.asarray(n.z_h), np.asarray(random.normal(random.fold_in(KEY, int(Sub.H)), (9,)))
+@pytest.mark.parametrize(
+    "vkw", [{}, {"rw": True, "sigma2_prior": "inv_gamma"}], ids=["ar-chi2", "rw-invgamma"]
+)
+def test_key_derivation_uses_one_sub_key_per_consumer(vkw):
+    """Every one of the 11 ``SVNoise`` fields is the draw of its own documented sub-key
+    ``fold_in(key, Sub.X)`` (module docstring; DESIGN §3.1 rule 5, §5.6), reproduced bit for bit,
+    so a ``draw_noise`` that derives one field from another field's sub-key (e.g. the NC
+    ``(μ, σ)`` accept from the NC φ accept key) fails here. Which field each stage of
+    ``sample_core`` reads is not checked here. ``jax.debug_key_reuse`` cannot see such a reuse: every
+    ``fold_in`` returns a fresh key. ``sample`` is ``sample_core`` of ``draw_noise`` of the key it
+    receives (no further derivation)."""
+    k, cs, le2, tmask, Te, sp = setup(**vkw)
+    T_pad = int(k.T_pad)
+    n = k.draw_noise(KEY, T_pad, Te, sp)
+
+    def sk(sub):
+        return random.fold_in(KEY, int(sub))
+
+    def u_tiny(sub):
+        return random.uniform(sk(sub), (), dtype=F64, minval=TINY)
+
+    expected = {
+        "u_s": random.uniform(sk(Sub.S), (T_pad,), dtype=F64),
+        "z_h": random.normal(sk(Sub.H), (T_pad + 1,), dtype=F64),
+        "u_h": u_tiny(Sub.H_ACC),
+        "z_gp": random.normal(sk(Sub.C_GP), (2,), dtype=F64),
+        "u_gp": u_tiny(Sub.C_GP_ACC),
+        "lg_s2": loggamma(sk(Sub.C_S2), SV.sigma2_proposal_shape(Te, sp, k.static)),
+        "u_s2": u_tiny(Sub.C_S2_ACC),
+        "z_phi": random.normal(sk(Sub.NC_PHI), (), dtype=F64),
+        "u_phi": u_tiny(Sub.NC_PHI_ACC),
+        "z_ms": random.normal(sk(Sub.NC_MS), (2,), dtype=F64),
+        "u_ms": u_tiny(Sub.NC_MS_ACC),
+    }
+    assert sorted(expected) == sorted(f.name for f in dataclasses.fields(SV.SVNoise))
+    for name, ref in expected.items():
+        got = np.asarray(getattr(n, name))
+        assert got.dtype == np.float64 and got.shape == np.shape(ref), name
+        np.testing.assert_array_equal(got, np.asarray(ref), err_msg=name)
+    # sample consumes exactly that noise record
+    run = jax.jit(lambda kk, c: k.sample(kk, c, le2, tmask, Te, sp))
+    run_core = jax.jit(
+        lambda c: k.sample_core(k.draw_noise(KEY, T_pad, Te, sp), c, le2, tmask, Te, sp)
     )
-    np.testing.assert_array_equal(
-        np.asarray(n.u_s), np.asarray(random.uniform(random.fold_in(KEY, int(Sub.S)), (8,)))
-    )
-    assert float(n.u_h) > 0 and n.z_ms.shape == (2,) and n.z_gp.shape == (2,)
+    for a, b in zip(jax.tree.leaves(run(KEY, cs)), jax.tree.leaves(run_core(cs)), strict=True):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
 
 
 @pytest.mark.parametrize("rw", [False, True])
@@ -1261,11 +1299,16 @@ def test_block_geweke_exact_mode_with_coarse_mixture():
 @pytest.mark.slow
 def test_block_geweke_power_against_stale_w_nightly():
     """The stale-``w`` mutant (pilot §3.4) at 80× the PR chain length (``M_c = 8000``) with the
-    coarse table: the exact kernel passes and the mutant fails. Scratch power study (2–3 seeds per
-    size): mutant max |z| ≈ 2 at ``M_c = 100``, 4.0–4.3 at 1000 (borderline against t_crit 4.1),
-    5.4–5.8 at 4000, 6.9–8.7 at 8000; the exact kernel stays below 2.5. At the PR size the mutant
-    passes, so the PR-tier guard is the deterministic
-    ``test_nc_accept_uses_w_of_the_post_h_step_state``."""
+    coarse table: the exact kernel passes and the mutant fails.
+
+    Scratch power study of exactly this configuration (``_block_geweke`` with ``seed`` varied;
+    ``t_crit = 4.10``; max ``|z|`` over the test functions, range over seeds): the mutant gives
+    1.4–2.4 at ``M_c = 100`` (5 seeds, all pass), 1.4–4.1 at 300 and 2.4–4.1 at 500 (5 seeds each,
+    1 and 0 fail), 3.3–5.1 at 1000 (4 of 6 fail), 4.7–5.3 at 2000 (3 of 3), 6.0–7.6 at 4000
+    (2 of 2) and 5.2–5.6 at 8000 (2 of 2; 5.6 for the seed used here). ``|z|`` stops growing past
+    ``M_c ≈ 2000``, so the margin here is about 1.5 above ``t_crit``; the exact kernel stays below
+    3.1 at every size tried (2.5–3.1 at ``M_c`` = 100–500, at or below 2.4 from 1000). At the PR size the mutant passes, so the PR-tier guard is the
+    deterministic ``test_nc_accept_uses_w_of_the_post_h_step_state``."""
     res = _block_geweke("gauss_sv_exact", coarse=True, M_c=8000)
     assert res.passed, res.table()
     assert not _block_geweke("gauss_sv_exact", coarse=True, M_c=8000, cls=StaleW).passed

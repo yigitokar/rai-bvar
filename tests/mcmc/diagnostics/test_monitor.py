@@ -12,6 +12,7 @@ variances ``h_{t+1}`` or ``log λ`` plus ``2 log o_t + log τ_t``.
 from __future__ import annotations
 
 import dataclasses
+import functools
 from dataclasses import dataclass
 from typing import Any
 
@@ -888,12 +889,21 @@ def counted(monkeypatch):
     return seen
 
 
-def test_flag_table_and_warnings_evaluate_each_quantity_once(counted):
+@pytest.mark.parametrize(
+    ("n", "draws"),
+    [(4, 400), (20, 2000)],  # n = 20 SV-O-t at the default 4 × 2000: 392 quantities (DESIGN §8.2)
+)
+def test_flag_table_and_warnings_evaluate_each_quantity_once(counted, n, draws):
     """The fit's sequence (results.py: ``converged``, ``diagnostics_table``, then
-    ``warning_catalogue``, which runs ``converged`` again) ranks and FFTs every quantity once."""
+    ``warning_catalogue``, which runs ``converged`` again) ranks and FFTs every quantity once.
+
+    A memoised value equals a recomputation to rounding, not bitwise: it is the value of the
+    batch in which the quantity was first evaluated, and the FFT's last bits depend on the batch
+    (at ``n = 20`` a few bulk ESS differ from the scalar function's in the last digits)."""
     static = make_static("structural-sv-ot")
-    spec = M.monitor_spec(static, variables(4))
-    mon = iid_store(spec, draws=400, seed=31)
+    static = dataclasses.replace(static, shapes=Shapes.of(n, LAGS, 1, T_PAD))
+    spec = M.monitor_spec(static, variables(n))
+    mon = iid_store(spec, draws=draws, seed=31)
     mon["phi"][1, :, 2] += 1.0  # one primary failure, so every message path runs
     flag, first = M.converged(mon, spec, SETTINGS, error=False, eb_converged=None)
     primary_and_a = len(spec.primary) + len(spec.field_labels("a"))
@@ -905,10 +915,16 @@ def test_flag_table_and_warnings_evaluate_each_quantity_once(counted):
         M.DiagnosticsInput(static=static, settings=SETTINGS, mon=mon, spec=spec)
     )
     assert sum(counted) == len(spec.labels) and not flag and out[0] == first[0]
-    for label in ("loglik", "phi[y2]", "a[y3,y1]", "nu[y0]", "log_prior"):
-        x = spec.select(mon, [label])[label]  # memoised values are the scalar functions' (bitwise)
-        assert table.loc[label, "rhat"] == dg.rhat(x)
-        assert table.loc[label, "ess_bulk"] == dg.ess_bulk(x)
+    assert len(spec.labels) == (392 if n == 20 else 48)
+    # every memoised value against one batch of all quantities, and some against the scalar
+    # functions (Phase 1), to rounding
+    rhat, ess = dg.rhat_ess_bulk_many(spec.stack(mon))
+    np.testing.assert_allclose(table["rhat"], rhat, rtol=1e-13, atol=0)
+    np.testing.assert_allclose(table["ess_bulk"], ess, rtol=1e-13, atol=0)
+    for label in ("loglik", "phi[y2]", "a[y3,y1]", "nu[y0]", "log_prior", f"B_own1[y{n // 2}]"):
+        x = spec.select(mon, [label])[label]
+        np.testing.assert_allclose(table.loc[label, "rhat"], dg.rhat(x), rtol=1e-13, atol=0)
+        np.testing.assert_allclose(table.loc[label, "ess_bulk"], dg.ess_bulk(x), rtol=1e-13, atol=0)
 
 
 def test_memoised_statistics_follow_in_place_changes(spec3, counted):
@@ -918,21 +934,37 @@ def test_memoised_statistics_follow_in_place_changes(spec3, counted):
     ok, (msg,) = M.converged(mon, spec3, SETTINGS, error=False, eb_converged=None)
     assert not ok and "phi[cpi] R-hat" in msg
     rhat, ess = M.rhat_ess(mon, spec3, ["phi[cpi]", "phi[gdp]"])
-    assert rhat[0] == dg.rhat(mon["phi"][:, :, 1]) and ess[0] == dg.ess_bulk(mon["phi"][:, :, 1])
-    assert rhat[1] == dg.rhat(mon["phi"][:, :, 0])
+    close = functools.partial(np.testing.assert_allclose, rtol=1e-13, atol=0)  # to rounding
+    close(rhat[0], dg.rhat(mon["phi"][:, :, 1]))
+    close(ess[0], dg.ess_bulk(mon["phi"][:, :, 1]))
+    close(rhat[1], dg.rhat(mon["phi"][:, :, 0]))
     # (chains, draws) is part of the key: the same values split into other chains are new
     x = mon["phi"][:, :, 0].reshape(2, -1)
     spec = M.MonitorSpec(("x",), ())
-    assert M.rhat_ess({"x": x}, spec, ["x"])[0][0] == dg.rhat(x)
+    close(M.rhat_ess({"x": x}, spec, ["x"])[0][0], dg.rhat(x))
+    # primary and a_ij once, then the changed column, then the re-split one: nothing else
+    assert counted == [len(spec3.primary), len(spec3.field_labels("a")), 1, 1]
 
 
 def test_memo_is_bounded(spec3, counted, monkeypatch):
+    """At most ``_STATS_CACHE_SIZE`` pairs are kept and the least recently *used* go first: a hit
+    refreshes its entry, so it outlives an older untouched one (a FIFO memo would drop it)."""
     monkeypatch.setattr(M, "_STATS_CACHE_SIZE", 5)
     mon = iid_store(spec3, seed=35)
-    M.rhat_ess(mon, spec3, spec3.primary)
+    primary = spec3.primary
+    M.rhat_ess(mon, spec3, primary)
     assert len(M._stats_cache) == 5
-    M.rhat_ess(mon, spec3, spec3.primary[-5:])  # the most recent five are kept
-    assert counted == [len(spec3.primary)]
+    M.rhat_ess(mon, spec3, primary[-5:])  # the most recent five are kept
+    assert counted == [len(primary)]
+    touched, untouched = primary[-5], primary[-4]  # the two oldest entries, in this order
+    M.rhat_ess(mon, spec3, [touched])  # a hit: now the most recently used
+    assert counted == [len(primary)]
+    M.rhat_ess(mon, spec3, primary[:2])  # two new pairs evict the two least recently used
+    assert counted == [len(primary), 2] and len(M._stats_cache) == 5
+    M.rhat_ess(mon, spec3, [touched])  # still a hit (FIFO would have evicted it)
+    assert counted == [len(primary), 2]
+    M.rhat_ess(mon, spec3, [untouched])  # evicted: evaluated again
+    assert counted == [len(primary), 2, 1] and len(M._stats_cache) == 5
 
 
 # --------------------------------------------------------------------------- warning catalogue
@@ -996,6 +1028,14 @@ def test_nc_fold_fraction():
         "non-centred sign fold in more than 1% of sweeps for ['y1'] (fractions [0.025])"
     )
     assert msg.endswith("where stochvol and bayesianVARs differ from rai-bvar (D-7)")
+    # "> 1%": exactly 1% in each of 32 chains is quiet (a plain float mean rounds above), the
+    # next float above warns
+    fold = np.full((32, 3), 0.01)
+    assert fold.mean(axis=0)[0] > 0.01
+    assert catalogue(acc={"fold": fold}) == []
+    fold[:, 2] = np.nextafter(0.01, 1.0)
+    (msg,) = catalogue(acc={"fold": fold})
+    assert "for ['y2'] (fractions [0.01])" in msg
 
 
 def test_nu_mass_at_the_grid_bound():
@@ -1061,6 +1101,40 @@ def test_outliers_at_the_grid_maximum_from_the_monitor():
     assert outlier_warnings(outlier_at_max=np.zeros(2)) == []  # an explicit input wins
     del mon["outlier_at_max"]
     assert outlier_warnings() == []
+
+
+def test_outliers_at_the_grid_maximum_threshold_is_strict():
+    """``> 1% of rows`` (DESIGN §8.3): a posterior mean of exactly 1% at ``K`` is quiet, the next
+    float above it warns. At the default 4 × 2000 draws a plain float mean over chains and draws
+    of ``0.01`` (one of 100 rows at ``K`` in every draw) rounds to ``0.010000000000000503``, so
+    the decision must not rest on it."""
+    static = make_static("zero-sv-o")
+    spec = M.monitor_spec(static, variables(2))
+    above = np.nextafter(0.01, 1.0)
+    trap = np.full((4, 2000, 2), 1 / 100).reshape(-1, 2).mean(axis=0)  # strided: no pairwise sum
+    assert (trap > 0.01).all()  # the trap this test pins
+
+    def outlier_warnings(mon=None, **kw):
+        inputs = M.DiagnosticsInput(static=static, settings=SETTINGS, mon=mon, spec=spec, **kw)
+        return [w for w in M.warning_catalogue(inputs) if w.startswith("outlier scale")]
+
+    mon = iid_store(spec, draws=2000)
+    mon["outlier_at_max"] = np.full((4, 2000, 2), 1 / 100)
+    assert outlier_warnings(mon) == []
+    mon["outlier_at_max"][..., 1] = above  # just above, in every draw
+    (msg,) = outlier_warnings(mon)
+    assert "for more than 1% of rows in ['y1'] (fractions [0.01])" in msg
+    mixed = np.zeros((4, 2000, 2))
+    mixed[:, ::2, :] = 2 / 100  # half the draws at 2%, half at 0: mean exactly 1%
+    mixed[:, 0, 1] = 3 / 100  # one more row at K in one draw: above
+    mon["outlier_at_max"] = mixed
+    (msg,) = outlier_warnings(mon)
+    assert "in ['y1']" in msg
+    # explicit inputs, (n,) and (chains, n)
+    assert outlier_warnings(outlier_at_max=np.array([0.01, 0.01])) == []
+    assert outlier_warnings(outlier_at_max=np.full((32, 2), 0.01)) == []
+    (msg,) = outlier_warnings(outlier_at_max=np.array([above, 0.01]))
+    assert "in ['y0']" in msg
 
 
 def test_outlier_monitors_end_to_end():

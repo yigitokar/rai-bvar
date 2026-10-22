@@ -11,10 +11,13 @@ Typed threefry2x32 keys and a ``fold_in`` chain, so every draw is a pure functio
     sub_key   = fold_in(eq_key, Sub.Y)
     init      : fold_in(fold_in(fold_in(root, Stream.INIT), salt), c) → Block → i → Sub
     forecast  : fold_in(fold_in(key(fseed), Stream.FORECAST), c) → d → Ahead.X → i
+                                                                    d: kept-draw index
     validation: fold_in(key(seed), Stream.VALIDATION) → tier → composition → chain or replication
 
-Draws therefore do not depend on chunk size, burn piece size, thinning alignment, chain-count
-prefixes or vmap versus loops (N07 §4.1). No key is ever carried in a loop state.
+Keys therefore do not depend on chunk size, burn piece size, thinning alignment, chain-count
+prefixes or vmap versus loops (N07 §4.1): draws are bitwise independent of the first three, and
+equal across chain-count prefixes and ``vmap`` vs ``shard_map`` to rounding (XLA's batch-size
+dependent vectorisation; DESIGN §5.6, Stage 2 amendment). No key is ever carried in a loop state.
 
 The implementation is pinned to :data:`PRNG_IMPL` (D-16): roots are built with
 ``impl="threefry2x32"`` whatever ``jax_default_prng_impl`` (or ``JAX_DEFAULT_PRNG_IMPL``) says,
@@ -96,7 +99,7 @@ class Sub(IntEnum):
 
 
 class Ahead(IntEnum):
-    """Forecast randomness per stored draw (DESIGN §7.2)."""
+    """Forecast randomness per selected kept draw (DESIGN §5.6, §7.2)."""
 
     VOL = 0
     SHOCK = 1
@@ -197,7 +200,7 @@ def fit_root(seed: int, salt: int) -> Key:
 
 def chain_keys(root: Key, C: int) -> Key:
     """``fold_in(root, c)`` for ``c = 0..C−1``; shape ``(C,)``. The first ``m`` keys do not depend
-    on ``C`` (chain prefixes)."""
+    on ``C`` (chain prefixes; the draws then agree across ``C`` to rounding, DESIGN §5.6)."""
     _typed(root, "root")
     if np.ndim(root) != 0:
         raise ValueError("root must be a scalar key")
@@ -235,8 +238,12 @@ def sub_key(eq_key: Key, sub: Sub) -> Key:
 
 
 def forecast_key(fseed: int, c: object, d: object, kind: Ahead, i: object) -> Key:
-    """Forecast randomness of chain ``c``, stored draw ``d``, kind ``Ahead.X``, equation ``i``
-    (``i = 0`` for draw-level randomness). Scalars only; vmap over ``(c, d, i)`` for batches."""
+    """Forecast randomness of chain ``c``, kept draw ``d``, kind ``Ahead.X``, equation ``i``
+    (``i = 0`` for draw-level randomness). Scalars only; vmap over ``(c, d, i)`` for batches.
+
+    ``d`` is the **kept-draw index** (DESIGN §5.6, §7.1; Stage 2 amendment): the ``draw``
+    coordinate of ``fit.posterior``, not the draw's position in the store, so in-loop (§5.8) and
+    post-hoc forecasts share keys whatever ``store_thin`` is."""
     k = random.fold_in(random.fold_in(_root(fseed), int(Stream.FORECAST)), _index(c, "c"))
     k = random.fold_in(random.fold_in(k, _index(d, "d")), _member(kind, Ahead))
     return random.fold_in(k, _index(i, "i"))

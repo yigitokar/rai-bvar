@@ -142,18 +142,58 @@ def test_k_equals_n_labels_follow_the_leaf_names(mean):
 
 
 def test_ambiguous_unnamed_leaves_get_generic_dims():
+    """Named leaves keep their layout; only per-equation leaves have trailing axes named by shape
+    (when exactly one layout fits); unknown leaves get generic names except for a leading axis of
+    ``n`` entries; leaves known not to be per equation get generic names throughout."""
     from rai_bvar.engines.mcmc.storage import _Names
 
     names = _Names(("chain",), 2, 2, ("a", "b"), ("a.L1", "b.L1"), ("b~a",), None, None)
     assert names.dims("gamma", (2, 2)) == ("variable", "regressor")
     assert names.dims("glob.mean.Pi", (2, 2)) == ("regressor", "variable")
-    assert names.dims("mystery", (2, 2)) == ("mystery_dim0", "mystery_dim1")
-    assert names.dims("mystery", (2, 2), lead_variable=True) == ("variable", "mystery_dim1")
-    assert names.dims("mystery", (2, 1)) == ("variable", "variable_")
+    assert names.dims("mystery", (2, 2)) == ("variable", "mystery_dim1")
+    assert names.dims("mystery", (2, 1)) == ("variable", "mystery_dim1")
     assert names.dims("mystery", (2,)) == ("variable",)
+    assert names.dims("mystery", (3, 2)) == ("mystery_dim0", "mystery_dim1")
+    assert names.dims("mystery", (2,), equation=False) == ("mystery_dim0",)
+    assert names.dims("mu", (2,)) == ("variable",)  # a per-equation name
+    assert names.dims("prior_eq_x", (2, 1), equation=True) == ("variable", "variable_")
+    assert names.dims("prior_eq_x", (2, 2), equation=True) == ("variable", "regressor")
     wide = _Names(("chain",), 2, 3, ("a", "b"), ("c", "a.L1", "b.L1"), ("b~a",), None, None)
-    assert wide.dims("mystery", (2, 3)) == ("variable", "regressor")
-    assert wide.dims("mystery", (3, 2)) == ("regressor", "variable")
+    assert wide.dims("mystery", (2, 3)) == ("variable", "mystery_dim1")
+    assert wide.dims("mystery", (3, 2)) == ("mystery_dim0", "mystery_dim1")
+    assert wide.dims("prior_eq_x", (2, 3), equation=True) == ("variable", "regressor")
+    # k == G: as many regressors as ν grid points
+    grid = _Names(
+        ("chain",), 2, 3, ("a", "b"), ("c", "a.L1", "b.L1"), ("b~a",), None, None, (3, 4, 5)
+    )
+    assert grid.dims("prior_eq_transitory_log_nu_w", (2, 3)) == ("variable", "nu")
+    assert grid.dims("prior_eq_coef_mean0", (2, 3)) == ("variable", "regressor")
+    assert grid.dims("prior_eq_x", (2, 3), equation=True) == ("variable", "prior_eq_x_dim1")
+    assert grid.dims("mystery", (2, 3)) == ("variable", "mystery_dim1")
+    assert grid.coords["nu"] == [3, 4, 5] and "nu" not in names.coords
+
+
+def test_nu_prior_weights_are_labelled_by_name_when_k_equals_the_grid_size():
+    """``n = 3``, 12 lags, 2 deterministic terms: ``k = 38 = |ν grid {3..40}|``. The ν prior
+    weights ``(n, G)`` are labelled ``(variable, nu)`` with the grid as coordinate, never by shape
+    as ``(variable, regressor)``; ``gamma`` keeps ``(variable, regressor)``."""
+    static = toys.toy_static(
+        "linear_structural", "sv", transitory="outlier", n=3, lags=12, n_det=2, T_eff=40, chunk=5
+    )
+    assert static.shapes.k == len(static.vol.nu_grid) == 38
+    fit = fit_mcmc(
+        static, toys.toy_data(static, 40, 5), toys.toy_prior(static), MCMCSettings(chains=2, draws=3, burn=1),
+        Runtime(chunk=5), seed=0, salt=1, meta=FitMeta(variables=("a", "b", "c")),
+        _overrides=toys.toy_overrides(static),
+    )  # fmt: skip
+    const = fit.posterior["constant_data"].to_dataset()
+    w = const["prior_eq_transitory_log_nu_w"]
+    assert w.dims == ("variable", "nu")
+    np.testing.assert_array_equal(w["nu"].values, np.arange(3, 41))
+    assert list(w["variable"].values) == ["a", "b", "c"]
+    assert const["prior_eq_coef_mean0"].dims == ("variable", "regressor")
+    assert fit.posterior["posterior"]["gamma"].dims == ("chain", "draw", "variable", "regressor")
+    assert "nu" not in fit.posterior["posterior"].to_dataset().coords
 
 
 def test_memmap_store_equals_memory_store(tmp_path):

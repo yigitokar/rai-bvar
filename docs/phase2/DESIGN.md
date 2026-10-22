@@ -1610,8 +1610,8 @@ Tail ESS is reported, not gated. Acceptance rates never gate (E21). Single-chain
 R-hat cannot see between-chain disagreement), consistent with the Phase 1 MH rule. The flag goes into forecast
 attrs `converged`, so the backtest score `converged` and `compare()`'s "≥ 95% of origins" rule (SPEC §9.5) work
 unchanged. Cost (Stage 2 amendment, measured): about 1 s CPU for flag, table and warnings at n = 20 SV-O-t
-(392 quantities) and the default 4 × 2000 draws; about 7 s at 4 × 10,000 draws, dominated by the two argsorts
-per quantity of the rank normalisation. Each quantity is evaluated once per fit (content-addressed memo); a
+(392 quantities) and the default 4 × 2000 draws; about 7 s at 4 × 10,000 draws, split between the rank
+normalisation (two argsorts and a sort per quantity, ~40%) and the five FFT-based ESS per quantity (~25–40%). Each quantity is evaluated once per fit (content-addressed memo); a
 memoised value equals a recomputation to rounding (the FFT's last bits depend on the batch it ran in).
 
 ### 8.3 Warnings (`fit.warnings`, copied into forecast attrs, aggregated by the backtest)
@@ -2072,8 +2072,8 @@ class MCMCSettings:                 # part of the spec: results depend on every 
     ess_min: float = 400.0
 
 @dataclass(frozen=True)
-class Runtime:                      # NOT in the spec: only knobs with a bitwise-invariance test (§5.6)
-    devices: int | Literal["auto"] = "auto"
+class Runtime:                      # NOT in the spec: knobs with an invariance test (§5.6)
+    devices: int | Literal["auto"] = 1   # Stage 2 amendment: sharding is opt-in (§5.2)
     chunk: int = 250
     memory_budget_gb: float = 2.0   # only decides whether the storage plan raises
     storage_dir: str | None = None  # memmap host store

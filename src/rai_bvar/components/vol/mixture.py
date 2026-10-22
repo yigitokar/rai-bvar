@@ -161,9 +161,10 @@ COARSE1: MixtureTable = MixtureTable("coarse1", [1.0], [LOGCHI2_MEAN], [LOGCHI2_
 """Validation device only (pilot §3.4): one component ``N(ψ(½) + log 2, π²/2)``. Exact mode is exact
 for any table (N01 §10.2), so a deliberately poor table gives Geweke and invariance tests power
 over the exact correction: ``exact=False`` and M7 fail the PR-size block Geweke with it (and pass
-with OCSN-10). A stale ``w`` is subtler: it fails only with ~80× longer chains (nightly), so it is
-pinned by a deterministic test of the ``w`` the NC accept uses. Inject it through the
-``mixture_table`` override; it is not a user option."""
+with OCSN-10). A stale ``w`` is subtler: it passes the PR-size block Geweke (``M_c = 100``), is
+borderline at 10× that chain length and fails for every seed tried from 20× (the nightly test runs
+80×), so the PR tier pins it with a deterministic test of the ``w`` the NC accept uses. Inject it
+through the ``mixture_table`` override; it is not a user option."""
 
 
 def mixture_table(name: Literal["ocsn10", "ksc7"]) -> MixtureTable:

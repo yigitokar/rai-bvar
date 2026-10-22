@@ -641,7 +641,7 @@ def test_mcmc_settings_sweep_counter_boundary(last, one_more):
 def test_runtime_defaults_and_validation(tmp_path):
     r = rb.Runtime()
     assert (r.devices, r.chunk, r.memory_budget_gb, r.storage_dir, r.replay, r.progress) == (
-        "auto",
+        1,  # DESIGN §5.2 Stage 2 amendment: sharding is opt-in
         250,
         2.0,
         None,

@@ -118,9 +118,19 @@ def test_nig_posterior_without_rows_is_the_prior():
     assert post.log_ml == pytest.approx(0.0, abs=1e-13)
 
 
+# Householder QR is backward stable: ρ = R_aug[q, q] is exact for data perturbed by
+# O(ε‖[Z̃|ỹ]‖), so its relative error is O(ε‖[Z̃|ỹ]‖/ρ) and the last bits depend on the LAPACK
+# build (blocked reflectors, SIMD reductions). Accelerate (macOS) happens to be exact on the
+# cancellation cases below; OpenBLAS on x86 Linux is off by up to ~1e-10 relative in Ŝ. The
+# tolerances sit about ten times above the worst build seen in CI, and many orders of magnitude
+# below what the textbook form loses.
+_S_HAT_RTOL = 1e-9
+
+
 def test_residual_form_survives_cancellation():
     """Level 1e8, residuals ±0.5 orthogonal to both regressors and a prior mean at the truth:
-    ``θ̂ = μ₀`` and ``Ŝ = S₀ + T/8`` exactly, while ``y'y + μ₀'V₀⁻¹μ₀ − θ̂'Kθ̂`` cancels ~1e18."""
+    ``θ̂ = μ₀`` and ``Ŝ = S₀ + T/8``, recovered to the QR's backward error (``_S_HAT_RTOL``),
+    while ``y'y + μ₀'V₀⁻¹μ₀ − θ̂'Kθ̂`` cancels ~1e18 and is off by more than 10%."""
     T, level, nu0, S0 = 64, 1e8, 2.0, 0.3
     e = 0.5 * np.tile([1.0, 1.0, -1.0, -1.0], T // 4)
     Z = np.column_stack([np.ones(T), np.tile([1.0, -1.0], T // 2)])  # Z'e = 0, Z'Z = T·I
@@ -129,7 +139,7 @@ def test_residual_form_survives_cancellation():
     mu0, var0 = np.array([level, 0.0]), np.array([1e7, 1e7])
     post = nig_posterior(Z, y, mu0, var0, nu0, S0)
     exact = S0 + T / 8.0
-    assert post.S_hat == pytest.approx(exact, rel=1e-13)
+    assert post.S_hat == pytest.approx(exact, rel=_S_HAT_RTOL)
     K = post.R.T @ post.R
     naive = S0 + 0.5 * (y @ y + mu0 @ (mu0 / var0) - post.theta_hat @ K @ post.theta_hat)
     assert abs(naive - exact) > 0.1 * exact  # the textbook form is useless here
@@ -143,7 +153,7 @@ def test_residual_form_survives_cancellation():
         + nu0 * np.log(S0)
         - nu_hat * np.log(exact)
     )
-    assert post.log_ml == pytest.approx(log_ml, rel=1e-13)
+    assert post.log_ml == pytest.approx(log_ml, abs=nu_hat * _S_HAT_RTOL)  # ∂log p/∂log Ŝ = −ν̂
 
 
 def _exact_nig(Z, y, mu0, var0, nu0, S0) -> tuple[float, float, np.ndarray]:
@@ -187,8 +197,8 @@ def _exact_nig(Z, y, mu0, var0, nu0, S0) -> tuple[float, float, np.ndarray]:
 @pytest.mark.parametrize("seed", range(3))
 def test_s_hat_is_exact_when_the_level_dwarfs_the_noise(seed):
     """Random walks at level 1e6 with steps of 0.01 (noise/level 1e-8): ``ρ²`` read off the
-    prior-first QR keeps ``Ŝ`` to ~1e-12, where an explicit residual ``y − Zθ̂`` loses ~1e-9
-    (reviewer finding). Powers-of-4 prior variances make ``V₀^{−½}`` exact, so the rational
+    prior-first QR keeps ``Ŝ`` to ~1e-12 with Accelerate and ~1e-10 with OpenBLAS (backward error,
+    see ``_S_HAT_RTOL``), where an explicit residual ``y − Zθ̂`` loses ~1e-9 (reviewer finding). Powers-of-4 prior variances make ``V₀^{−½}`` exact, so the rational
     oracle sees the same problem. θ̂ is ill-conditioned along the intercept (posterior s.d. ~40);
     its error is judged in posterior standard deviations."""
     rng = np.random.default_rng(seed)
@@ -199,8 +209,8 @@ def test_s_hat_is_exact_when_the_level_dwarfs_the_noise(seed):
     nu0, S0 = 1.5, 2.0**-15
     S_hat, log_ml, theta = _exact_nig(Z, y, mu0, var0, nu0, S0)
     post = nig_posterior(Z, y, mu0, var0, nu0, S0)
-    assert post.S_hat == pytest.approx(S_hat, rel=1e-10)
-    assert post.log_ml == pytest.approx(log_ml, abs=1e-9)
+    assert post.S_hat == pytest.approx(S_hat, rel=_S_HAT_RTOL / 2)
+    assert post.log_ml == pytest.approx(log_ml, abs=post.nu_hat * _S_HAT_RTOL / 2)
     sd = np.sqrt(np.diag(post.cov()))
     assert np.max(np.abs(post.theta_hat - theta) / sd) < 1e-6
 
@@ -288,10 +298,12 @@ def test_a1_log_ml_equals_phase1(name):
     assert structural_log_ml(data, prior, {}, lags, det) == pytest.approx(fit.log_ml(), abs=1e-10)
 
 
-@pytest.mark.parametrize("level", [1e4, 1e6])
-def test_a1_holds_when_the_level_dwarfs_the_noise(level):
-    """Random walks at ``level`` with step s.d. 0.01 … 10 (reviewer finding): A1 still holds to
-    1e-10. With data rows first and an explicit residual the gap was 8e-10 (1e4) and 1e-7 (1e6)."""
+@pytest.mark.parametrize("level, tol", [(1e4, 1e-10), (1e6, 5e-8)])
+def test_a1_holds_when_the_level_dwarfs_the_noise(level, tol):
+    """Random walks at ``level`` with step s.d. 0.01 … 10 (reviewer finding): A1 holds to the two
+    QRs' backward error (``_S_HAT_RTOL``; at 1e6 the gap is 5e-9 with OpenBLAS, below 1e-10 with
+    Accelerate). With data rows first and an explicit residual the gap was 8e-10 (1e4) and 1e-7
+    (1e6)."""
     rng = np.random.default_rng(1)
     T, n = 120, 4
     y = level + np.cumsum(rng.standard_normal((T, n)) * np.array([0.01, 0.1, 1.0, 10.0]), axis=0)
@@ -300,7 +312,7 @@ def test_a1_holds_when_the_level_dwarfs_the_noise(level):
     prior = rb.Minnesota(var_const=1e7, hierarchy="fixed")
     fit = _phase1(prior, data, 2, "c")
     value = structural_log_ml(data, prior, fit.hyper, 2, "c")
-    assert value == pytest.approx(fit.log_ml(), abs=1e-10)
+    assert value == pytest.approx(fit.log_ml(), abs=tol)
 
 
 @pytest.mark.parametrize(

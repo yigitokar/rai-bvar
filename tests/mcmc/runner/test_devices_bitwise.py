@@ -1,5 +1,9 @@
-"""Chains on several CPU devices (DESIGN §5.2): ``shard_map`` equals single-device ``vmap`` bit for
-bit, which is the condition for ``Runtime.devices`` staying outside the spec."""
+"""Chains on several CPU devices (DESIGN §5.2, Stage 2 amendment): ``shard_map`` equals the
+single-device run bit for bit with ``chains="map"`` (one identical one-chain program per chain)
+and to rounding with ``chains="vmap"``, whose per-device batch size changes how XLA vectorises
+reductions (on x86 Linux even the toy kernels differ in the last bit; ``rtol 1e-12`` for toys,
+``1e-9`` for the production SV kernels on short runs). ``Runtime.devices`` therefore defaults to
+one device, and sharding is opt-in."""
 
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ import jax
 import pytest
 
 from rai_bvar.engines.mcmc.runner import resolve_devices
+from rai_bvar.settings import Runtime
 
 TESTS_MCMC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -35,6 +40,14 @@ SCRIPT = textwrap.dedent(
         for x, y in zip(jax.tree.leaves(a), jax.tree.leaves(b), strict=True):
             np.testing.assert_array_equal(np.asarray(x), np.asarray(y))
 
+    def close(a, b):  # another vmap batch size: equal to rounding (DESIGN §5.6)
+        for x, y in zip(jax.tree.leaves(a), jax.tree.leaves(b), strict=True):
+            x, y = np.asarray(x), np.asarray(y)
+            if np.issubdtype(x.dtype, np.floating):
+                np.testing.assert_allclose(x, y, rtol=1e-12, atol=1e-14)
+            else:
+                np.testing.assert_array_equal(x, y)
+
     toys.install_monitor_doubles()
     static = toys.toy_static("linear_structural", "sv", transitory="outlier", n=2, T_eff=20, chunk=5)
     data, prior = toys.toy_data(static, 20, 1), toys.toy_prior(static)
@@ -44,13 +57,17 @@ SCRIPT = textwrap.dedent(
         settings = MCMCSettings(chains=C, draws=7, burn=6, thin=2)
         one = run_chains(fns, static, data, prior, settings, Runtime(chunk=5, devices=1), seed=3, salt=4)
         four = run_chains(fns, static, data, prior, settings, Runtime(chunk=5, devices=4), seed=3, salt=4)
-        auto = run_chains(fns, static, data, prior, settings, Runtime(chunk=5), seed=3, salt=4)
+        auto = run_chains(fns, static, data, prior, settings, Runtime(chunk=5, devices="auto"), seed=3,
+                          salt=4)
+        default = run_chains(fns, static, data, prior, settings, Runtime(chunk=5), seed=3, salt=4)
         sharded = "shard_map(4)" + ("" if chains == "vmap" else "+map")
         assert one.chain_method == chains and four.chain_method == sharded == auto.chain_method
-        for other in (four, auto):
-            same(one.store.stream("monitor"), other.store.stream("monitor"))
-            same(one.store.stream("params"), other.store.stream("params"))
-            same(one.final_state, other.final_state)
+        assert default.devices == 1 and default.chain_method == chains  # opt-in sharding
+        for other in (four, auto, default):
+            check = same if (chains == "map" or other is default) else close
+            check(one.store.stream("monitor"), other.store.stream("monitor"))
+            check(one.store.stream("params"), other.store.stream("params"))
+            check(one.final_state, other.final_state)
     print("TOYS-OK")
 
     # in-loop forecasts (DESIGN §5.8) under shard_map: the hook's extra arguments are sharded too
@@ -68,8 +85,16 @@ SCRIPT = textwrap.dedent(
     four = run_chains(fns, fstatic, data, prior, settings, Runtime(chunk=5, devices=4), seed=3, salt=4,
                       plan=plan)
     assert four.chain_method == "shard_map(4)"
-    same(one.store.stream("forecast"), four.store.stream("forecast"))
-    same(one.store.stream("params"), four.store.stream("params"))
+    close(one.store.stream("forecast"), four.store.stream("forecast"))
+    close(one.store.stream("params"), four.store.stream("params"))
+    # several paths per stored draw (DESIGN §7.1: ⌈200/8⌉ = 25 > 7 stored draws → 4 paths each)
+    many = FitPlan(horizon=3, draws=200, seed=2)
+    one = run_chains(fns, fstatic, data, prior, settings, Runtime(chunk=5, devices=1), seed=3, salt=4,
+                     plan=many)
+    four = run_chains(fns, fstatic, data, prior, settings, Runtime(chunk=5, devices=4), seed=3, salt=4,
+                      plan=many)
+    assert one.forecast["paths_per_draw"] == four.forecast["paths_per_draw"] == 4
+    close(one.store.stream("forecast"), four.store.stream("forecast"))
     print("FORECAST-OK")
 
     from rai_bvar.engines.mcmc.compose import compose
@@ -85,8 +110,8 @@ SCRIPT = textwrap.dedent(
         raise SystemExit(0)
     key = jax.random.key(7)
     data = jax.tree.map(np.asarray, spec.simulate(jax.random.fold_in(key, 1), spec.prior_sample(key)))
-    # production kernels: the sharded run agrees to rounding (XLA CPU may lower a product
-    # differently inside the 4-device program, so it is not asserted bitwise; see the WP14 report)
+    # production kernels: the sharded run agrees to rounding, rtol 1e-9 (DESIGN §5.2, §5.6 Stage 2
+    # amendment: XLA vectorises the SV reductions differently for another per-device batch size)
     for chains in ("vmap", "map"):
         fns = make_runner(static, chains=chains)
         cache = fns.prepare(data, spec.prior)
@@ -109,7 +134,10 @@ SCRIPT = textwrap.dedent(
 )
 
 
-def test_shard_map_equals_vmap_bitwise_in_subprocess():
+def test_shard_map_matches_vmap_in_subprocess():
+    """Toys: bitwise with ``map``, ``rtol 1e-12`` with ``vmap`` (in-loop forecasts included);
+    production SV kernels: ``rtol 1e-9`` after a short burn; ``Runtime()`` runs on one device even
+    with 4 available."""
     env = {**os.environ, "PYTHONHASHSEED": "0"}
     env.pop("XLA_FLAGS", None)
     proc = subprocess.run(
@@ -122,6 +150,8 @@ def test_shard_map_equals_vmap_bitwise_in_subprocess():
 
 
 def test_resolve_devices_rules():
+    assert Runtime().devices == 1  # DESIGN §5.2 Stage 2 amendment: sharding is opt-in
+    assert resolve_devices(Runtime().devices, 4) == 1
     avail = jax.local_device_count()
     if avail == 1:
         assert resolve_devices("auto", 4) == 1

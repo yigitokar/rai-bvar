@@ -331,7 +331,7 @@ BATCH_CASES = [
 @pytest.mark.parametrize("stat", sorted(BATCHED))
 def test_batched_equals_scalar(stat):
     """Every ``*_many`` equals its scalar function column by column; for ``rhat``/``ess_bulk``
-    (the functions predating Phase 2) to rounding, bitwise in practice."""
+    (the functions predating Phase 2) to rounding (not bitwise: the FFT's last bits depend on the batch, DESIGN §8.2)."""
     x = stacked(BATCH_CASES, 500)
     x = np.concatenate([x, np.full((4, 500, 1), 2.5)], axis=-1)  # a constant column
     got = BATCHED[stat](x)

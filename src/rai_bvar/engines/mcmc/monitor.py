@@ -28,7 +28,8 @@ with the rank-normalised split R-hat ``max(bulk, folded)`` and the bulk ESS of
 ``rai_bvar.diagnostics``. Tail ESS, acceptance rates and every secondary quantity are reported
 only (E21). :func:`warning_catalogue` assembles every message of the DESIGN §8.3 table. R-hat and
 bulk ESS are memoised by the content of each quantity's draws, so the flag, the table and the
-warnings of one fit evaluate them once per quantity (:func:`rhat_ess`).
+warnings of one fit evaluate them once per quantity (:func:`rhat_ess`); a memoised value equals
+a recomputation to rounding, being that of the batch in which the quantity was first evaluated.
 """
 
 from __future__ import annotations
@@ -400,9 +401,10 @@ def _content_key(draws: np.ndarray) -> bytes:
 
 def _rhat_ess_once(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """``(R-hat, bulk ESS)`` of every column of ``x`` (``(chains, draws, Q)``), memoised by the
-    content of each column: R-hat and bulk ESS depend on a quantity's own draws only, and the
-    batched kernels treat every quantity independently, so a hit returns exactly (bitwise) what
-    a recomputation would. A fit runs :func:`converged`, :func:`diagnostics_table` and
+    content of each column. R-hat and bulk ESS depend on a quantity's own draws only, so a hit
+    equals a recomputation to rounding: memoised values are those of the batch in which the
+    quantity was first evaluated (the FFT's last bits depend on the batch it ran in, DESIGN
+    §8.2). A fit runs :func:`converged`, :func:`diagnostics_table` and
     :func:`warning_catalogue` (which runs :func:`converged` again) on the same draws; the cache
     makes that one evaluation per quantity (DESIGN §8.2). Least recently used pairs are dropped
     beyond ``_STATS_CACHE_SIZE``; an array changed in place has new content, hence a new key."""
@@ -581,6 +583,15 @@ def _per_equation(x: np.ndarray, n: int, how: Literal["mean", "max", "min", "sum
     return {"mean": np.mean, "max": np.max, "min": np.min, "sum": np.sum}[how](x, axis=0)
 
 
+def _mean_above(x: np.ndarray, n: int, threshold: float) -> tuple[np.ndarray, np.ndarray]:
+    """Per equation, the mean of ``x`` (``(…, n)``, every leading axis averaged) and whether it
+    is strictly above ``threshold``. The test reads the sign of the mean excess ``x − threshold``,
+    which is exactly zero when every value sits at the threshold: a plain float mean of copies of
+    ``0.01`` can round to either side of it (e.g. ``0.010000000000000503`` over 4 × 2000 draws)."""
+    x = np.asarray(x, dtype=np.float64)
+    return _per_equation(x, n, "mean"), _per_equation(x - threshold, n, "mean") > 0.0
+
+
 def _names(variables: tuple[str, ...], mask: np.ndarray) -> list[str]:
     return [v for v, m in zip(variables, mask, strict=True) if m]
 
@@ -634,8 +645,7 @@ def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
                 "the h diagnostics and consider a longer burn-in"
             )
     if vol.persistent == "sv" and "fold" in acc:
-        fold = _per_equation(acc["fold"], n, "mean")
-        bad = fold > _FOLD_MAX
+        fold, bad = _mean_above(acc["fold"], n, _FOLD_MAX)
         if bad.any():
             out.append(
                 f"non-centred sign fold in more than {_FOLD_MAX:.0%} of sweeps for "
@@ -656,10 +666,9 @@ def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
     at_max = inputs.outlier_at_max
     if vol.has_outliers and at_max is None and inputs.mon is not None:
         draws = np.asarray(inputs.mon.get("outlier_at_max", ()), dtype=np.float64)
-        at_max = draws.reshape(-1, n).mean(axis=0) if draws.size else None  # (chains, draws, n)
-    if vol.has_outliers and at_max is not None:
-        frac = _per_equation(at_max, n, "mean")
-        bad = frac > _OUTLIER_AT_K_MAX
+        at_max = draws.reshape(-1, n) if draws.size else None  # (chains, draws, n) → (C·D, n)
+    if vol.has_outliers and at_max is not None:  # "> 1% of rows": exactly 1% is quiet
+        frac, bad = _mean_above(at_max, n, _OUTLIER_AT_K_MAX)
         if bad.any():
             out.append(
                 f"outlier scale at its maximum K = {vol.outlier_K} for more than "

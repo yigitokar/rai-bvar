@@ -83,18 +83,32 @@ class FitMeta:
 class InLoopForecast:
     """Forecasts computed inside the sampling loop for a ``FitPlan`` (DESIGN §5.8).
 
-    ``out``: the forecast core's output (``ForecastOut``) with leaves ``(chain, M, …)``, from the
-    kept draws ``draw_index`` (``0, s, 2s, …``, ``s = stride = ⌈C·D/S⌉``) of every chain, with the
-    shocks of :func:`runner.forecast_shocks` keyed by ``(fseed, chain, kept-draw index)``;
-    ``fseed`` derives from ``seed`` as in DESIGN §7.1."""
+    Every chain forecasts from exactly the draws DESIGN §7.1 selects post hoc
+    (:func:`storage.forecast_selection`): ``per_chain = ⌈S/C⌉`` stored parameter draws, evenly
+    spaced, one path each (``C·per_chain ≥ S`` paths, fewer than ``C`` extra); when that exceeds
+    the stored draws, every stored draw with ``paths_per_draw = ⌈S/(C·D_stored)⌉`` paths. ``out``:
+    the forecast core's output (``ForecastOut``) with leaves ``(chain, M, …)``, ``M = per_chain ·
+    paths_per_draw``, each ``(chain, m)`` slice one path from one parameter draw: the kept draw
+    ``draw_index[m]`` (the ``draw`` coordinate of ``fit.posterior``), path ``replicate[m]``.
+    Shocks are those of :func:`runner.forecast_shocks` keyed by ``(fseed, chain, d)`` with ``d =
+    draw_index[m] + replicate[m]·D`` (``D`` kept draws per chain; ``d`` is the kept-draw index
+    for single paths), ``fseed`` from ``seed`` as in DESIGN §7.1."""
 
     horizon: int
     draws: int
     seed: int
     fseed: int
-    stride: int
+    per_chain: int
+    paths_per_draw: int
+    kept_draws: int  # D, kept draws per chain
     draw_index: np.ndarray
+    replicate: np.ndarray
     out: Any
+
+    @property
+    def key_index(self) -> np.ndarray:
+        """The forecast key's ``d`` of each ``(chain, m)`` slice (DESIGN §5.6)."""
+        return self.draw_index + self.replicate * int(self.kept_draws)
 
     def matches(self, horizon: int, draws: int, seed: Any) -> bool:
         """Whether ``fit.forecast(horizon, draws, seed)`` asks for exactly these forecasts."""
@@ -139,7 +153,16 @@ def _metadata(
         "prng_impl": PRNG_IMPL,
         "jax_threefry_partitionable": int(bool(jax.config.jax_threefry_partitionable)),
         "platform": jax.default_backend(),
-        "device_count": int(jax.local_device_count()),
+        # the devices the chains ran on and how (DESIGN §5.2, §5.6): draws are bitwise
+        # reproducible for one device count and chain method, and equal across device counts,
+        # chain methods and chain-count prefixes only to rounding (Stage 2 amendment)
+        "device_count": int(run.devices),
+        "chain_method": run.chain_method,
+        "local_device_count": int(jax.local_device_count()),
+        "reproducibility": (
+            "bitwise across Runtime.chunk, burn piece size and fused/unfused plan execution; "
+            "to rounding across chain-count prefixes and vmap vs shard_map (DESIGN §5.6)"
+        ),
         "seed": run.seed if isinstance(run.seed, int) else str(run.seed),
         "salt": run.salt if isinstance(run.salt, int) else str(run.salt),
         "T_pad": static.shapes.T_pad,
@@ -233,10 +256,18 @@ class MCMCFit:
         self.in_loop_forecast: InLoopForecast | None = None
         if run.forecast is not None and "forecast" in store.plan.streams:
             fc = run.forecast
+            R = int(fc["paths_per_draw"])
+            index = store.plan.streams["forecast"].draw_index()
+            lead = len(store.plan.lead)  # (chain, M, R, …) → (chain, M·R, …)
+            out = jax.tree.map(
+                lambda x: np.asarray(x).reshape(*x.shape[:lead], -1, *x.shape[lead + 2 :]),
+                store.stream("forecast"),
+            )
             self.in_loop_forecast = InLoopForecast(
                 horizon=int(fc["horizon"]), draws=int(fc["draws"]), seed=int(fc["seed"]),
-                fseed=int(fc["fseed"]), stride=int(fc["stride"]),
-                draw_index=store.plan.streams["forecast"].draw_index(), out=store.stream("forecast"),
+                fseed=int(fc["fseed"]), per_chain=int(fc["per_chain"]), paths_per_draw=R,
+                kept_draws=int(run.draws), draw_index=np.repeat(index, R),
+                replicate=np.tile(np.arange(R, dtype=np.int64), index.size), out=out,
             )  # fmt: skip
 
         spec = _monitor_fn("monitor_spec")(static, self.ordering)
@@ -314,9 +345,11 @@ class MCMCFit:
         )
 
     def prior_vol_mean(self) -> np.ndarray:
-        """``E[λ_i]`` (n,) behind the implied moments: the IG prior mean ``C/(c − 1)`` (Constant;
-        ``ψ_ι/ι`` in Mode I, DESIGN §6.1), or the data-centred level ``exp(b_μ)`` (``exp(m₀)``
-        with a random walk) ``= ψ_ι/ι`` (SV, §6.3); the cold-start centre of ``runner``."""
+        """``λ_i`` (n,) behind the implied moments: the IG prior mean ``C/(c − 1)`` (Constant;
+        ``ψ_ι/ι`` in Mode I, DESIGN §6.1), or under SV the plug-in at the data-centred level
+        ``exp(b_μ)`` (``exp(m₀)`` with a random walk) ``= ψ_ι/ι`` (§6.3; Stage 2 amendment: a
+        plug-in, not ``E[λ_i] = E[exp h]``, which exceeds it by Jensen's inequality); the
+        cold-start centre of ``runner``. :meth:`vol_mean_label` names the choice."""
         core = self.prior.eq.vol_core
         if isinstance(core, ConstantPrior):
             c, C = np.asarray(core.shape, np.float64), np.asarray(core.scale, np.float64)
@@ -324,6 +357,12 @@ class MCMCFit:
         if isinstance(core, SVPrior):
             return np.exp(np.asarray(core.m0 if self.static.vol.rw else core.b_mu, np.float64))
         raise TypeError(f"no prior mean of λ for {type(core).__name__}")
+
+    def vol_mean_label(self) -> str:
+        """How :meth:`prior_vol_mean` sets ``λ_i`` (the ``vol_mean`` field of ``summary()``)."""
+        if self.static.vol.persistent == "constant":
+            return "C/(c-1) prior mean (Constant)"
+        return "exp(m0) plug-in (SV, RW)" if self.static.vol.rw else "exp(b_mu) plug-in (SV)"
 
     def implied_prior_moments(self) -> ImpliedMoments | None:
         """Implied reduced-form prior moments of ``B = (A⁻¹Γ)'`` and ``Σ`` (R8; N05 §4.3, DESIGN
@@ -362,6 +401,7 @@ class MCMCFit:
 
         return {
             "method": im.method,
+            "vol_mean": self.vol_mean_label(),
             "mean": table(im.mean, regs, var),
             "var": table(im.var, regs, var),
             "sigma_mean": table(im.sigma_mean, var, var),
@@ -373,7 +413,9 @@ class MCMCFit:
         prior form and mode, the hyperparameters in use (with the EB note), the implied
         reduced-form prior moments (R8, :meth:`implied_prior_moments`, as ``{column: {row:
         value}}`` tables of ``E[B]``, ``Var(B)`` (regressor × variable), ``E[Σ]`` and the shock
-        shares; a note when not applicable), the ordering and the convergence flag."""
+        shares, with ``vol_mean`` naming the ``λ_i`` used: under SV ``Σ`` is the plug-in at
+        ``λ_i = exp(b_μ)`` (RW: ``exp(m₀)``), DESIGN Stage 2 amendment; a note when not
+        applicable), the ordering and the convergence flag."""
         diag = self.diagnostics
         frame = diag
         if isinstance(diag, pd.DataFrame) and "primary" in diag.columns:

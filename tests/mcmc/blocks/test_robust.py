@@ -317,6 +317,54 @@ def test_constant_core_with_exact_zero_residuals_is_finite():
     assert np.isfinite(float(v.loglik_eq(vs, jnp.asarray(e), tm, Empty())))
 
 
+def _nan_beta(o_idx, tmask, T_eff, a_p, b_p):
+    return jnp.full((), jnp.nan), jnp.full((), jnp.nan)
+
+
+def _inf_tau_scale_row3(log_r2, nu, log_c):
+    shape, log_scale = TR.tau_conditional(log_r2, nu, log_c)
+    return shape, log_scale.at[3].set(jnp.inf)
+
+
+@pytest.mark.parametrize(
+    ("transitory", "name", "leaf"),
+    [("outlier", "p_conditional", "log_p"), ("outlier_t", "p_conditional", "log1m_p"),
+     ("t", "tau_conditional", "log_tau"), ("outlier_t", "tau_conditional", "log_tau")],
+)  # fmt: skip
+def test_sample_eq_flags_non_finite_transitory_values(transitory, name, leaf):
+    """Failures are values (D-18): a non-finite transitory value makes ``sample_eq``'s ``ok``
+    false even though the core's own step succeeds. Injected through the override seam: ``p | o``
+    with NaN Beta parameters (``log p``, ``log(1 − p)`` NaN, while ``2 log o`` and so the core's
+    data stay finite), or the IG scale of ``τ`` set to ``+∞`` on one real row (``log τ = +∞``,
+    which the Constant core reads as an exact zero, ``log ẽ² = −∞``)."""
+    T_eff, T_pad = 30, 32
+    tm, Te = tmask_of(T_eff, T_pad), jnp.int32(T_eff)
+    e = jnp.asarray(np.random.default_rng(12).normal(size=T_pad)) * tm
+    pr = eq_prior()
+    good = block(transitory, T_pad)
+    bad = good.with_overrides(
+        {name: {"p_conditional": _nan_beta, "tau_conditional": _inf_tau_scale_row3}[name]}
+    )
+    vs = good.init_eq(key(160), e, tm, Te, pr)
+    k = key(161)
+
+    def step(v):
+        return jax.jit(lambda s: v.sample_eq(k, s, e, tm, Te, pr, Coupling.zeros(), Empty()))(vs)
+
+    assert bool(step(good)[1].ok)
+    new, info = step(bad)
+    assert not np.all(np.isfinite(np.asarray(getattr(new.trans, leaf))))
+    # the core alone succeeds on the cleaned residuals it received (same key, same state)
+    le2c = jnp.where(tm > 0, RB.log_e2(e, tm) - bad.log_scale2_eq(new), 0.0)
+    core, core_info = jax.jit(lambda c: bad.core.sample(k, c, le2c, tm, Te, pr, Coupling.zeros()))(
+        vs.core
+    )
+    assert bool(core_info.ok) and np.isfinite(float(core.log_lam))
+    np.testing.assert_allclose(float(new.core.log_lam), float(core.log_lam), rtol=1e-13)
+    assert not bool(info.ok)  # ... and the block reports the transitory failure
+    assert float(info.min_pivot) == float(core_info.min_pivot)
+
+
 # --------------------------------------------------------------------------- views vs references
 
 
@@ -664,14 +712,19 @@ def test_batched_sweeps_keep_the_state_invariants(transitory):
         assert np.all(np.asarray(info.ok))
     new = dataclasses.replace(st, eq=dataclasses.replace(st.eq, vol=vs))
     assert check_state_invariants(jax.tree.map(np.asarray, new), s, spec.fixed.T_eff) == []
-    # batched lanes equal per-equation calls bitwise
+    # batched lanes equal per-equation calls: bitwise on macOS, to rounding on x86 Linux, where
+    # XLA vectorises the lanes' reductions differently (DESIGN §5.6 Stage 2 amendment)
     ks = jr.split(key(99), n)
     b, _ = f(ks, vs, e, spec.prior.eq)
     for i in range(n):
         a, _ = jax.jit(one)(ks[i], jax.tree.map(lambda x, i=i: x[i], vs), e[i],
                             jax.tree.map(lambda x, i=i: x[i], spec.prior.eq))  # fmt: skip
         for x, y in zip(jax.tree.leaves(a), jax.tree.leaves(b), strict=True):
-            np.testing.assert_array_equal(np.asarray(x), np.asarray(y)[i])
+            x, y = np.asarray(x), np.asarray(y)[i]
+            if np.issubdtype(x.dtype, np.floating):
+                np.testing.assert_allclose(x, y, rtol=1e-12, atol=1e-14)
+            else:
+                np.testing.assert_array_equal(x, y)
 
 
 # --------------------------------------------------------------------------- block Geweke (§9.2)

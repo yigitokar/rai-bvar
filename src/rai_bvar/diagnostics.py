@@ -102,8 +102,10 @@ def ess_bulk(chains: np.ndarray) -> float:
 #
 # The batched kernels keep every reduced axis last and contiguous and finish each quantity with the
 # same scalar Geyer recursion as ``ess_bulk``, so ``rhat_many``/``ess_bulk_many`` agree with
-# ``rhat``/``ess_bulk`` to rounding (bitwise in practice). Cost per quantity: two argsorts (bulk and
-# folded rank normalisation), one sort and five FFT-based ESS for the full summary (DESIGN §8.2).
+# ``rhat``/``ess_bulk`` to rounding, not bitwise: the last bits of the FFT autocovariances depend on
+# the batch a quantity runs in (its size and neighbours), so a quantity's ESS can differ in the
+# last digits between batches (DESIGN §8.2). Cost per quantity: two argsorts (bulk and folded rank
+# normalisation), one sort and five FFT-based ESS for the full summary (DESIGN §8.2).
 
 _TAIL_PROBS = (0.05, 0.95)
 _MCSE_PROBS = np.array([0.1586553, 0.8413447])  # Φ(−1), Φ(1): a ±1 s.d. band of order statistics

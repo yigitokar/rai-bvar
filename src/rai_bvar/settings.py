@@ -5,8 +5,9 @@ Pure Python, so ``import rai_bvar`` stays free of JAX (D-31).
 * ``MCMCSettings`` is **part of the model spec** (``BVAR.mcmc``): every field can change the
   draws, so it enters the spec hash and the backtest cache key. ``gram`` and ``const_path`` are
   resolved by deterministic shape rules (DESIGN §3.7.2, §10.5), never by machine properties.
-* ``Runtime`` is **not** in the spec: it holds only knobs whose bitwise invariance is tested
-  (chunk size, devices, storage location, replay copies; DESIGN §5.1, §5.2, §5.6).
+* ``Runtime`` is **not** in the spec: it holds execution knobs whose invariance is tested
+  (bitwise: chunk size, storage location, replay copies; to rounding: the device layout, so
+  ``devices`` defaults to one device; DESIGN §5.1, §5.2, §5.6).
 * ``FitPlan`` requests forecasts computed inside the sampling loop (DESIGN §5.8).
 """
 
@@ -128,16 +129,20 @@ class MCMCSettings:
 
 @dataclass(frozen=True)
 class Runtime:
-    """Execution knobs that never change the draws (bitwise-invariance tested; DESIGN §5.6).
+    """Execution knobs outside the spec (DESIGN §5.2, §5.6; Stage 2 amendment).
 
-    ``devices="auto"`` shards chains over the local devices when there are at least two and they
-    divide ``chains`` (see ``rb.set_cpu_devices``); ``chunk`` kept draws run per compiled call;
-    ``memory_budget_gb`` only decides whether the storage plan raises; ``storage_dir`` selects a
-    memory-mapped host store; ``replay`` keeps a host copy of each chunk's start state so a
-    numerical failure can be replayed deterministically (D-18).
+    ``chunk`` (kept draws per compiled call), ``memory_budget_gb`` (only decides whether the
+    storage plan raises), ``storage_dir`` (a memory-mapped host store) and ``replay`` (a host copy
+    of each chunk's start state, so a numerical failure can be replayed deterministically; D-18)
+    never change the draws: bitwise-invariance tested. ``devices`` (default ``1``) is opt-in
+    sharding: an integer ``D ≥ 2`` dividing ``chains``, or ``"auto"`` (every local device when
+    there are at least two and they divide ``chains``; see ``rb.set_cpu_devices``), runs the
+    chains under ``shard_map``, whose draws equal the one-device draws only to rounding with the
+    production SV and CCCM kernels (``rtol 1e-9`` on short runs, tested), not bitwise. The device
+    count and chain method are recorded in ``fit.metadata``.
     """
 
-    devices: int | Literal["auto"] = "auto"
+    devices: int | Literal["auto"] = 1
     chunk: int = 250
     memory_budget_gb: float = 2.0
     storage_dir: str | None = None
