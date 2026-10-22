@@ -603,6 +603,12 @@ PathDraw:     h: f64[n, T_pad+1]; log_scale2: f64[n, T_pad]           2 log o + 
 Mode I and Mode II/iw_equivalent need different contemporaneous prior scales; §9.3's eigen-vs-Cholesky tolerance
 is conditioning-aware (see §9.3 item 1).
 
+**Stage 2 amendments (orchestrator, 2026-10-22):** (1) `Runtime.devices` defaults to 1; chain-count prefixes and
+`vmap` vs `shard_map` agree to rounding, not bitwise, with the production kernels (§5.2, §5.6). (2) The forecast
+key's `d` is the kept-draw index (§5.6, §7.1). (3) In-loop forecasts select exactly the §7.1 draws (§5.8).
+(4) The §8.2 cost figure is restated from measurements. (5) `fit.summary()`'s implied reduced-form `Σ` under SV
+is the plug-in at `λ_i = exp(b_μ)` (RW: `exp(m_0)`) and says so in a `vol_mean` field.
+
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 
 Mapping from the SPEC §4.2 sketch (settled here, open question Q12): `MeanBlock.sample(target, weights, glob)` →
@@ -1198,10 +1204,13 @@ jitted functions.
 ### 5.2 Chains and devices
 
 - Default: `vmap` over chains on one device (`in_axes=(0, 0, None, None, None, None, None, None)`).
-- `Runtime.devices="auto"`: if `jax.local_device_count() ≥ 2` and `C % D == 0`, the same body runs under
-  `jax.shard_map` over a 1-D `("chain",)` mesh with `NamedSharding`-placed keys and state (N07 §6 snippet).
-  Sharded output is bitwise equal to single-device `vmap` on CPU (N07 §6 cross-check; re-tested by
-  `test_devices_bitwise`, which is the condition for `devices` staying outside the spec).
+- `Runtime.devices` defaults to `1` (Stage 2 amendment; was `"auto"`). With `devices="auto"` or an integer
+  `D ≥ 2` dividing `C`, the same body runs under `jax.shard_map` over a 1-D `("chain",)` mesh with
+  `NamedSharding`-placed keys and state (N07 §6 snippet). With the production SV and CCCM kernels, XLA
+  vectorises reductions differently for different per-device batch sizes, so sharded output equals
+  single-device `vmap` only to rounding (`rtol 1e-9` on short runs, tested), not bitwise. Sharding is therefore
+  opt-in, and the device count and chain method are recorded in attrs (§5.6). The backtest never passes a
+  `Runtime`, so cached backtest scores never depend on the machine's device count.
 - `rb.set_cpu_devices(k)` must run before JAX initialises; otherwise it raises with an actionable message and
   the runner falls back to one device with a warning.
 - Optional `fit_axis=True` adds a leading fit axis `F` to data, priors, caches, keys and state (one more `vmap`).
@@ -1270,7 +1279,7 @@ step_key  = fold_in(it_key, Block.X)
 eq_key    = fold_in(step_key, i)                                i: uint32 position in the ordering
 sub_key   = fold_in(eq_key, Sub.Y)
 init      : fold_in(fold_in(fold_in(root, Stream.INIT), salt), c) → Block → i → Sub
-forecast  : fold_in(fold_in(key(fseed), Stream.FORECAST), c) → d (stored-draw index) → Ahead.{VOL, SHOCK, MEAN, GLOBAL} → i
+forecast  : fold_in(fold_in(key(fseed), Stream.FORECAST), c) → d (kept-draw index) → Ahead.{VOL, SHOCK, MEAN, GLOBAL} → i
 validation: fold_in(key(seed), Stream.VALIDATION) → tier → composition id → chain or replication
 ```
 
@@ -1288,9 +1297,14 @@ validation: fold_in(key(seed), Stream.VALIDATION) → tier → composition id �
 - **Seeds.** `fit(seed=…)` overrides `MCMCSettings.seed`. The backtest passes a per-origin fit seed to MCMC models
   (§11.6), in addition to the data salt (which keeps chain noise independent across windows even when a user fits
   several windows with one seed, as `ordering_sensitivity` does). Analytic models are unaffected.
-- **Bitwise guarantees** for the same `(spec, data, seed, Runtime-independent settings)`: across `runtime.chunk`,
-  burn piece size, chain-count prefixes, `vmap` vs `shard_map` (CPU), fused vs unfused plan execution. **Not
-  across** JAX versions, platforms, PRNG implementations, `jax_threefry_partitionable`, or any spec-level choice:
+- **Bitwise guarantees** for the same `(spec, data, seed, Runtime-independent settings)` on one device count:
+  across `runtime.chunk`, burn piece size, fused vs unfused plan execution. **To rounding only** (Stage 2
+  amendment): across chain-count prefixes and `vmap` vs `shard_map`. The keys are prefix-stable, so chain `c`
+  consumes the same random numbers whatever `C` is, but XLA's batch-size-dependent vectorisation of the SV and
+  CCCM reductions changes last bits; over long runs a last-bit difference can flip an accept/reject decision,
+  after which the chains are only equal in distribution. `chains` is a spec field (`MCMCSettings`), so the cache
+  key already covers it; `devices` defaults to 1 (§5.2). The prefix property is still tested bitwise with
+  `chains="map"` and with toy kernels. **Not across** JAX versions, platforms, PRNG implementations, `jax_threefry_partitionable`, or any spec-level choice:
   `gram`, `const_path`, `t_bucket` (and hence `T_pad`) are spec fields or deterministic functions of spec and data
   shape, so they can never differ silently between two runs with the same cache key.
 - **Recorded in every fit and forecast**: `jax`/`jaxlib` versions, PRNG implementation,
@@ -1310,8 +1324,11 @@ precision range (N05 §7.3, N02 §10.3). No jitter is ever added and no chain is
 ### 5.8 In-loop forecast hook (for Phases 4–5)
 
 `fit(data, plan=FitPlan(horizon, draws, seed))` sets `StoreStatic.in_loop_forecast = horizon`: the `sample`
-executable calls the forecast core (§7.2) on every `⌈C·D/S⌉`-th kept state inside the scan, with the same keys as
-post-hoc forecasting (`Stream.FORECAST → c → d`), and emits the `ForecastResult` arrays directly.
+executable calls the forecast core (§7.2) on exactly the kept states that §7.1 would select post hoc (Stage 2
+amendment; was "every `⌈C·D/S⌉`-th", which can return fewer than `S` paths): the host precomputes the selection
+as a per-chain index mask, passed as a traced argument and used as the shared `cond` predicate. Keys are the same
+as post-hoc forecasting (`Stream.FORECAST → c → d`, `d` the kept-draw index), and the `ForecastResult` arrays are
+emitted directly.
 `fit.forecast(h, draws, seed)` returns the precomputed result when `(h, draws, seed)` match the plan. Linear
 models do not need it (their draws are small); it exists so BART forests and TVP paths never have to be stored. It
 is tested in Phase 2 on Linear × SV: in-loop and post-hoc forecasts agree to 1e-12. The backtest passes a plan only
@@ -1482,7 +1499,9 @@ means `M`; EB values; offsets `c_i = c_rel ψ[i]`; data-centred SV levels `log(�
 ### 7.1 Draw selection and seeds
 
 `fit.forecast(horizon, draws=1000, seed=None)`: `⌈draws/C⌉` stored parameter draws per chain, evenly spaced (the
-`(chain, draw)` structure is kept; the total can exceed `draws` by less than `C`). If that exceeds the stored
+`(chain, draw)` structure is kept; the total can exceed `draws` by less than `C`). Each selected draw is keyed by
+its kept-draw index `d` (the `draw` coordinate of `fit.posterior`), not by its position in the store, so in-loop
+(§5.8) and post-hoc forecasts agree whatever `store_thin` is. If that exceeds the stored
 draws, each parameter draw gets `⌈draws/(C·D_stored)⌉` paths with independent shocks (each `(chain, draw)` slice
 is still one path from one parameter draw). `seed` accepts `SeedLike`: `rng = np.random.default_rng(seed)`,
 `label = seed_label(seed, rng)`, `fseed = int(rng.integers(0, 2**32))` (the backtest's generator advances, as with
@@ -1590,7 +1609,10 @@ converged = (no chain raised an error)
 Tail ESS is reported, not gated. Acceptance rates never gate (E21). Single-chain runs are never converged (split
 R-hat cannot see between-chain disagreement), consistent with the Phase 1 MH rule. The flag goes into forecast
 attrs `converged`, so the backtest score `converged` and `compare()`'s "≥ 95% of origins" rule (SPEC §9.5) work
-unchanged. Cost: ≈430 quantities × 40k draws through FFT, under 1 s on the host.
+unchanged. Cost (Stage 2 amendment, measured): about 1 s CPU for flag, table and warnings at n = 20 SV-O-t
+(392 quantities) and the default 4 × 2000 draws; about 7 s at 4 × 10,000 draws, dominated by the two argsorts
+per quantity of the rank normalisation. Each quantity is evaluated once per fit (content-addressed memo); a
+memoised value equals a recomputation to rounding (the FFT's last bits depend on the batch it ran in).
 
 ### 8.3 Warnings (`fit.warnings`, copied into forecast attrs, aggregated by the backtest)
 
