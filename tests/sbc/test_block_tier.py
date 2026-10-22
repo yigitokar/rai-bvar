@@ -13,8 +13,10 @@ Exact because the live block runs before every frozen one and draws from its exa
   ``cholesky_const``);
 * the reduced-form contemporaneous step ``a_i | Π, λ_eff, y`` in every reduced composition
   (rows 7–11, 13), with ``Π`` held by the identity ``cccm_core`` (the ``contemp_only`` mechanism);
-* each column step ``π_j | π_{−j}, A, λ_eff, y`` of the program's ``cccm_core`` in every reduced
-  composition (column ``j`` of one call with fresh noise, the other columns restored).
+* each column step ``π_j | π_{−j}, A, λ_eff, y`` in every reduced composition: column 0 from one
+  call of the program's ``cccm_core`` with fresh noise, columns ``j ≥ 1`` from the exposed exact
+  conditional ``cccm_conditional_j`` (the scan would condition them on its new earlier columns;
+  ``sbc_models.cccm_column_draws``); the other columns restored.
 
 **One-block invariance** (MH, ASIS and Gibbs-scan blocks, whose single application is not an iid
 draw; N06 §5.3): ``N = 1000`` joint draws, ``L = 20`` applications of the live blocks with ``ỹ``
@@ -115,9 +117,10 @@ def test_block_sbc_reduced_contemporaneous_step(name):
 
 @pytest.mark.parametrize("name", REDUCED)
 def test_block_sbc_cccm_columns(name):
-    """Each column step ``π_j | π_{−j}, A, λ_eff, y`` of the program's ``cccm_core`` (exact; the
-    scan's building block, N04 §5.3) inside composition ``name``: ranks of ``π_j`` and of the
-    exact log-likelihood (the statistic that sees the CCM-2019 error, N06 §7.3)."""
+    """Each column step ``π_j | π_{−j}, A, λ_eff, y`` (exact; the scan's building block, N04 §5.3)
+    inside composition ``name``: column 0 through the program's ``cccm_core``, columns ``j ≥ 1``
+    through ``cccm_conditional_j`` (module docstring); ranks of ``π_j`` and of the exact
+    log-likelihood (the statistic that sees the CCM-2019 error, N06 §7.3)."""
     spec = joint_spec(name)
     for j in range(spec.static.shapes.n):
 

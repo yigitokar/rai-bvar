@@ -15,9 +15,8 @@ fresh run with ``C`` and ``M₁`` four times larger instead of a red build (fami
 =========================  =================================================  ==================
 Test                       Sizes                                              Tier
 =========================  =================================================  ==================
-``test_g_small``           rows 1–5, 7–9, 17; ``size="small"``;               PR
+``test_g_small``           rows 1–5, 7–10, 17; ``size="small"``;              PR
                            ``C = 1000, M_c = 100, M₁ = 2·10⁵, α = 1e-3``
-``test_g_small_nightly``   row 10 (reduced × ``SV(t)``) at G-small            nightly (``slow``)
 ``test_g_small_block``     the seven block configurations of §9.2 through     nightly (``slow``)
                            ``JointSpec.step`` (their PR-tier G-small runs
                            live with the kernel owners, see below)
@@ -27,12 +26,8 @@ Test                       Sizes                                              Ti
                            ``exact=False``, G-full sizes                       recorded, not gating
 =========================  =================================================  ==================
 
-Deviations from DESIGN §9.10, forced by the per-WP PR budget (≈ 2 min measured locally):
+Deviations from DESIGN §9.10:
 
-* row 10 (reduced × ``SV(t)``, the most expensive G-small: 25–40 s) runs its G-small nightly,
-  beside its G-full. Its two ingredients stay on every PR: the reduced form with every other vol
-  block (rows 7–9) and the ``t`` scale in the structural form (row 4) and in the WP13 block
-  configurations. Moving it back is a one-line change of :data:`PR_ROWS`;
 * the block configurations already run at G-small on every PR in the kernel work packages'
   suites — ``equation_only`` (``tests/mcmc/blocks/test_linear_structural.py``, also through the
   production sweep), ``contemp_only`` (``test_recursive.py``), ``cccm_only`` (``test_cccm.py``,
@@ -91,11 +86,9 @@ SEED_FULL = 20261023
 SEED_INEXACT = 20261024
 SEED_BLOCK = 20261025
 
-#: DESIGN §9.5 lists rows 1–5, 7–10 and 17 for G-small on every PR; row 10 is nightly here
-DESIGN_PR_ROWS = frozenset({1, 2, 3, 4, 5, 7, 8, 9, 10, 17})
-PR_ROWS = DESIGN_PR_ROWS - {10}
+#: DESIGN §9.5 and the WP19 acceptance: rows 1–5, 7–10 and 17 at G-small on every PR
+PR_ROWS = frozenset({1, 2, 3, 4, 5, 7, 8, 9, 10, 17})
 PR_COMPOSITIONS = tuple(n for n in COMPOSITIONS if composition_id(n) in PR_ROWS)
-NIGHTLY_SMALL = tuple(n for n in COMPOSITIONS if composition_id(n) in DESIGN_PR_ROWS - PR_ROWS)
 #: rows 18+: rows 1–16 with exact=False; only the SV rows differ from their exact versions
 INEXACT_ROWS = frozenset({2, 3, 4, 8, 9, 10, 12, 13, 14, 15, 16})
 INEXACT_COMPOSITIONS = tuple(n for n in COMPOSITIONS if composition_id(n) in INEXACT_ROWS)
@@ -149,10 +142,13 @@ def run_geweke(name: str, size: str, sizes: dict[str, Any], seed: int, **overrid
 
 
 def test_pr_rows_are_the_design_rows():
-    """The PR and nightly G-small sets together are rows 1–5, 7–10 and 17 of DESIGN §9.5 (names
-    resolved by row)."""
-    assert {composition_id(n) for n in PR_COMPOSITIONS + NIGHTLY_SMALL} == DESIGN_PR_ROWS
-    assert NIGHTLY_SMALL == ("reduced_sv_t",)
+    """The PR G-small set is rows 1–5, 7–10 and 17 of DESIGN §9.5, resolved by row to the
+    compositions the table names."""
+    assert {composition_id(n) for n in PR_COMPOSITIONS} == PR_ROWS
+    by_row = {composition_id(n): n for n in COMPOSITIONS}
+    assert [by_row[r] for r in (7, 8, 9, 10, 17)] == [
+        "reduced_constant", "reduced_sv", "reduced_sv_outliers", "reduced_sv_t", "zero_sv"
+    ]  # fmt: skip
     assert {composition_id(n) for n in COMPOSITIONS} == set(range(1, 18))
     assert len(BLOCK_CONFIGS) == 7
     for name in COMPOSITIONS:  # rows 18+ are exactly the SV rows among 1–16
@@ -172,16 +168,6 @@ def test_g_small(name):
 
 
 # --------------------------------------------------------------------------- nightly
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("name", NIGHTLY_SMALL)
-def test_g_small_nightly(name):
-    """G-small of the DESIGN PR rows moved to the nightly tier (module docstring)."""
-    spec, seq, results, out = run_geweke(name, "small", G_SMALL, SEED_SMALL)
-    record("geweke", {"tier": "G-small", **out})
-    assert spec.static.vol.exact and spec.fixed.T_eff % 32 != 0
-    assert seq.passed, explain(seq, results)
 
 
 @pytest.mark.slow
