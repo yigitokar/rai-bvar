@@ -150,6 +150,25 @@ Measured values of the DGP guard: posterior ranks of the truth 0.58, 0.55 and 0.
 therefore fail the test. An unexpected pass fails it too, since that would mean the oracle or our
 sampler changed. Each of these four outcomes was checked with a mutated scratch copy.
 
+**Version caveat.** Every statement in this section is about stochvol **3.2.1**, the version that
+produced the committed fixtures. DESIGN §9.9 names 3.2.9; whether 3.2.9 (or later) still deviates
+was not checked, because R is not available where this phase was finished. The finding is a
+property of one fixture, not of stochvol in general.
+
+**Unblock path for the SV-t row.** The strict `xfail` is meant to be removed, not kept:
+
+1. Regenerate the one fixture under stochvol 3.2.9 or later, same seeds and dataset (v):
+   `Rscript tools/make_r_fixtures.R --sections=stochvol --sv-only=stochvol_v_t5` (the script
+   records `stochvol_version` in the fixture attributes).
+2. Run the four-observation exact check of the table above against that version (a few lines of R
+   with `svsample(…, priornu = …)`/`specify_priors(nu = sv_constant(5))`). If stochvol now matches
+   the importance-sampling posterior, `test_stochvol_parity[stochvol_v_t5]` passes, the strict
+   `xfail` turns that pass into a failure, and the `xfail` mark (and `OracleDeviation`) is deleted
+   in the same change; the row then gates like the other fixtures.
+3. If stochvol still deviates, keep the `xfail`, update the version and the table here, and report
+   the four-observation example upstream; the exact importance-sampling test stays the SV-t exit
+   criterion.
+
 ## 4. bayesianVARs: blocked
 
 **Status: bayesianVARs parity is blocked.** bayesianVARs 0.1.8 (first CRAN release 2023) has no
