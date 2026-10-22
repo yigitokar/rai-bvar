@@ -386,12 +386,18 @@ def test_post_hoc_forecast_recomputed_from_stored_draws_and_keys(fit):
     program = fit.program
     core = jax.jit(lambda p, s: F.forecast_core(p, fit.engine_data.hist, fit.engine_data.t_last, s,
                                                 program))  # fmt: skip
+    ds = fr.dataset
     for c, j in [(0, 0), (1, 3), (0, 4)]:
         d = int(fit.draw_index[pos[j]])
         params = jax.tree.map(lambda x, c=c, w=pos[j]: np.asarray(x)[c, w], fit.param_draws)
         ref = core(params, forecast_shocks(ck[c], jnp.uint32(d), 4, 3))
         np.testing.assert_allclose(fr.paths.values[c, j], ref.paths, rtol=1e-12, atol=1e-12)
         np.testing.assert_allclose(fr.cond_chol.values[c, j], ref.cond_chol, rtol=1e-12)
+        # accelerator variables (DESIGN §7.3): exp(½ log λ^eff) and exp(½ log λ^pers)
+        np.testing.assert_allclose(ds["cond_scale"].values[c, j], ref.cond_scale, rtol=1e-12)
+        np.testing.assert_allclose(
+            ds["cond_scale_persistent"].values[c, j], np.exp(0.5 * ref.log_lam_pers), rtol=1e-12
+        )
     big = fit.forecast(2, draws=C * D * 2 + 1, seed=3)
     assert big.dataset.sizes["draw"] == 3 * D and big.dataset.attrs["draws_per_parameter"] == 3
     fseed = int(big.dataset.attrs["fseed"])
@@ -406,6 +412,49 @@ def test_post_hoc_forecast_recomputed_from_stored_draws_and_keys(fit):
     # replicates of one draw share the conditional mean at h = 1 but not the shocks
     np.testing.assert_allclose(big.cond_mean.values[0, 0, 0], big.cond_mean.values[0, 1, 0])
     assert not np.allclose(big.paths.values[0, 0, 0], big.paths.values[0, 1, 0])
+
+
+def _chunk_size(total: int) -> int:
+    """The chunk size ``min(S_CHUNK, 2^⌈log₂ S⌉)`` of ``forecast`` for ``S`` items (§7.2)."""
+    return min(F.S_CHUNK, 1 << (total - 1).bit_length())
+
+
+def test_post_hoc_forecast_across_chunk_boundaries(fit, monkeypatch):
+    """More paths than ``S_CHUNK`` (DESIGN §7.2: chunks of ``S_c``, the last one padded), with
+    ``S_CHUNK`` patched to 16 (the production 1024 would need ≥ 1025 paths): the items on both
+    sides of every chunk boundary, the first and the last are the core on their stored draw with
+    the keys ``d + r·D_kept``, and the whole forecast equals the one-chunk forecast (1e-12: the
+    vmap batch sizes differ, so not bitwise)."""
+    Hc, chunk = 2, 16
+    C, D = np.shape(fit.param_draws.struct.a)[:2]
+    draws = 2 * C * D + 1
+    pos, R = F.select_draws(D, C, draws)
+    total = C * pos.size * R
+    assert R == 3 and _chunk_size(total) >= total  # one chunk unpatched
+    one = fit.forecast(Hc, draws=draws, seed=3)
+    monkeypatch.setattr(F, "S_CHUNK", chunk)
+    assert _chunk_size(total) == chunk and total % chunk != 0  # several chunks, the last padded
+    fr = fit.forecast(Hc, draws=draws, seed=3)
+    assert int(fr.dataset.attrs["fseed"]) == int(one.dataset.attrs["fseed"])
+    for name in ("paths", "cond_mean", "cond_chol", "cond_scale", "cond_scale_persistent"):
+        np.testing.assert_allclose(
+            fr.dataset[name].values, one.dataset[name].values, rtol=1e-12, atol=1e-12
+        )
+    ck = forecast_chain_keys(int(fr.dataset.attrs["fseed"]), C)
+    D_kept = fit.settings.draws
+    core = jax.jit(lambda p, s: F.forecast_core(p, fit.engine_data.hist, fit.engine_data.t_last, s,
+                                                fit.program))  # fmt: skip
+    items = {0, total - 1}
+    for lo in range(chunk, total, chunk):
+        items |= {lo - 1, lo}
+    for item in sorted(items):  # items in (chain, draw, replicate) order
+        c, slot = divmod(item, pos.size * R)
+        j, r = divmod(slot, R)
+        d = int(fit.draw_index[pos[j]]) + r * D_kept
+        params = jax.tree.map(lambda x, c=c, w=pos[j]: np.asarray(x)[c, w], fit.param_draws)
+        ref = core(params, forecast_shocks(ck[c], jnp.uint32(d), Hc, N))
+        np.testing.assert_allclose(fr.paths.values[c, slot], ref.paths, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(fr.cond_chol.values[c, slot], ref.cond_chol, rtol=1e-12)
 
 
 def test_forecast_argument_errors(fit):

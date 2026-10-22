@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
+    branches: [main]  # branches with a PR run once, through pull_request
   pull_request:
   schedule:
-    - cron: "17 3 * * *"  # nightly: slow statistical tests and network downloads
+    - cron: "17 3 * * 0"  # weekly (Sunday): slow statistical tests and network downloads
   workflow_dispatch:
 
 concurrency:
@@ -30,14 +31,23 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python-version: ["3.12", "3.13", "3.14"]
-        include:
-          - os: macos-latest
-            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
+      - run: uv sync --group dev
+      - name: Fast suite (unit, contract, integration)
+        run: uv run pytest -m "not slow and not network"
+
+  macos:  # weekly: macOS minutes bill at 10x; local development runs on macOS anyway
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
       - run: uv sync --group dev
       - name: Fast suite (unit, contract, integration)
         run: uv run pytest -m "not slow and not network"

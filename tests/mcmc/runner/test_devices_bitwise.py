@@ -51,6 +51,16 @@ SCRIPT = textwrap.dedent(
     toys.install_monitor_doubles()
     static = toys.toy_static("linear_structural", "sv", transitory="outlier", n=2, T_eff=20, chunk=5)
     data, prior = toys.toy_data(static, 20, 1), toys.toy_prior(static)
+
+    def fit_metadata(fns, settings, run):  # the fit fit_mcmc builds from this run (DESIGN §5.6)
+        import warnings
+        from rai_bvar.engines.mcmc.results import FitMeta, MCMCFit
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # convergence warnings of the short toy runs
+            return MCMCFit(static=static, run=run, program=fns.program, data=data, prior=prior,
+                           settings=settings, meta=FitMeta(variables=("a", "b"))).metadata
+
     # vmap over chains: 2 chains per device; map over chains: 1 chain per device
     for chains, C in (("vmap", 8), ("map", 4)):
         fns = toys.cached_runner(static, toys.toy_overrides(static), chains=chains)
@@ -68,6 +78,11 @@ SCRIPT = textwrap.dedent(
             check(one.store.stream("monitor"), other.store.stream("monitor"))
             check(one.store.stream("params"), other.store.stream("params"))
             check(one.final_state, other.final_state)
+        # fit.metadata records the devices the chains ran on, not the 4 local devices (§5.2)
+        for run, D in ((one, 1), (four, 4), (auto, 4), (default, 1)):
+            md = fit_metadata(fns, settings, run)
+            assert md["device_count"] == md["devices"] == D, (chains, D, md["device_count"])
+            assert md["local_device_count"] == 4 and md["chain_method"] == run.chain_method
     print("TOYS-OK")
 
     # in-loop forecasts (DESIGN §5.8) under shard_map: the hook's extra arguments are sharded too

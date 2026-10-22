@@ -27,7 +27,7 @@ from rai_bvar.engines.mcmc.runner import (
     make_runner,
     run_chains,
 )
-from rai_bvar.engines.mcmc.storage import forecast_selection
+from rai_bvar.engines.mcmc.storage import StorageBudgetError, forecast_selection
 from rai_bvar.settings import FitPlan, MCMCSettings, Runtime
 
 from . import toys
@@ -49,10 +49,11 @@ def forecast_double(monkeypatch):
     monkeypatch.setattr(forecast_mod, "forecast_core", toys.toy_forecast_core, raising=False)
 
 
-def _fit(static=STATIC, plan=PLAN, settings=SETTINGS, data=None):
+def _fit(static=STATIC, plan=PLAN, settings=SETTINGS, data=None, runtime=None):
     data = toys.toy_data(static, 20, 5) if data is None else data
+    runtime = Runtime(chunk=static.chunk) if runtime is None else runtime
     return fit_mcmc(
-        static, data, toys.toy_prior(static), settings, Runtime(chunk=static.chunk), seed=0, salt=1,
+        static, data, toys.toy_prior(static), settings, runtime, seed=0, salt=1,
         meta=FitMeta(variables=("a", "b")), plan=plan, _overrides=toys.toy_overrides(static),
     )  # fmt: skip
 
@@ -177,6 +178,28 @@ def test_forecast_key_is_the_kept_draw_index_with_store_thin():
     assert not np.allclose(ilf.out["paths"][0, 1], by_position["paths"])
 
 
+def test_path_keys_stride_by_the_kept_draws_with_store_thin():
+    """``D = 7`` kept draws, ``store_thin = ⌈7/3⌉ = 3``: ``D_s = 3`` stored draws (kept draws
+    0, 3, 6). ``C = 2``, ``S = 15``: ``⌈15/2⌉ = 8 > 3``, so every stored draw gets ``⌈15/6⌉ = 3``
+    paths, path ``q`` of kept draw ``d`` keyed by ``d + q·D`` with ``D = 7`` (DESIGN §5.6), not
+    the stored-draw count ``D_s = 3``: ``d + q·D_s`` reuses keys (``0 + 1·3`` is kept draw 3's
+    path 0), ``d + q·D`` never does since ``d < D``."""
+    settings = MCMCSettings(chains=2, draws=7, burn=2, store_max=3)
+    fit = _fit(plan=FitPlan(horizon=H, draws=15, seed=11), settings=settings)
+    np.testing.assert_array_equal(fit.posterior["posterior"]["draw"].values, [0, 3, 6])
+    ilf = fit.in_loop_forecast
+    assert (ilf.per_chain, ilf.paths_per_draw, ilf.kept_draws) == (3, 3, 7)
+    assert fit.metadata["in_loop_forecast_paths_per_draw"] == 3
+    np.testing.assert_array_equal(ilf.draw_index, [0, 0, 0, 3, 3, 3, 6, 6, 6])
+    np.testing.assert_array_equal(ilf.replicate, [0, 1, 2] * 3)
+    np.testing.assert_array_equal(ilf.key_index, [0, 7, 14, 3, 10, 17, 6, 13, 20])
+    assert ilf.out["paths"].shape == (2, 9, H, 2)
+    _assert_equals_post_hoc(fit)  # the in-loop shocks are those of the key indices above
+    for c in range(2):  # path 1 of kept draw 0 is not keyed by 0 + 1·D_s = 3
+        by_stored = _post_hoc(fit, c, 0, 3)
+        assert not np.allclose(ilf.out["paths"][c, 1], by_stored["paths"])
+
+
 def test_forecast_shocks_follow_the_documented_key_layout():
     """``forecast_shocks`` derives exactly ``keys.forecast_key(fseed, c, d, Ahead.X, i)``."""
     fseed, c, d, n = FSEED_11, 1, 4, 2
@@ -252,6 +275,21 @@ def test_plan_consistency_checks():
         _fit(plan=FitPlan(horizon=H + 1, draws=5))
     with pytest.raises(ValueError, match="in_loop_forecast"):
         _fit(BASE)  # a plan without the static hook
+
+
+def test_forecast_key_index_guard_counts_kept_draws_not_stored_draws():
+    """Path ``q`` of kept draw ``d`` uses key index ``d + q·D``, at most ``R·D − 1``, so the guard
+    is ``R·D ≤ 2**32`` with ``D`` the kept draws, not the ``D_s`` stored ones. ``D = 2**16``,
+    ``store_max = 1`` (``D_s = 1``), ``C = 2``: ``S = 2**17 + 2`` gives ``R = 2**16 + 1`` and is
+    refused before init (``R·D_s`` would be tiny); ``S = 2**17`` gives ``R·D = 2**32`` exactly and
+    passes the guard, reaching the storage plan, which the tiny budget refuses before sampling."""
+    settings = MCMCSettings(chains=2, draws=2**16, burn=2, store_max=1)
+    assert settings.store_thin == 2**16  # D_s = 1
+    tiny = Runtime(chunk=STATIC.chunk, memory_budget_gb=1e-6)
+    with pytest.raises(ValueError, match=r"\(131074\) needs 65537 paths per kept draw.*uint32"):
+        _fit(plan=FitPlan(horizon=H, draws=2**17 + 2, seed=11), settings=settings, runtime=tiny)
+    with pytest.raises(StorageBudgetError):
+        _fit(plan=FitPlan(horizon=H, draws=2**17, seed=11), settings=settings, runtime=tiny)
 
 
 def test_forecast_selection_rules():

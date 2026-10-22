@@ -82,24 +82,44 @@ def test_draw_parameters_at_the_last_period(fit):
     np.testing.assert_array_equal(L2, chol)
 
 
+def _outlier_row(fit) -> int:
+    """The data row ``t < T_eff − 1`` where most stored path draws have a transitory scale
+    (``log_scale2 = 2 log o_t ≠ 0``). At a typical date every draw has ``o_t = 1``, so the
+    effective variance equals the persistent one and an ``effective`` check would be vacuous."""
+    s2 = fit.posterior["paths"]["log_scale2"].values  # (C, Dp, n, T_eff)
+    return int(np.argmax((s2[..., :-1] != 0).sum(axis=(0, 1, 2))))
+
+
+def _informative(s2: np.ndarray, t: int) -> None:
+    """``log_scale2`` of the selected draws (…, n, T_eff) is nonzero at row ``t`` and differs from
+    row ``t + 1``, so the effective variance at ``t`` is distinguishable from the persistent one
+    and from a neighbouring row's."""
+    assert np.any(s2[..., t] != 0), "no selected draw has a transitory scale at the test date"
+    assert np.any(s2[..., t] != s2[..., t + 1])
+
+
 def test_draw_parameters_at_a_date_uses_the_stored_paths(fit):
     """``chol = A⁻¹ diag(exp(½ h_t))`` (persistent) or with ``2 log o_t + log τ_t`` added
-    (effective), from the path draws (every ``path_thin``-th stored draw)."""
-    date = "2001Q3"
-    t = int(fit.periods.get_loc(pd.Period(date, "Q")))
-    coefs, chol = fit.draw_parameters(10, date=date)
-    coefs_e, chol_e = fit.draw_parameters(10, date=date, which="effective")
+    (effective), from the path draws (every ``path_thin``-th stored draw), at the date with the
+    most outlier draws (every path draw selected, so some have ``o_t > 1``)."""
     paths = fit.posterior["paths"]
     h = paths["h"].values  # (C, Dp, n, T_eff+1)
-    s2 = paths["log_scale2"].values
+    s2 = paths["log_scale2"].values  # (C, Dp, n, T_eff)
     C, Dp = h.shape[:2]
-    flat = np.round(np.linspace(0, C * Dp - 1, 10)).astype(int)
+    t = _outlier_row(fit)
+    date = str(fit.periods[t])
+    S = C * Dp
+    coefs, chol = fit.draw_parameters(S, date=date)
+    coefs_e, chol_e = fit.draw_parameters(S, date=date, which="effective")
+    flat = np.round(np.linspace(0, C * Dp - 1, S)).astype(int)
     c, q = np.divmod(flat, Dp)
+    _informative(s2[c, q], t)
     where = np.searchsorted(fit.draw_index, paths["draw"].values[q])
     A = _A(np.asarray(fit.param_draws.struct.a)[c, where])
     for L, lam in ((chol, h[c, q, :, t + 1]), (chol_e, h[c, q, :, t + 1] + s2[c, q, :, t])):
         ref = np.linalg.solve(A, np.exp(0.5 * lam)[:, None, :] * np.eye(3))
         np.testing.assert_allclose(L, ref, rtol=1e-12, atol=1e-16)
+    assert not np.allclose(chol_e, chol, rtol=1e-6, atol=0)  # the outlier draws scale columns
     np.testing.assert_allclose(coefs, _B(fit, c, where), rtol=1e-11, atol=1e-13)
     np.testing.assert_array_equal(coefs_e, coefs)
     # the effective variance at the last period also needs the paths (o_T, τ_T)
@@ -197,14 +217,19 @@ def test_unit_shock_irf_is_phi_ainv_and_date_free(fit):
 
 
 def test_irf_effective_differs_only_by_the_transitory_scale(fit):
-    p = fit.irf(horizon=3, draws=10, date="2001Q3")
-    e = fit.irf(horizon=3, draws=10, date="2001Q3", which="effective")
-    assert e.data.attrs["which"] == "effective"
+    """``Θ^eff = Θ^pers · diag(o_t √τ_t)`` per draw, at the date with the most outlier draws
+    (every path draw selected, so some shocks are scaled)."""
     paths = fit.posterior["paths"]
-    C = e.data.sizes["chain"]
-    pos, _ = F.select_draws(paths.sizes["draw"], C, 10)
-    t = int(fit.periods.get_loc(pd.Period("2001Q3", "Q")))
-    scale = np.exp(0.5 * paths["log_scale2"].values[:, pos][..., t])  # o_t √τ_t per shock
+    C, Dp = paths.sizes["chain"], paths.sizes["draw"]
+    t = _outlier_row(fit)
+    date = str(fit.periods[t])
+    p = fit.irf(horizon=3, draws=C * Dp, date=date)
+    e = fit.irf(horizon=3, draws=C * Dp, date=date, which="effective")
+    assert e.data.attrs["which"] == "effective" and e.data.attrs["date"] == date
+    pos, _ = F.select_draws(Dp, C, C * Dp)
+    s2 = paths["log_scale2"].values[:, pos]
+    _informative(s2, t)
+    scale = np.exp(0.5 * s2[..., t])  # o_t √τ_t per shock
     np.testing.assert_allclose(
         e.data.values, p.data.values * scale[:, :, None, None, :], rtol=1e-12, atol=1e-16
     )

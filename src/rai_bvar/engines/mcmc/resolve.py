@@ -341,13 +341,26 @@ def _tcode_clash(model: BVAR, data: VARData, scales: WindowScales) -> tuple[str,
 # --------------------------------------------------------------------------- BVAR.fit
 
 
+WARM_SLOT = 2**32 - 1
+"""The init-stream slot of the warm-start key: the largest uint32, which no chain index reaches."""
+
+
 def warm_key(seed: int, salt: int) -> jax.Array:
-    """Key of the warm-start remap (forward-simulated ``h``; DESIGN §5.5): the initialisation
-    stream ``key(seed) → Stream.INIT → salt`` folded with ``Block.EQ_VOL`` before the chain, so it
-    never coincides with a cold-start key (``… → salt → c → Block``)."""
+    """Key of the warm-start remap (forward-simulated ``h``; DESIGN §5.5)::
+
+        warm_key = key(seed) → Stream.INIT → salt → WARM_SLOT → Block.EQ_VOL
+
+    The cold-start keys of the same stream are ``key(seed) → Stream.INIT → salt → c → Block → i →
+    Sub`` (``keys.init_keys``) with a chain index ``c < C``. :data:`WARM_SLOT` ``= 2**32 − 1`` sits
+    where they put ``c`` and is never a chain index (``c`` runs over ``0..C−1`` with ``C`` far below
+    ``2**32 − 1``: a chain axis that long cannot be allocated), so the fold path of the warm key,
+    and of the keys the remap folds from it (``→ c → i``), leaves every cold-start path of every
+    chain at the slot after the salt: no warm-start key is a cold-start key. (Folding
+    ``Block.EQ_VOL`` straight after the salt would not do: ``salt → 2`` *is* the cold init key of
+    chain 2.)"""
     root = random.key(int(seed), impl=keys.PRNG_IMPL)
-    base = random.fold_in(random.fold_in(root, int(keys.Stream.INIT)), int(salt))
-    return keys.block_key(base, keys.Block.EQ_VOL)
+    base = random.fold_in(random.fold_in(root, int(keys.Stream.INIT)), np.uint32(salt))
+    return keys.block_key(random.fold_in(base, np.uint32(WARM_SLOT)), keys.Block.EQ_VOL)
 
 
 def _warm_state(

@@ -13,6 +13,7 @@ import dataclasses
 import warnings
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import pytest
@@ -215,13 +216,84 @@ def test_warm_start_from_a_fit_or_its_final_state(sv_model, sv_fit, data, sim_da
     assert resolve._warm_state(None, same, 0, 2) is None
     # the remap key follows the fit's seed: the two new periods' h are forward-simulated under it
     s0, s5 = (resolve._warm_state(sv_fit, same, seed, 2) for seed in (0, 5))
-    key5 = resolve.warm_key(5, same.salt)
+    key5 = explicit_warm_key(5, same.salt)
     assert_tree_equal(
         s5, warm_state(sv_fit.final_state, same.data, same.periods, same.static, key5)
     )
     assert not np.array_equal(flat(s0)["eq.vol.core.h"], flat(s5)["eq.vol.core.h"])
     with pytest.raises(TypeError, match="init must be"):
         model.fit(longer, init=object(), runtime=RUNTIME)
+
+
+def explicit_warm_key(seed, salt):
+    """``key(seed) → Stream.INIT → salt → 2**32 − 1 → Block.EQ_VOL`` spelled out (DESIGN §5.5)."""
+    k = jax.random.key(seed, impl="threefry2x32")
+    for value in (1, salt, 2**32 - 1, 2):
+        k = jax.random.fold_in(k, np.uint32(value))
+    return k
+
+
+def test_warm_key_never_coincides_with_a_cold_start_key():
+    """The warm-start key folds ``2**32 − 1`` (never a chain index) after the salt, then
+    ``Block.EQ_VOL``: neither it nor the keys the remap derives from it (``→ c → i``) equals a
+    cold-start init key (``salt → c → Block → i → Sub``) of any of 8 chains. The previous
+    derivation (``salt → Block.EQ_VOL``) was the cold init key of chain 2."""
+    data_of = jax.random.key_data
+    seed, salt, C, n = 3, keys.data_salt("window"), 8, 3
+    warm = resolve.warm_key(seed, salt)
+    assert np.array_equal(data_of(warm), data_of(explicit_warm_key(seed, salt)))
+    init = keys.init_keys(seed, salt, C)  # (C,)
+    root = jax.random.key(seed, impl="threefry2x32")
+    base = jax.random.fold_in(jax.random.fold_in(root, np.uint32(1)), np.uint32(salt))
+    old = keys.block_key(base, keys.Block.EQ_VOL)
+    assert np.array_equal(data_of(old), data_of(init[2]))  # the collision this derivation fixes
+
+    fold = jax.vmap(jax.random.fold_in, in_axes=(0, None))  # every key × one value
+
+    def tails(ks, values):
+        return jnp.concatenate([fold(ks, np.uint32(v)) for v in values])
+
+    blocks = [int(b) for b in keys.Block]
+    cold_block = tails(init, blocks)  # c → Block
+    cold_eq = tails(cold_block, range(n))  # c → Block → i
+    cold_sub = tails(cold_eq, sorted({int(s) for s in keys.Sub}))  # c → Block → i → Sub
+    cold = [init, cold_block, cold_eq, cold_sub]
+    remap_c = tails(warm[None], range(C))  # the remap's keys: warm → c → i
+    remap_i = tails(remap_c, range(n))
+    warm_keys = [warm[None], remap_c, remap_i]
+    as_rows = lambda ks: {tuple(r) for r in np.asarray(data_of(ks)).tolist()}  # noqa: E731
+    cold_rows = set().union(*(as_rows(k) for k in cold))
+    warm_rows = set().union(*(as_rows(k) for k in warm_keys))
+    assert len(cold_rows) == sum(k.shape[0] for k in cold)  # the cold keys themselves are distinct
+    assert len(warm_rows) == 1 + C + C * n
+    assert not warm_rows & cold_rows
+
+
+def test_warm_start_from_a_fit_with_more_chains(sv_fit, data, sim_data_stationary):
+    """A final state with more chains than the settings ask for warm-starts the fit without a
+    warning (``fit_mcmc`` keeps the first ``C``): with 4 stacked chains and ``chains=2`` the remap
+    is not ``None`` and its first two chains equal the remap of the 2-chain state (the remap folds
+    the chain index, so chain prefixes agree); the fit equals the warm fit from the 2-chain state."""
+    model = bvar(mcmc=dataclasses.replace(SETTINGS, warm_burn=3))
+    longer = sim_data_stationary.tail(82)
+    prev = sv_fit.final_state
+    four = dataclasses.replace(
+        prev, state=jax.tree.map(lambda x: np.concatenate([x, x]), prev.state)
+    )
+    assert four.chains == 4
+    same = resolve.resolve(model, longer, RUNTIME)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no "warm start ignored" warning
+        s4 = resolve._warm_state(four, same, 0, 2)
+    assert s4 is not None
+    s2 = resolve._warm_state(prev, same, 0, 2)
+    assert_tree_equal(jax.tree.map(lambda x: np.asarray(x)[:2], s4), s2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)  # not converged at 2 × 30 draws
+        a = model.fit(longer, init=four, runtime=RUNTIME)
+        b = model.fit(longer, init=prev, runtime=RUNTIME)
+    assert a.final_state.seed_meta["warm_start"] and a.final_state.chains == 2
+    assert_tree_equal(a.param_draws, b.param_draws)
 
 
 # =========================================================================== static configs
@@ -290,13 +362,16 @@ def test_reduced_form_resolution(data, vol):
     s = r.static
     assert s.mean.kind == "linear_reduced" and s.mean.coef_scaling == "none"
     assert s.mean.const_path == "weighted" and s.mean.gram == "packed" and s.mean.cccm_precompute
-    assert s.struct.contemp_scaling == (
-        "lambda" if isinstance(vol, rb.Constant) and vol.prior == "iw_equivalent" else "none"
-    )
+    scaling = "lambda" if isinstance(vol, rb.Constant) and vol.prior == "iw_equivalent" else "none"
+    assert s.struct.contemp_scaling == scaling
     scales = window_scales(data, model.mean.prior, LAGS, "c")
     coef, _ = reduced_arrays(scales, model.mean.prior, {}, n=3, lags=LAGS, n_det=1)
     assert_tree_equal(r.prior.eq.coef, coef)
     np.testing.assert_array_equal(r.prior.shared.Mc, np.zeros((7, 2)))
+    # the a_i arrays at the composition's scaling: λ-free for reduced × iw_equivalent (row 8)
+    assert_tree_equal(
+        r.prior.eq.contemp, contemp_arrays(scales, model.mean.prior, 3, scaling=scaling)
+    )
     assert_matches_template(r)
 
 

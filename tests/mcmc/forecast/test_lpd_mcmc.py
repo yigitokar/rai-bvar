@@ -71,6 +71,13 @@ def test_mcmc_forecasts_carry_the_accelerator_variables(fr):
     np.testing.assert_allclose(
         np.einsum("sij,shjk->shik", A, L), ell[..., None] * np.eye(3), rtol=1e-12, atol=1e-14
     )
+    # SV with outliers: cond_scale = cond_scale_persistent · o_{T+h}, o ∈ {1} ∪ {2..K} drawn
+    # with probability p (≈ 1%: some of the 120·4·3 future scales are outliers)
+    assert ds["cond_scale_persistent"].dims == ("chain", "draw", "horizon", "variable")
+    o = ds["cond_scale"].values / ds["cond_scale_persistent"].values
+    np.testing.assert_allclose(o, np.rint(o), rtol=1e-12, atol=0)
+    o = np.rint(o)
+    assert o.min() == 1 and o.max() <= ds.attrs["outlier_K"] and np.any(o > 1)
     check_structure(fr)  # extras are ignored by the contract checks
 
 

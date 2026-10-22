@@ -182,7 +182,9 @@ def test_eb_converged_flag_and_messages_propagate(data, monkeypatch):
 
 def test_twin_setting_warnings_are_dropped_and_psi_notes_kept(simulate_var):
     """The twin's 2020 warning is recomputed by the MCMC fit (``SV(outliers=True)`` counts as a
-    treatment), so it is not propagated; its ψ notes are (DESIGN §6.5 step 4)."""
+    treatment), so it is not propagated; its ψ notes are (DESIGN §6.5 step 4), on the twin path,
+    on the structural ``cross ≠ 1`` path (Chan EB) and, from the window scales, with
+    ``hierarchy="fixed"`` (no EB at all)."""
     index = pd.period_range("2017Q1", periods=14, freq="Q")
     frame = pd.DataFrame(simulate_var(14, 3), index=index, columns=["gdp", "prices", "rate"])
     short = rb.VARData.from_frame(frame, 1)  # covers 2020; AR(2) residuals have 9 d.o.f.
@@ -192,6 +194,13 @@ def test_twin_setting_warnings_are_dropped_and_psi_notes_kept(simulate_var):
     out = eb.eb_hyper(mcmc_model(rb.SV(outliers=True)), short)
     assert not any("covers 2020" in w for w in out.warnings)
     assert any("degrees of" in w for w in out.warnings)
+    chan = eb.eb_hyper(mcmc_model(cross=0.5), short)
+    assert chan.hyper["eb_method"] == "structural_nig"
+    assert not any("covers 2020" in w for w in chan.warnings)
+    assert any("degrees of" in w for w in chan.warnings)
+    fixed = resolve.resolve(mcmc_model(hierarchy="fixed"), short, RUNTIME)
+    assert fixed.eb_converged is None
+    assert any("degrees of" in w for w in fixed.warning_inputs["eb_warnings"])
 
 
 def test_hierarchy_fixed_runs_no_eb(data, monkeypatch):
