@@ -7,10 +7,17 @@ Monte Carlo checks of ``validation.simulate.prior_sample`` (the references compo
 outlier frequencies; ``E τ = 1`` for the standardized t; inert padding; and the finite-variance
 flags of the test functions. Means are tested within 5 standard errors and variances within 5
 standard errors of the sample variance (fixed seeds, so the outcome is deterministic).
+
+Marginal moments cannot see a latent drawn from an independent copy of its parameters (Geweke
+2004 error 2 inside the prior simulator), so the **dependence structure** is checked as well: the
+standardised SV innovations and initial state are iid ``N(0, 1)`` and uncorrelated with
+``(μ, φ, log σ)``; ``o`` is conditional on the stored ``p`` and ``τ`` on the stored ``ν`` (per
+grid value); and equations are mutually independent, leaf by leaf.
 """
 
 from __future__ import annotations
 
+import itertools
 import math
 
 import jax
@@ -47,6 +54,54 @@ def assert_var(x, var, label=""):
     m4 = np.mean((x - x.mean()) ** 4)
     se = math.sqrt(max(m4 - s2**2, 0.0) / x.size)
     assert abs(s2 - var) < K_SE * se, f"{label}: var {s2} vs {var} (se {se})"
+
+
+def assert_std_normal(z, label=""):
+    assert_mean(z, 0.0, label)
+    assert_var(z, 1.0, label)
+
+
+def assert_uncorrelated(x, others: dict[str, np.ndarray], label=""):
+    """``|corr(x, y)| < 5/√N`` for every ``y`` in ``others`` (``x`` carries no information about
+    them; the null s.d. of a sample correlation is ``1/√N`` for independent finite-variance
+    variables)."""
+    x = np.asarray(x, dtype=np.float64).ravel()
+    for name, y in others.items():
+        r = np.corrcoef(x, np.asarray(y, dtype=np.float64).ravel())[0, 1]
+        assert abs(r) < K_SE / math.sqrt(x.size), f"{label}: corr with {name} = {r}"
+
+
+def sv_standardised(spec: J.JointSpec, core, eq: int = 0):
+    """``(z_0, η)`` of equation ``eq``'s path: ``z_0 = (h_0 − E[h_0 | θ])/sd(h_0 | θ)`` and
+    ``η_t = (h_t − E[h_t | h_{t−1}, θ])/σ`` for ``t = 1..T_eff`` (shape ``(N, T_eff)``). Under the
+    prior both are iid ``N(0, 1)`` and independent of ``θ = (μ, φ, σ)``, whatever the law of θ."""
+    T, vol = spec.fixed.T_eff, spec.static.vol
+    cp = spec.prior.eq.vol_core
+    h, sigma = core.h[:, eq], core.sigma[:, eq]
+    if vol.rw:  # h_0 ~ N(m₀, V₀), h_t = h_{t−1} + σ η_t
+        m0, V0 = float(np.asarray(cp.m0)[eq]), float(np.asarray(cp.V0)[eq])
+        return (h[:, 0] - m0) / math.sqrt(V0), (h[:, 1 : T + 1] - h[:, :T]) / sigma[:, None]
+    mu, phi = core.mu[:, eq], core.phi[:, eq]
+    if vol.h0 == "stationary":  # h_0 ~ N(μ, σ²/(1 − φ²))
+        sd0 = sigma / np.sqrt((1.0 - phi) * (1.0 + phi))
+    else:  # fixed B₀: h_0 ~ N(μ, B₀σ²)
+        sd0 = sigma * math.sqrt(float(np.asarray(cp.B0)[eq]))
+    dev = h[:, : T + 1] - mu[:, None]
+    return (h[:, 0] - mu) / sd0, (dev[:, 1:] - phi[:, None] * dev[:, :-1]) / sigma[:, None]
+
+
+def assert_sv_conditionals(spec: J.JointSpec, core, eq: int = 0) -> None:
+    """The path is drawn from the stored ``(μ, φ, σ)``: ``z_0`` and ``η`` are ``N(0, 1)``, and their
+    levels and squares are uncorrelated with ``μ``, ``φ`` and ``log σ`` (N06 §2.1)."""
+    z0, eta = sv_standardised(spec, core, eq)
+    assert_std_normal(z0, "z_0")
+    assert_std_normal(eta, "η")
+    theta = {"log σ": np.log(core.sigma[:, eq])}
+    if not spec.static.vol.rw:
+        theta |= {"μ": core.mu[:, eq], "φ": core.phi[:, eq]}
+    stats_ = {"z_0": z0, "z_0²": z0**2, "mean η": eta.mean(-1), "mean η²": (eta**2).mean(-1)}
+    for label, x in stats_.items():
+        assert_uncorrelated(x, theta, label)
 
 
 def test_constant_mode1_ig_normal_and_d3_centring():
@@ -158,6 +213,9 @@ def test_stationary_sv_parameters_and_h_moments():
     c = np.mean(h[:, T] * h[:, T - 1]) - h[:, T].mean() * h[:, T - 1].mean()
     x = h[:, T] * h[:, T - 1]
     assert abs(c - cov1) < K_SE * x.std(ddof=1) / math.sqrt(N)
+    # dependence on the stored θ: h_T − μ is independent of μ, so Cov(μ, h_T) = Var μ = 0.25
+    assert_mean(mu * (h[:, T] - mu), 0.0, "Cov(μ, h_T − μ)")
+    assert_sv_conditionals(spec, core)
     pad = h[:, T + 1 :]  # decoupled N(0, 1) dummies beyond T_eff
     assert pad.shape[1] == spec.static.shapes.T_pad - T
     assert_mean(pad, 0.0, "padding")
@@ -165,12 +223,15 @@ def test_stationary_sv_parameters_and_h_moments():
 
 
 def test_random_walk_and_fixed_b0_initial_states():
-    rw = draws(J.joint_spec("structural_sv_rw", "full"), seed=4)
+    rw_spec = J.joint_spec("structural_sv_rw", "full")
+    rw = draws(rw_spec, seed=4)
     h = rw.eq.vol.core.h[:, 0]
     for t in (0, 1, 10, 50):  # h_0 ~ N(0, 1), increments σ η with E σ² = 0.1
         assert_mean(h[:, t], 0.0, f"rw h_{t}")
         assert_var(h[:, t], 1.0 + 0.1 * t, f"rw h_{t}")
-    fb = draws(J.joint_spec("structural_sv_fixed_b0"), seed=5)
+    assert_sv_conditionals(rw_spec, rw.eq.vol.core)  # (h_t − h_{t−1})/σ ~ N(0, 1), ⟂ σ
+    fb_spec = J.joint_spec("structural_sv_fixed_b0")
+    fb = draws(fb_spec, seed=5)
     core = fb.eq.vol.core
     h0, h1, phi = core.h[:, 0, 0], core.h[:, 0, 1], core.phi[:, 0]
     assert_var(h0, 0.25 + 2.0 * 0.1, "h_0 = μ + N(0, B₀σ²)")
@@ -179,6 +240,8 @@ def test_random_walk_and_fixed_b0_initial_states():
     e_phi2 = 4 * e_u2 - 4 * e_u + 1
     assert_var(h1, 0.25 + 0.1 * (2.0 * e_phi2 + 1.0), "h_1")
     assert np.all(np.abs(phi) < 1)
+    for eq in range(2):  # (h_0 − μ)/(σ√B₀) ~ N(0, 1), ⟂ (μ, φ, σ)
+        assert_sv_conditionals(fb_spec, core, eq)
 
 
 def test_inverse_gamma_sigma2_prior():
@@ -208,6 +271,16 @@ def test_outlier_frequencies_and_moments():
     assert_mean((o**2).mean(axis=-1), 1 + (151 - 1) * 0.1, "E o²")  # N03 §2.3: 1 + 150 p
     counts = np.bincount(o_idx[o_idx > 0].ravel(), minlength=K)[1:]  # o | o > 1 uniform on 2..K
     assert stats.chisquare(counts).pvalue > 1e-4
+    # o is drawn given the stored p, not only from the right marginal: E[1{o > 1} | p] = p and
+    # E[o² | p] = 1 + (E[o² | o > 1] − 1)·p, so both residuals are orthogonal to p (regression
+    # slope 1 on p), and n_out | p ~ Binomial(T_eff, p)
+    e_o2_out = sum(k * k for k in range(2, K + 1)) / (K - 1)
+    assert e_o2_out == 151.0  # K = 20
+    assert_mean((share - p) * p, 0.0, "E[(share − p)·p]")
+    o2_resid = (o**2).mean(axis=-1) - (1.0 + (e_o2_out - 1.0) * p)
+    assert_mean(o2_resid * p, 0.0, "E[(mean o² − E[o² | p])·p]")
+    n_out = (o_idx > 0).sum(axis=-1)
+    assert_mean((n_out - T * p) ** 2 - T * p * (1 - p), 0.0, "Var(n_out | p) = T p (1 − p)")
 
 
 @pytest.mark.parametrize("t_scale", ["standardized", "unit"])
@@ -228,8 +301,22 @@ def test_student_t_scale(t_scale):
     cg = grid - 2.0 if t_scale == "standardized" else grid
     e_log = float(np.mean(np.log(cg / 2.0) - special.digamma(grid / 2.0)))
     assert_mean(np.log(tau).mean(axis=-1), e_log, "E log τ")
-    # given ν, 1/τ ~ Gamma(ν/2, rate c/2): E[1/τ | ν] = ν/c
-    assert_mean((1.0 / tau).mean(axis=-1) - (nu / c)[..., None].mean(axis=-1), 0.0, "E[1/τ | ν]")
+    # τ is drawn given the stored ν: per grid value, 1/τ_t ~ Gamma(ν/2, rate c(ν)/2), so
+    # E[1/τ | ν] = ν/c, Var(1/τ | ν) = 2ν/c² and E[log τ | ν] = log(c/2) − ψ(ν/2). (Under the unit
+    # scale E[1/τ | ν] = 1 for every ν; the variance and log τ still depend on ν.)
+    for g, nu_g in enumerate(grid):
+        sel = tr.nu_idx == g  # (draw, equation) pairs with ν = nu_g
+        assert sel.sum() > 1000
+        c_g = nu_g - 2.0 if t_scale == "standardized" else nu_g
+        inv, log_tau = 1.0 / tau[sel], np.log(tau[sel])  # (pairs, T_eff)
+        assert_mean(inv.mean(axis=-1), nu_g / c_g, f"E[1/τ | ν = {nu_g}]")
+        assert_var(inv, 2.0 * nu_g / c_g**2, f"Var(1/τ | ν = {nu_g})")
+        e_log_g = math.log(c_g / 2.0) - special.digamma(nu_g / 2.0)
+        assert_mean(log_tau.mean(axis=-1), e_log_g, f"E[log τ | ν = {nu_g}]")
+    # pooled over ν: the residual of log τ given the stored ν has mean 0 and does not covary with ν
+    resid = np.log(tau).mean(axis=-1) - (np.log(c / 2.0) - special.digamma(nu / 2.0))
+    assert_mean(resid, 0.0, "E[log τ − E[log τ | ν]]")
+    assert_uncorrelated(resid, {"ν": nu}, "log τ residual")
 
 
 def test_outlier_t_combined_and_status():
@@ -243,6 +330,43 @@ def test_outlier_t_combined_and_status():
     for leaf in (tr.rb_out, tr.acc_nu_move, st.eq.vol.core.acc_h, st.eq.vol.core.rb_h_sum):
         assert np.all(leaf == 0)
     assert_mean(np.exp(tr.log_p), 0.1, "p")
+    # each part is drawn given its own stored parameter, and the two parts are independent
+    p = np.exp(tr.log_p)
+    share = (tr.o_idx[..., :T] > 0).mean(axis=-1)
+    nu = np.asarray(J.TEST_NU_GRID, dtype=np.float64)[tr.nu_idx]
+    c = np.asarray(R.t_scale_constant(nu, spec.static))
+    log_tau_resid = tr.log_tau[..., :T].mean(axis=-1) - (np.log(c / 2.0) - special.digamma(nu / 2))
+    assert_mean((share - p) * p, 0.0, "E[(share − p)·p]")
+    assert_mean(log_tau_resid, 0.0, "E[log τ − E[log τ | ν]]")
+    assert_uncorrelated(log_tau_resid, {"ν": nu, "p": p, "share": share}, "log τ residual")
+    assert_uncorrelated(nu, {"p": p, "share": share}, "ν")
+
+
+@pytest.mark.parametrize(
+    ("name", "size", "expected"),
+    [("structural_mode2_constant", "full", {"log_lam", "a", "delta"}),
+     ("structural_sv_outliers_t", "full",
+      {"a", "delta", "h", "mu", "phi", "sigma", "o_idx", "log_p", "log_tau", "nu_idx"})],
+)  # fmt: skip
+def test_equations_are_independent(name, size, expected):
+    """θ_i are independent over equations under the prior (one key per equation): for every
+    per-equation leaf, slot by slot and date by date, draws of different equations are
+    uncorrelated (``|corr| < 5/√N``). Leaves that are constant in an equation (accumulators,
+    inactive ``a`` slots, padded ``o``/``τ``) carry no draw and are skipped."""
+    spec = J.joint_spec(name, size)
+    st = draws(spec, seed=11)
+    n = spec.static.shapes.n
+    checked: set[str] = set()
+    for path, leaf in jax.tree_util.tree_leaves_with_path(st.eq):
+        label = jax.tree_util.keystr(path)
+        x = np.asarray(leaf, dtype=np.float64).reshape(N, n, -1)
+        for col in range(x.shape[-1]):
+            live = [i for i in range(n) if np.ptp(x[:, i, col]) > 0]
+            for i, j in itertools.combinations(live, 2):
+                r = np.corrcoef(x[:, i, col], x[:, j, col])[0, 1]
+                assert abs(r) < K_SE / math.sqrt(N), f"{label}[{col}]: corr(eq{i}, eq{j}) = {r}"
+                checked.add(label.rsplit(".", 1)[-1])
+    assert expected <= checked, expected - checked
 
 
 @pytest.mark.parametrize(

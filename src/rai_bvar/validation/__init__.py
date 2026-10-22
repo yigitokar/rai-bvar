@@ -26,6 +26,7 @@ _LAZY = {
     "sbc": "rai_bvar.validation.sbc",
     "block_sbc": "rai_bvar.validation.sbc",
     "sbc_sequential": "rai_bvar.validation.sbc",
+    "block_sbc_sequential": "rai_bvar.validation.sbc",
     "rank_with_ties": "rai_bvar.validation.uniformity",
     "gamma_statistic": "rai_bvar.validation.uniformity",
     "gamma_pvalue": "rai_bvar.validation.uniformity",

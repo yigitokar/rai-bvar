@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -29,10 +30,12 @@ from rai_bvar.validation.sbc import (
     _pooled_ess,
     _thinned_ess,
     block_sbc,
+    block_sbc_sequential,
     iat,
     sbc,
     sbc_sequential,
 )
+from rai_bvar.validation.sequential import bonferroni, holm_reject, stage_seed
 from rai_bvar.validation.uniformity import rank_with_ties
 
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
@@ -90,10 +93,19 @@ def test_correct_toy_holds_the_nominal_level_over_20_seeds():
     assert sum(not r.passed for r in results) <= 3
     p = np.array([r.p for r in results])  # (20, 3); exact γ p-values are super-uniform
     assert np.all(np.sum(p <= 0.05, axis=0) <= 4)  # P(Bin(20, 0.05) ≥ 5) = 0.003
-    assert all(r.ess_ok == 1.0 and not r.failed.any() for r in results)
-    # the pooled kept-draw ESS is precise: well clear of 0.8·L for well-thinned draws
+    assert all(r.ess_ok == 1.0 and not r.failed.any() and r.checks_ok for r in results)
+    # the pooled kept-draw ESS diagnostic is precise: well clear of 0.8·L for well-thinned draws
     assert all(np.all(r.ess_pooled[:2] > 0.85 * CFG.L) for r in results)
-    assert not any(reason.startswith("kept draws") for r in results for reason in r.reasons)
+    # the decision is Bonferroni over the Q quantities (DESIGN §9.6); Holm lists the failures
+    Q, a = len(NAMES), CFG.alpha
+    for r in results:
+        holm = tuple(n for n, rej in zip(NAMES, holm_reject(r.p, a), strict=True) if rej)
+        assert r.failing == holm
+        assert (not r.passed) == (r.p.min() <= a / Q)
+        assert r.passed == (r.p_bonferroni > a) and r.p_bonferroni == bonferroni(r.p)
+    # runs with α/Q < min p ≤ α exist, where an unadjusted rule would fail a correct sampler
+    window = [r for r in results if a / Q < r.p.min() <= a]
+    assert window and all(r.passed and not r.failing for r in window)
     ranks = np.concatenate([r.ranks for r in results])  # 2000 ranks per quantity
     for q in range(3):
         counts = np.bincount(ranks[:, q] // 10, minlength=10)
@@ -140,6 +152,7 @@ def test_capped_thinning_fails_the_ess_rule():
     assert np.all(res.thin <= 8)
     assert res.ess_ok < 0.99 and not res.passed
     assert any("thinned ESS" in reason for reason in res.reasons)
+    assert not res.checks_ok and res.p_bonferroni == 0.0  # not a marginal γ result
 
 
 def test_failed_replications_fail_the_test():
@@ -147,6 +160,8 @@ def test_failed_replications_fail_the_test():
     assert res.failed.any() and not res.passed
     assert res.ranks.shape[0] == 60  # failed replications are kept and reported, never dropped
     assert any("failed" in reason for reason in res.reasons)
+    # the stage value is fail-safe: 0, whatever the γ p-values of the surviving ranks say
+    assert not res.checks_ok and res.p_bonferroni == 0.0 < bonferroni(res.p)
 
 
 def truth_and_data(toy, cfg, i):
@@ -157,8 +172,10 @@ def truth_and_data(toy, cfg, i):
 
 @dataclass(frozen=True)
 class LateFailure(ARToy):
-    """The sampler breaks (NaN) only after the pilot's sweep range, and only for datasets with
-    ``mean(y) > 2``: the pilot cannot see it, only the production chain."""
+    """The sampler breaks (NaN) from sweep ``fail_at`` on, and only for datasets with
+    ``mean(y) > 2``. Sweep indices restart at 0 in both chains, so ``fail_at`` past the pilot's
+    last sweep (``burn + pilot − 1``) hides the failure from the pilot, and ``fail_at`` past the
+    production chain's last sweep (``burn + L·t_max − 1``) hides it from the production chain."""
 
     fail_at: int = 0
     name: str = "late_failure"
@@ -178,6 +195,21 @@ def test_late_sampler_failures_fail_the_test():
     assert np.all(res.thin[res.failed] < cfg.t_max)  # their pilots were finite
     assert not res.passed and any("failed" in reason for reason in res.reasons)
     assert res.ranks.shape[0] == res.kept.size  # reported, never dropped
+
+
+def test_pilot_only_sampler_failures_fail_the_test():
+    # L·t_max = 200 < 250: the production chains end at sweep burn + 199, before the failure;
+    # the pilots run to sweep burn + 399 and break for the datasets with mean(y) > 2
+    cfg = replace(CFG, N=100, L=20, pilot=400, t_max=10)
+    toy = LateFailure(fail_at=cfg.burn + 250, name="pilot_only_failure")
+    res = sbc(toy, quantities, NAMES, cfg)
+    expected = [float(jnp.mean(truth_and_data(toy, cfg, int(i))[2])) > 2.0 for i in res.kept]
+    assert 0 < sum(expected) < res.kept.size
+    np.testing.assert_array_equal(res.failed, expected)  # a later finite pass never clears them
+    assert np.all(res.thin[res.failed] == cfg.t_max)  # a failed pilot gives t_max
+    assert np.all(np.isfinite(res.ess_kept[res.failed]))  # their production draws were finite
+    assert not res.passed and any("failed" in reason for reason in res.reasons)
+    assert res.ranks.shape[0] == res.kept.size and res.p_bonferroni == 0.0
 
 
 @dataclass(frozen=True)
@@ -205,20 +237,29 @@ def test_non_finite_truth_alone_fails_the_test():
     assert not res.passed and any("failed" in reason for reason in res.reasons)
 
 
-def test_pooled_ess_catches_a_pilot_that_underestimates_the_iat():
-    # ρ = 0.995 (IAT = 399): 200 pilot draws see a fraction of the IAT and Geyer truncates early,
-    # so t_i = ⌈2·IAT_i⌉ ≈ 95 is uncapped and the per-replication rule is blind (ess_ok = 1)
-    res = sbc(ARToy(rho=0.995), quantities, NAMES, replace(CFG, N=60, pilot=200, t_max=2000))
+def test_the_ess_rules_per_replication_and_pooled():
+    # DESIGN §9.6 (+ erratum): per-replication thinned ESS ≥ 0.8·L for ≥ 99% of replications, and
+    # the pooled kept-draw ESS ≥ 0.8·L for every quantity.
+    # ρ = 0.995 (IAT = 399) with the default t_max = 50: the thinning hits the cap and the rule fails
+    slow = ARToy(rho=0.995)
+    capped = sbc(slow, quantities, NAMES, replace(CFG, N=60, pilot=1000))
+    assert np.mean(capped.thin == 50) > 0.5
+    np.testing.assert_allclose(capped.ess_thin, _thinned_ess(capped.iat, capped.thin, 99))
+    assert capped.ess_ok == np.mean(capped.ess_thin >= 0.8 * CFG.L) < 0.99
+    assert not capped.passed and not capped.checks_ok
+    assert any(r.startswith("thinned ESS") for r in capped.reasons)
+    seq, _ = sbc_sequential(slow, quantities, NAMES, replace(CFG, N=60, pilot=1000))
+    assert not seq.passed and seq.q == (0.0,)  # an ESS failure is not a marginal γ result
+    # without the cap, 200 pilot draws see a fraction of the IAT and Geyer truncates early, so
+    # t_i = ⌈2·IAT_i⌉ ≈ 95 is uncapped and the per-replication rule is blind; the pooled kept-draw
+    # ESS catches it and fails the run (erratum to DESIGN §9.6)
+    res = sbc(slow, quantities, NAMES, replace(CFG, N=60, pilot=200, t_max=2000))
     assert res.ess_ok == 1.0 and np.all(res.thin < 2000)
     phi = 0.995**res.thin  # the true lag-1 autocorrelation of the kept draws
     assert np.median((1 - phi) / (1 + phi)) < 0.5  # true ESS < L/2
     assert np.all(res.ess_pooled[:2] < 0.8 * CFG.L)
-    assert not res.passed
-    assert any(r.startswith("kept draws: pooled ESS") and "theta" in r for r in res.reasons)
-    seq, _ = sbc_sequential(
-        ARToy(rho=0.995), quantities, NAMES, replace(CFG, N=60, pilot=200, t_max=2000)
-    )
-    assert not seq.passed and seq.q == (0.0,)  # an ESS failure is not a marginal γ result
+    assert not res.checks_ok and not res.passed and res.p_bonferroni == 0.0
+    assert any(r.startswith("pooled kept-draw ESS") for r in res.reasons)
 
 
 def test_data_only_filter():
@@ -421,6 +462,89 @@ def test_block_sbc_detects_wrong_conditionals(conditional):
         joint_sample, conditional, block_stat, N=200, L=99, seed=1, names=("b1", "loglik")
     )
     assert not res.passed and res.failing
+
+
+def block_replay(conditional, reps, seed=0, L=99, composition=0):
+    """Truth statistics, data and draw statistics of block-SBC replications ``reps`` from the
+    documented keys: ``validation_key(seed, Tier.B, composition, i)``, ``Part.PRIOR`` for the joint
+    draw and ``fold_in(Part.DRAWS, d)`` for conditional draw ``d``."""
+
+    def one(i):
+        k = validation_key(seed, int(Tier.B), composition, i)
+        th, y = joint_sample(random.fold_in(k, int(Part.PRIOR)))
+        dkey = random.fold_in(k, int(Part.DRAWS))
+        draws = jax.vmap(lambda d: block_stat(conditional(random.fold_in(dkey, d), th, y), y))(
+            jnp.arange(L, dtype=jnp.uint32)
+        )
+        return block_stat(th, y), y, draws
+
+    out = jax.jit(jax.vmap(one))(jnp.asarray(np.asarray(reps), dtype=jnp.uint32))
+    return tuple(np.asarray(a) for a in out)
+
+
+def failing_conditional():
+    """The exact conditional, except that draws with b1 > 1.6 come back NaN (a sampler failure,
+    not a calibration error)."""
+    good = make_conditional()
+
+    def draw(key, state, y):
+        out = good(key, state, y)
+        return {"b1": jnp.where(out["b1"] > 1.6, jnp.nan, out["b1"]), "b2": out["b2"]}
+
+    return draw
+
+
+BROKEN = failing_conditional()
+
+
+def test_block_sbc_failed_replications_fail_the_test():
+    res = block_sbc(joint_sample, BROKEN, block_stat, N=200, L=99, names=("b1", "loglik"))
+    truth, _, draws = block_replay(BROKEN, res.kept)
+    expected = ~(np.isfinite(truth).all(axis=1) & np.isfinite(draws).all(axis=(1, 2)))
+    assert 0 < expected.sum() < res.kept.size
+    np.testing.assert_array_equal(res.failed, expected)  # exactly the broken replications
+    assert not res.passed and any("failed" in reason for reason in res.reasons)
+    assert res.ranks.shape == (200, 2)  # reported, never dropped
+    # the stage value is fail-safe: 0, although the γ p-values alone look unremarkable
+    assert not res.checks_ok and res.p_bonferroni == 0.0 and bonferroni(res.p) > 1e-3
+    seq, runs = block_sbc_sequential(
+        joint_sample, BROKEN, block_stat, N=200, names=("b1", "loglik")
+    )
+    assert not seq.passed and seq.stage == 1 and seq.q == (0.0,)
+    np.testing.assert_array_equal(runs[0].ranks, res.ranks)  # stage 0 uses the seed itself
+
+
+def test_block_sbc_data_only_filter():
+    conditional = make_conditional()
+    res = block_sbc(
+        joint_sample, conditional, block_stat, N=200, names=("b1", "loglik"), max_abs_data=2.5
+    )
+    y = block_replay(conditional, np.arange(200))[1]  # (200, T)
+    np.testing.assert_array_equal(res.kept, np.flatnonzero(np.abs(y).max(axis=1) < 2.5))
+    assert 0 < res.kept.size < 200 and res.n_total == 200
+    assert res.ranks.shape == (res.kept.size, 2) and res.failed.shape == (res.kept.size,)
+    assert res.passed and res.checks_ok  # selecting on ỹ alone keeps ranks uniform
+
+
+def test_block_sbc_sequential_reruns_fresh_and_larger():
+    conditional, names = make_conditional(), ("b1", "loglik")
+    seq, runs = block_sbc_sequential(joint_sample, conditional, block_stat, N=200, names=names)
+    assert seq.passed and len(runs) == seq.stage and seq.q == (runs[0].p_bonferroni,)
+    seq, _ = block_sbc_sequential(
+        joint_sample, make_conditional(couple=False), block_stat, N=200, seed=1, names=names
+    )
+    assert not seq.passed and seq.stage == 1
+    # α = 0.9, k = 2: β₁ = 0.45 and γ + β₁ > 1, so q₁ > 0.45 reruns with fresh keys at Δ× the size
+    seq, runs = block_sbc_sequential(
+        joint_sample, conditional, block_stat, N=50, seed=2, names=names, alpha=0.9, k=2, delta=3
+    )
+    assert seq.stage == 2 and seq.multipliers == (1, 3)
+    assert [r.n_total for r in runs] == [50, 150] and all(r.alpha == 0.9 for r in runs)
+    again = block_sbc(
+        joint_sample, conditional, block_stat, N=150, seed=stage_seed(2, 1), names=names, alpha=0.9
+    )
+    np.testing.assert_array_equal(runs[1].ranks, again.ranks)
+    assert seq.q == (runs[0].p_bonferroni, runs[1].p_bonferroni)
 
 
 def test_block_sbc_validation():

@@ -1716,9 +1716,9 @@ nightly `n = 3`, `p = 2`, `T_eff = 50`, fixed stored presample.
 1. **Dense oracles with injected noise** (N07 §13.1): `precision_draw` vs dense `solve`/`chol` (1e-10); padding
    exactness (padded vs unpadded with `z[:q_i]`, 1e-12); packed and tiled Gram vs dense `Fᵀ diag(w) F` (1e-13
    relative); eigen and fixed-factor draws vs the `cholesky_const` path: identical mean and covariance to 1e-12
-   on well-conditioned posteriors (cond(sKs) ≲ 1e3) — on Minnesota level data both paths are only accurate to
-   O(ε·cond(sKs)) with constants up to ~150 (WP4 review), so compare each path with a high-precision reference
-   or use ≈ 2e-12 + 300ε·cond(sKs) path-vs-path; plus a KS test on 10⁴ draws; a weighted-path oracle builds its own
+   is not achievable in general: both paths are accurate to O(ε·κ), κ = cond(sKs), so compare each path with a
+   high-precision reference or path-vs-path with mean 2e-12 + 5εκ(1 + t) and covariance 2e-12 + 5εκ (WP4 fix-up,
+   verified on 2,250 fresh problems); plus a KS test on 10⁴ draws; a weighted-path oracle builds its own
    cache with `const_path="weighted"` (only that path carries `FF`); tridiagonal sampler vs dense `Q` and `slogdet` (1e-12); SV `Q̃, b̃`
    builder vs `HᵀS⁻¹H + GᵀV⁻¹G` including masks and `T_eff`; CCCM vs the SUR oracle on the N04 §9.1 table
    (rtol 1e-10) and 20 random problems; A-row gradient/Hessian and sign check (N04 §9.4).
@@ -1791,7 +1791,10 @@ tie-breaking `n_less + ⌊u(n_tie + 1)⌋` with one `u` per quantity (N07 §13.3
 `mean h`, **total and per-equation log-likelihood**, `log p(θ)`, `‖Γ − AM′‖²`, transitory-marginal log-likelihood,
 `N_1`, `Σ log τ`, and the predictive unknowns `h_{T+1}`, `y_{T+1}` through the production forecast core. Pass:
 γ-test p-values from the exact Säilynoja recursion, Bonferroni over quantities, α = 1e-2; per-replication thinned
-ESS ≥ 0.8 L for ≥ 99% of replications.
+ESS ≥ 0.8 L for ≥ 99% of replications. **Erratum (orchestrator, 2026-10-22):** the per-replication ESS is predicted
+from the pilot IAT (an AR(1) form, `ess_thin`), because L = 99 kept draws cannot certify 0.8 L for one replication;
+that rule cannot see a pilot that underestimates the IAT, so a second gate requires the replication-pooled kept-draw
+ESS (`ess_pooled`, Kish-weighted ECDF-indicator IAT) ≥ 0.8 L for every quantity (iid minimum 0.836 L at n = 40).
 
 ### 9.7 Tier M: mutation suite (weekly; every mutant must fail some tier; fixes E17)
 

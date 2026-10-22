@@ -236,15 +236,22 @@ def eigen_prepare(G: Array, d: Array, mean0: Array, fty: Array, cmask: Array) ->
     iteration (not divide and conquer, which loses the small singular values of graded
     matrices) gives ``Q = U`` with the rows unsorted and ``g = S²``.
 
-    Accuracy (DESIGN §9.3 item 1). Against a 45-digit solve, in posterior standard deviations,
-    over level data (levels 0–1e4, AR roots up to 0.9995, ``var_const = 1e7``, ``q = 12–100``,
-    ``λ`` from ``0.01ψ`` to ``100ψ``, singular ``A`` included) the mean and covariance errors are
-    ``≲ 1e-12 + 30ε·cond(sKs)``, ``cond(sKs)`` the condition number of the Jacobi-scaled posterior
-    precision ``K = diag(d) + cmask⊗cmask ⊙ G/λ`` on the active block; observed ``≤ 7e-13`` when
-    ``cond(sKs) < 1e3`` and ``≤ 12ε·cond(sKs)`` above. The Cholesky path obeys the same bound
-    (``≤ 4ε·cond(sKs)`` above 1e3), so the two paths agree to ``1e-12`` only for well-conditioned
-    posteriors: with persistent level regressors ``cond(sKs)`` reaches 1e9–1e10 and both paths
-    are then up to ``2e-5`` sd from exact (statistically negligible).
+    Accuracy (DESIGN §9.3 item 1). Observed, not proven: errors in posterior standard deviations
+    against a 40–45-digit solve of the float64 ``K``, over about 1,500 random Minnesota level-data
+    problems (4,400 problem–λ pairs: levels 0–1e4, AR roots 0.3–0.9995, ``var_const = 1e7``,
+    ``q = 4–30`` plus the ``q = 100`` reference shape, ``T = 12–300`` with ``T < q`` included,
+    ``λ`` from ``0.01ψ`` to ``100ψ``). With ``κ = cond(sKs)`` the condition number of the
+    Jacobi-scaled posterior precision ``K = diag(d) + cmask⊗cmask ⊙ G/λ`` on the active block and
+    ``t = max_k |E θ_k|/sd_k`` its largest posterior t-ratio, the covariance error is
+    ``≤ 1e-12 + 0.8εκ`` and the mean error ``≤ 1e-12 + 1.5εκ(1 + t)``. The mean carries a relative
+    error of order ``εκ``, so in sd units it grows with ``t``, which reaches 1e3 on level data
+    (intercepts and own lags hundreds of sd from 0) while ``κ`` reaches 1e9–1e11. A plain
+    ``1e-12 + cεκ`` bound on the mean would need ``c ≈ 470``; the largest mean error seen is
+    ``9e-5`` sd (statistically negligible). The cholesky_const path (:func:`precision_draw`) stays within half
+    of the same envelope; its mean error also grows with ``t`` (``39εκ`` at ``t = 696``). So the
+    two paths agree to ``1e-12`` only when ``εκ(1 + t)`` is small: they are ``6.9e-12`` apart at
+    ``κ = 374``, ``t = 259``. Path-vs-path tests should compare each path with a high-precision
+    reference, or allow ``2e-12 + 5εκ(1 + t)`` for the mean and ``2e-12 + 5εκ`` for the covariance.
 
     If ``A`` is not PSD (Cholesky fails and ``min a < −1e-10·max|a|``) or anything is non-finite,
     ``g`` is NaN, so :func:`eigen_draw` reports ``ok = False`` at the first sweep (D-18).

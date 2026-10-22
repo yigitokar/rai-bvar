@@ -113,7 +113,11 @@ def test_rne_matches_the_closed_form():
     res = geweke(NormalToy(), GewekeConfig(C=2000, M_c=M, M1=50_000, alpha=1e-3, seed=3))
     assert res.passed
     assert res.rne[0] == pytest.approx(1 / long_run, rel=0.12)
-    assert res.rne_batch is not None and np.all(np.isfinite(res.rne_batch))
+    # batch means of size b = ⌊√M_c⌋ = 14: b·Var(batch mean) = σ²·[the same bracket at M = b]
+    b = int(np.floor(np.sqrt(M)))
+    batch = (1 + kappa) / (1 - kappa) - 2 * kappa * (1 - kappa**b) / (b * (1 - kappa) ** 2)
+    assert res.rne_batch[0] == pytest.approx(1 / batch, rel=0.1)
+    assert np.all(np.isfinite(res.z_batch)) and np.all((res.p_batch > 0) & (res.p_batch <= 1))
 
 
 def test_statistics_follow_the_documented_keys_and_formulas():
@@ -151,6 +155,42 @@ def test_statistics_follow_the_documented_keys_and_formulas():
     np.testing.assert_allclose(res.z, z, rtol=1e-8)
     np.testing.assert_allclose(res.p, 2 * stats.t.sf(np.abs(z), 2), rtol=1e-8)
     assert res.z_batch is None and res.rne_batch is None
+
+
+def test_batch_means_follow_the_documented_formulas():
+    # M_c = 7: b = ⌊√7⌋ = 2 and 3 batches over the LAST 6 sweeps (sweeps 1–2, 3–4, 5–6; sweep 0
+    # is left out), pooled over the C chains
+    toy = NormalToy()
+    cfg = GewekeConfig(C=3, M_c=7, M1=5, alpha=0.05, seed=11)
+    res = geweke(toy, cfg)
+    comp = composition_id(toy)
+    g_mc = []
+    for m in range(cfg.M1):
+        k = validation_key(cfg.seed, int(Tier.G), comp, m)
+        th = toy.prior_sample(random.fold_in(k, int(Part.MC_PRIOR)))
+        g_mc.append(toy.test_functions(th, toy.simulate(random.fold_in(k, int(Part.MC_SIM)), th)))
+    g_mc = np.asarray(g_mc)
+    chains = []
+    for c in range(cfg.C):
+        k = validation_key(cfg.seed, int(Tier.G), comp, c)
+        th = toy.prior_sample(random.fold_in(k, int(Part.PRIOR)))
+        gs = []
+        for it in range(cfg.M_c):
+            u = jnp.uint32(it)
+            y = toy.simulate(random.fold_in(random.fold_in(k, int(Part.SIM)), u), th)
+            th = toy.step(random.fold_in(k, int(Part.STEP)), u, th, y)
+            gs.append(toy.test_functions(th, y))
+        chains.append(np.asarray(gs))
+    chains = np.asarray(chains)  # (C, M_c, G)
+    b = 2
+    batch_means = chains[:, 1:].reshape(cfg.C, 3, b, -1).mean(axis=2).reshape(cfg.C * 3, -1)
+    tau2 = b * batch_means.var(axis=0, ddof=1)
+    diff = g_mc.mean(0) - chains.mean(axis=(0, 1))
+    z_b = diff / np.sqrt(g_mc.var(0, ddof=1) / cfg.M1 + tau2 / (cfg.C * cfg.M_c))
+    np.testing.assert_allclose(res.z_batch, z_b, rtol=1e-7)
+    np.testing.assert_allclose(res.p_batch, 2 * stats.norm.sf(np.abs(z_b)), rtol=1e-7)
+    np.testing.assert_allclose(res.rne_batch, g_mc.var(0, ddof=1) / tau2, rtol=1e-7)
+    np.testing.assert_allclose(res.z, diff / np.sqrt(res.var_mc / 5 + res.var_chain_means / 3))
 
 
 def test_results_do_not_depend_on_block_sizes():
@@ -212,6 +252,37 @@ def test_sampler_failures_in_the_sc_chains_fail_with_counts():
         chains |= ~np.isfinite(np.asarray(th))
     assert res.n_nonfinite[NAMES.index("theta")] == nan_states
     assert 0 < chains.sum() < 0.2 * SMALL.C  # rare chains
+
+
+@dataclass(frozen=True)
+class ClippedSampler(NormalToy):
+    """The sampler never returns θ > 2.4, and ``ybar`` is NaN for θ > 2.5 (``nan_above``). The SC
+    chains evaluate the test functions only after a step, so only the MC simulator, which draws
+    θ from the prior, can produce the NaN."""
+
+    nan_above: float | None = 2.5
+    name: str = "clipped_sampler"
+
+    def step(self, key, it, th, y):
+        return jnp.minimum(super().step(key, it, th, y), 2.4)
+
+
+def test_non_finite_mc_draws_fail_with_counts():
+    toy = ClippedSampler()
+    res = geweke(toy, SMALL)
+    nan_g = [NAMES.index(n) for n in ("ybar", "ybar2", "theta_ybar")]
+    # n_nonfinite is exactly the number of MC prior draws above 2.5 (rerun from the MC keys)
+    keys = rep_keys(SMALL.seed, Tier.G, composition_id(toy), np.arange(SMALL.M1))
+    th = jax.vmap(lambda k: toy.prior_sample(random.fold_in(k, int(Part.MC_PRIOR))))(keys)
+    n_mc = int(np.sum(np.asarray(th) > 2.5))
+    assert 0 < n_mc < 0.05 * SMALL.M1  # P(θ > 2.5) = P(Z > 2) ≈ 2.3%
+    np.testing.assert_array_equal(res.n_nonfinite[nan_g], n_mc)
+    other = [j for j in range(len(NAMES)) if j not in nan_g]
+    assert np.all(res.n_nonfinite[other] == 0)
+    assert np.all(res.p[nan_g] == 0.0) and set(res.failing) >= {"ybar", "ybar2", "theta_ybar"}
+    assert not res.passed and res.p_bonferroni == 0.0
+    # the NaN draws are excluded from the MC moments, so the means alone stay finite
+    assert np.all(np.isfinite(res.mean_mc)) and np.all(np.isfinite(res.z[nan_g]))
 
 
 def test_constant_test_function_carries_no_evidence():

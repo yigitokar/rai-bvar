@@ -2,7 +2,9 @@
 
 Dense oracles with injected noise, exact padding, packed/tiled/batched Gram agreement, the two
 Constant fast paths against the Cholesky path (moments to 1e-12 and KS on 10⁴ draws), the eigen
-and Cholesky paths on Minnesota level data against a 45-digit solve (``1e-12 + 30ε·cond(sKs)``), the
+and Cholesky paths on Minnesota level data against a 45-digit solve (mean ``1e-12 + 5εκ(1 + t)``,
+covariance ``1e-12 + 5εκ``, ``κ = cond(sKs)``, ``t`` the largest posterior t-ratio) with regression
+pins on the graded decomposition of ``eigen_prepare``, the
 tridiagonal sampler against dense ``Q``/``slogdet``, the stable 2×2 algebra against exact rationals
 (N02 T7), Jacobi scaling at 1e8 precision disparities, failures as values, ``vmap`` = loop, and a
 non-gating timing table at the reference shapes.
@@ -13,6 +15,7 @@ from __future__ import annotations
 import time
 from decimal import Decimal, localcontext
 from fractions import Fraction
+from types import SimpleNamespace
 from typing import Any
 
 import jax
@@ -387,9 +390,50 @@ def _dec_moments(K: np.ndarray, b: np.ndarray, digits: int = 45):
         return np.array([float(x) for x in mean]), np.array([[float(x) for x in c] for c in cov])
 
 
+def level_problem(seed: int, n: int, p: int, T: int, i: int, rho: float, level: float):
+    """:func:`mode1_problem` on level data: ``drift = (1 − ρ)·level``, ``y_0 = level``."""
+    return mode1_problem(seed, i=i, n=n, p=p, T=T, rho=rho, drift=(1.0 - rho) * level, y0=level)
+
+
+def level_reference(G, d, mean0, fty, cmask, lam) -> SimpleNamespace:
+    """45-digit mean and covariance of the active block of ``K = diag(d) + cmask⊗cmask ⊙ G/λ``
+    (cholesky_const, DESIGN §3.7.2) from the float64 ``K``, with ``κ = cond(sKs)`` (Jacobi-scaled
+    precision) and ``t = max_k |E θ_k|/sd_k``; also the float64 ``K`` and right-hand side."""
+    act = cmask > 0
+    K = np.diag(d) + np.outer(cmask, cmask) * G / lam
+    rhs = d * mean0 + cmask * fty / lam
+    Ka = K[np.ix_(act, act)]
+    m_ex, C_ex = _dec_moments(Ka, rhs[act])
+    s = 1.0 / np.sqrt(np.diag(Ka))
+    kappa = float(np.linalg.cond(s[:, None] * Ka * s[None, :]))
+    t = float(np.max(np.abs(m_ex) / np.sqrt(np.diag(C_ex))))
+    return SimpleNamespace(act=act, K=K, rhs=rhs, m=m_ex, C=C_ex, kappa=kappa, t=t)
+
+
+def sd_errors(m, C, ref) -> tuple[float, float]:
+    """Largest mean and covariance errors on the active block, in posterior sd."""
+    a = ref.act
+    sd = np.sqrt(np.diag(ref.C))
+    em = np.max(np.abs(m[a] - ref.m) / sd)
+    ec = np.max(np.abs(C[np.ix_(a, a)] - ref.C) / np.outer(sd, sd))
+    return float(em), float(ec)
+
+
+def assert_in_envelope(m, C, ref, c: float) -> None:
+    """Mean error ``≤ 1e-12 + cεκ(1 + t)`` and covariance error ``≤ 1e-12 + cεκ`` (the accuracy
+    envelope of :func:`LA.eigen_prepare`; both paths are observed within ``c = 1.5``)."""
+    em, ec = sd_errors(m, C, ref)
+    eps = np.finfo(np.float64).eps
+    assert em <= 1e-12 + c * eps * ref.kappa * (1.0 + ref.t), (em, ref.kappa, ref.t)
+    assert ec <= 1e-12 + c * eps * ref.kappa, (ec, ref.kappa)
+
+
 # (seed, n, p, T, i, ρ, level): Minnesota level data with var_const = 1e7. Well-conditioned but
 # graded (level 0), persistent levels with cond(sKs) up to ~1e10, the reference shape (q = 100),
 # and T < q, where the correlation of the Gram is singular and eigen_prepare falls back to eigh.
+# 2021 (T < q, cond ≤ 940) fails by ~50x with the default divide-and-conquer SVD; 1010, 5320 and
+# 21064 have posterior t-ratios of 280–700 (eigen mean error 35–300εκ); 20113 has the largest
+# observed eigen mean error relative to the envelope (c = 1.5 at κ = 25, t = 308).
 LEVEL_PROBLEMS = [
     (102, 4, 2, 60, 2, 0.5, 0.0),
     (109, 4, 2, 60, 1, 0.99, 100.0),
@@ -398,37 +442,81 @@ LEVEL_PROBLEMS = [
     (2, 20, 4, 300, 19, 0.999, 900.0),
     (202, 6, 4, 15, 3, 0.5, 0.0),
     (201, 6, 4, 15, 2, 0.99, 100.0),
+    (2021, 6, 4, 25, 1, 0.95, 0.0),
+    (1010, 3, 1, 200, 0, 0.99, 1e3),
+    (5320, 2, 1, 200, 1, 0.99, 1e4),
+    (21064, 2, 1, 200, 0, 0.999, 1e4),
+    (20113, 2, 1, 80, 0, 0.99, 1.0),
 ]
 
 
 @pytest.mark.parametrize("seed,n,p,T,i,rho,level", LEVEL_PROBLEMS)
 def test_constant_paths_on_level_data_vs_45_digits(seed, n, p, T, i, rho, level):
     """Eigen and Cholesky paths against a 45-digit solve on Minnesota level data (DESIGN §9.3
-    item 1). Both are backward stable, so their error in posterior sd is bounded by the
-    conditioning of the Jacobi-scaled posterior precision: ``1e-12 + 30ε·cond(sKs)`` (observed:
-    eigen ``≤ 12ε·cond``, Cholesky ``≤ 4ε·cond`` once ``cond > 1e3``; ``≤ 7e-13`` below). The two
-    paths agree to 1e-12 only when ``cond(sKs)`` is small; with persistent levels it reaches 1e10."""
-    G, d, mean0, fty, cmask, lam0 = mode1_problem(
-        seed, i=i, n=n, p=p, T=T, rho=rho, drift=(1.0 - rho) * level, y0=level
-    )
+    item 1), in the accuracy envelope of :func:`LA.eigen_prepare`: mean error
+    ``≤ 1e-12 + cεκ(1 + t)``, covariance error ``≤ 1e-12 + cεκ`` (``κ = cond(sKs)``, ``t`` the
+    largest posterior t-ratio). Over 4,400 random problem–λ pairs the eigen path stays within
+    ``c = 1.5`` (tested at 5) and the Cholesky path within 0.5 (tested at 1). Both mean errors
+    grow with ``t`` (eigen up to ``1e-12 + 470εκ``, Cholesky ``39εκ`` on seed 5320), so the two
+    paths agree to 1e-12 only when ``εκ(1 + t)`` is small."""
+    G, d, mean0, fty, cmask, lam0 = level_problem(seed, n, p, T, i, rho, level)
     q = len(d)
-    act = cmask > 0
     c = LA.eigen_prepare(*j(G, d, mean0, fty, cmask))
     for lam_mult in (0.01, 1.0, 100.0):
         lam = lam0 * lam_mult
-        K = np.diag(d) + np.outer(cmask, cmask) * G / lam
-        rhs = d * mean0 + cmask * fty / lam
-        Ka = K[np.ix_(act, act)]
-        m_ex, C_ex = _dec_moments(Ka, rhs[act])
-        s = 1.0 / np.sqrt(np.diag(Ka))
-        tol = 1e-12 + 30.0 * np.finfo(np.float64).eps * np.linalg.cond(s[:, None] * Ka * s[None, :])
-        m_ex_full, C_ex_full = np.zeros(q), np.eye(q)
-        m_ex_full[act], C_ex_full[np.ix_(act, act)] = m_ex, C_ex
-        m_ch, C_ch = (np.asarray(a) for a in LA.precision_moments(*j(K, rhs)))
+        ref = level_reference(G, d, mean0, fty, cmask, lam)
+        m_ch, C_ch = (np.asarray(a) for a in LA.precision_moments(*j(ref.K, ref.rhs)))
         m_e, C_e = linear_moments(lambda z, lam=lam: LA.eigen_draw(c, lam, z)[0] * cmask, q)
-        assert_moments_close(m_ch, C_ch, m_ex_full, C_ex_full, cmask, tol)
-        assert_moments_close(m_e, C_e, m_ex_full, C_ex_full, cmask, tol)
+        assert_in_envelope(m_ch, C_ch, ref, 1.0)
+        assert_in_envelope(m_e, C_e, ref, 5.0)
         assert bool(LA.eigen_draw(c, lam, jnp.zeros(q))[1].ok)
+
+
+# Problems on which an alternative to a choice in eigen_prepare is far outside a tenth of the
+# envelope while the shipped decomposition is well inside it (units of c, all three λ):
+# 42033: shipped ≤ 0.04, eigh factor of A in place of its Cholesky factor 1.2–1.3;
+# 8049: shipped ≤ 0.17, Householder QR of Bᵀ without the column sort 1.1–2.9.
+PIN_PROBLEMS = [
+    (42033, 5, 3, 25, 4, 0.9995, 100.0),
+    (8049, 2, 1, 200, 1, 0.9995, 1e4),
+]
+
+
+@pytest.mark.parametrize("seed,n,p,T,i,rho,level", PIN_PROBLEMS)
+def test_eigen_prepare_graded_choices_are_pinned(seed, n, p, T, i, rho, level):
+    """Regression pins on the choices that make :func:`LA.eigen_prepare` accurate on graded
+    problems: the Cholesky factor of the correlation ``A`` (eigh only as the fallback), the sort
+    of the columns of ``Bᵀ`` by decreasing ``δ`` before the QR, and the QR-iteration SVD. On these
+    problems the eigen path is within ``c = 0.4`` of the envelope, which the alternatives listed
+    at ``PIN_PROBLEMS`` miss by 2.7x or more; the divide-and-conquer SVD fails the envelope test
+    itself on seed 2021. A pin, not a bound: elsewhere the shipped path reaches ``c = 1.5``."""
+    G, d, mean0, fty, cmask, lam0 = level_problem(seed, n, p, T, i, rho, level)
+    q = len(d)
+    c = LA.eigen_prepare(*j(G, d, mean0, fty, cmask))
+    for lam_mult in (0.01, 1.0, 100.0):
+        lam = lam0 * lam_mult
+        ref = level_reference(G, d, mean0, fty, cmask, lam)
+        m_e, C_e = linear_moments(lambda z, lam=lam: LA.eigen_draw(c, lam, z)[0] * cmask, q)
+        assert_in_envelope(m_e, C_e, ref, 0.4)
+
+
+def test_eigen_path_gives_an_all_zero_regressor_its_prior():
+    """An active regressor that is 0 in every row has ``δ = 0``: its column of ``Bᵀ`` must be 0
+    (not the unit pivot that stands in for it in the Cholesky of ``A``), so its draw is the prior
+    ``N(mean0_k, 1/d_k)``, as on the Cholesky path."""
+    G, d, mean0, fty, cmask, lam = mode1_problem(21)
+    k = 2
+    G[k, :] = G[:, k] = 0.0
+    fty[k] = 0.0
+    q = len(d)
+    cache = LA.eigen_prepare(*j(G, d, mean0, fty, cmask))
+    K = np.diag(d) + np.outer(cmask, cmask) * G / lam
+    m_ref, C_ref = (
+        np.asarray(a) for a in LA.precision_moments(*j(K, d * mean0 + cmask * fty / lam))
+    )
+    m, C = linear_moments(lambda z: LA.eigen_draw(cache, lam, z)[0] * cmask, q)
+    assert_moments_close(m, C, m_ref * cmask, C_ref, cmask, 1e-12)
+    assert abs(m[k] - mean0[k]) * np.sqrt(d[k]) <= 1e-12 and abs(C[k, k] * d[k] - 1.0) <= 1e-12
 
 
 def ks_standardised(draws: np.ndarray, mean: np.ndarray, cov: np.ndarray, r) -> list[float]:

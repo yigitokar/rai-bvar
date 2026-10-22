@@ -8,6 +8,8 @@ lanes equal unbatched calls; key discipline.
 
 from __future__ import annotations
 
+import types
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -39,6 +41,26 @@ def test_uniform_tiny_range_shape_and_stream():
     ref = jr.uniform(key(0), (100_000,), dtype=jnp.float64, minval=np.finfo(np.float64).tiny)
     assert np.array_equal(np.asarray(u), np.asarray(ref))
     assert np.all(np.isfinite(np.log(np.asarray(u))))
+
+
+def test_uniform_tiny_floors_the_zero_draw(monkeypatch):
+    """The draw whose random bits give ``u = 0`` (probability 2⁻⁵² per draw, so no sample shows
+    it) comes out as ``TINY``, which keeps ``log u`` finite in every log-uniform (N07 §9.1),
+    including the ``a < 1`` boost of :func:`R.loggamma`. A stand-in ``jax.random`` whose
+    ``uniform`` returns the bottom of the requested interval (``maxval = minval``, through JAX's
+    own affine map and floor: what the zero-bits draw gives) makes every draw that one."""
+    real = jr.uniform
+
+    def bottom(key, shape=(), dtype=None, minval=0.0, maxval=1.0):
+        return real(key, shape, dtype=dtype, minval=minval, maxval=minval)
+
+    stub = types.ModuleType("jax_random_zero_bits")
+    stub.__dict__.update(vars(jr))
+    stub.uniform = bottom
+    monkeypatch.setattr(R, "jr", stub)
+    assert np.array_equal(np.asarray(R.uniform_tiny(key(0), (3,))), np.full(3, R.TINY))
+    lg = np.asarray(R.loggamma(key(1), jnp.full(64, 1e-3)))
+    assert np.all(np.isfinite(lg)) and np.all(lg < -7e5)  # log G_{a+1} + log(TINY)/a
 
 
 # --------------------------------------------------------------------------- categorical (D-4)

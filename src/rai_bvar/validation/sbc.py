@@ -17,35 +17,49 @@ Algorithm 2, N06 §4.2). For replication ``i``:
    blocking, which bounds the idle work of the vectorised ``while`` loops).
 4. ``rank = n_less + ⌊u(n_tie + 1)⌋`` per quantity (one ``u`` per quantity).
 
-**Decision** (DESIGN §9.6). γ-test p-values from the exact Säilynoja recursion, Bonferroni over
-the ``Q`` quantities at ``alpha``; any replication with a non-finite quantity (pilot, truth or kept
-draws) fails the test (never dropped); and two ESS rules on the thinned draws:
+**Decision** (DESIGN §9.6). The test passes iff all three hold:
 
-- *per replication* (the cap): the ESS the pilot predicts for an AR(1) with the pilot IAT,
-  ``ρ = (IAT − 1)/(IAT + 1)``, ``ESS_i = L(1 − ρ^{t_i})/(1 + ρ^{t_i})``, must reach ``min_ess·L``
-  for at least ``ess_coverage`` of the replications. Uncapped, ``t_i = ⌈2·IAT_i⌉`` gives
-  ``ESS_i ≥ 0.96L``, so this rule catches replications whose thinning hit ``t_max``;
-- *kept draws* (the pilot): per quantity, ``L/max_a τ̄_a`` must reach ``min_ess·L``, where
-  ``τ̄_a`` is the Geyer IAT of the autocovariances, pooled over replications, of the ECDF
-  indicators ``1{f ≤ q̂_{i,a}}`` at each replication's own empirical quantiles,
-  ``a ∈`` :data:`KEPT_LEVELS` (Talts et al. §5.1: the rank is a CDF statistic). For continuous
-  ``f`` every replication's indicator has variance ``≈ a(1 − a)``, so replications weigh equally
-  (N06 §4.2 rejects the pooled lag-1 autocorrelation of ``f`` itself, which a few large-variance
-  replications dominate); a degenerate discrete sequence weighs ``≈ 0``. A level is used only
-  when Kish's effective number of replications ``(Σγ̂_{i,0})²/Σγ̂_{i,0}²`` reaches
-  ``pooled_min_reps`` (s.e. of the pooled ``ρ̂_k ≈ 1/√(n_eff·L)``; with iid draws, ``n = 40``
-  and ``L = 99``, none of 2·10⁴ simulations fell below ``0.84L``). This catches a pilot that
-  underestimates the IAT (e.g. a pilot shorter than the IAT), which the per-replication rule
-  cannot see. It is lenient: indicator autocorrelations are below those of ``f``
-  (``(2/π)·asin ρ`` at the median of a Gaussian AR(1)). Quantities with no qualifying level
-  (``ess_pooled`` NaN) are not gated by this rule.
+1. *γ test*: p-values from the exact Säilynoja recursion, Bonferroni over the ``Q`` quantities at
+   ``alpha`` (fail iff ``min p ≤ alpha/Q``; Holm lists the failing quantities);
+2. *no failed replication*: any replication with a non-finite quantity (pilot, truth or kept
+   draws) fails the test; it is reported, never dropped;
+3. *the ESS rule*, the single rule of DESIGN §9.6: the per-replication thinned ESS reaches
+   ``min_ess·L`` (0.8 L) for at least ``ess_coverage`` (99%) of the replications.
 
-The per-replication empirical ESS of ``L = 99`` kept draws is too noisy to gate on (iid draws reach
-``0.8L`` in only ~76% of replications for one quantity), so its minimum over quantities is
-reported as a diagnostic only (``ess_kept``).
+The per-replication thinned ESS is the ESS of replication ``i``'s production chain thinned by
+``t_i``, computed from that replication's pilot IAT with the AR(1) form
+``ρ_i = (IAT_i − 1)/(IAT_i + 1)``, ``ESS_i = L(1 − ρ_i^{t_i})/(1 + ρ_i^{t_i})`` (``ess_thin``).
+Uncapped, ``t_i = ⌈2·IAT_i⌉`` gives ``ESS_i ≥ 0.96L``, so only replications whose thinning hit
+``t_max`` can fall short: ``ESS_i ≥ 0.8L`` iff ``ρ_i^{t_i} ≤ 1/9``, i.e. at ``t_max = 50`` iff
+``IAT_i ≤ 45.5`` (the remedy is a larger ``t_max``). The rule takes the IAT from the pilot because
+``L = 99`` kept draws cannot certify ``0.8L`` for one replication: with iid draws the Geyer ESS of
+the kept draws reaches ``0.8L`` in only ~76% of replications for one quantity, so gating on it
+would fail every correct sampler. For the same reason the rule cannot see a pilot that
+underestimates the IAT (a pilot much shorter than the IAT) unless the underestimate still exceeds
+the cap's limit (45.5 at ``t_max = 50``).
+
+Two kept-draw ESS values are reported. ``ess_kept``, the per-replication Geyer ESS of the kept
+draws (minimum over quantities), is a diagnostic only. ``ess_pooled`` is the **second gate**
+(orchestrator erratum to DESIGN §9.6, 2026-10-22): per
+quantity ``L/max_a τ̄_a``, where ``τ̄_a`` is the Geyer IAT of the autocovariances, pooled over
+replications, of the ECDF indicators ``1{f ≤ q̂_{i,a}}`` at each replication's own empirical
+quantiles, ``a ∈`` :data:`KEPT_LEVELS` (Talts et al. §5.1: the rank is a CDF statistic). For
+continuous ``f`` every replication's indicator has variance ``≈ a(1 − a)``, so replications weigh
+equally (N06 §4.2 rejects the pooled lag-1 autocorrelation of ``f`` itself, which a few
+large-variance replications dominate); a degenerate discrete sequence weighs ``≈ 0``. A level is
+used only when Kish's effective number of replications ``(Σγ̂_{i,0})²/Σγ̂_{i,0}²`` reaches
+``pooled_min_reps`` (``ess_pooled`` is NaN when no level qualifies). With iid draws, ``n = 40``
+and ``L = 99``, the minimum over 2·10⁴ simulations was ``0.836L``, so ``ess_pooled < min_ess·L``
+for any quantity fails the run: it points to a pilot that underestimates the IAT, the blind spot of
+the per-replication rule; raise ``pilot`` (or ``burn``, ``iat_factor``).
 
 **Block-conditional SBC** (:func:`block_sbc`; N06 §5.2): ``(θ̃, ỹ)`` from the joint, ``L`` iid draws
-of the block from its exact conditional given ``θ̃_−b``, ranks of the block statistics.
+of the block from its exact conditional given ``θ̃_−b``, ranks of the block statistics; the same
+decision without the ESS rule (the draws are iid).
+
+**Sequential wrapper** (:func:`sbc_sequential`, :func:`block_sbc_sequential`; DESIGN §9.4, §9.6):
+the stage value is :attr:`SBCResult.p_bonferroni`, which is ``0`` whenever the run failed for a
+reason other than the γ test (failed replications are not a marginal result).
 
 **Keys**: ``validation_key(seed, Tier.S | Tier.B, composition, i)`` then :class:`Part` sub-streams;
 sweep counters are uint32 (``burn + j·t + r``, DESIGN §5.6).
@@ -83,7 +97,15 @@ from rai_bvar.validation.sequential import (
 )
 from rai_bvar.validation.uniformity import gamma_test, rank_with_ties
 
-__all__ = ["SBCConfig", "SBCResult", "block_sbc", "iat", "sbc", "sbc_sequential"]
+__all__ = [
+    "SBCConfig",
+    "SBCResult",
+    "block_sbc",
+    "block_sbc_sequential",
+    "iat",
+    "sbc",
+    "sbc_sequential",
+]
 
 PyTree = Any
 
@@ -95,8 +117,9 @@ def _int_at_least(value: object, name: str, minimum: int) -> None:
 
 @dataclass(frozen=True)
 class SBCConfig:
-    """SBC sizes and rules (DESIGN §9.6 defaults). ``rep_block`` only bounds memory;
-    ``min_ess``, ``ess_coverage`` and ``pooled_min_reps`` set the two ESS rules (module doc)."""
+    """SBC sizes and rules (DESIGN §9.6 defaults). ``rep_block`` only bounds memory; ``min_ess``
+    and ``ess_coverage`` set the ESS rule; ``pooled_min_reps`` only sets the non-gating
+    ``ess_pooled`` diagnostic (module doc)."""
 
     N: int = 1000
     L: int = 99
@@ -137,8 +160,10 @@ class SBCConfig:
 @dataclass(frozen=True)
 class SBCResult:
     """Ranks and the γ uniformity test per quantity. ``passed`` combines the Bonferroni γ test,
-    the absence of failed replications and (full SBC) the thinned-ESS coverage rule; ``reasons``
-    says why a test failed."""
+    the absence of failed replications and (full SBC) the ESS rule (module doc); ``reasons``
+    says why a test failed. ``checks_ok`` is True when everything but the γ test held (no failed
+    replication, at least one replication kept, the ESS rule met): only then is the result a
+    γ-test p-value, and ``passed == checks_ok and not failing == (p_bonferroni > alpha)``."""
 
     names: tuple[str, ...]
     ranks: np.ndarray  # (N_kept, Q) in 0..L
@@ -154,10 +179,11 @@ class SBCResult:
     failed: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
     thin: np.ndarray | None = None  # (N_kept,) per-replication thinning
     iat: np.ndarray | None = None  # (N_kept,) pilot IAT (max over quantities and tails)
-    ess_thin: np.ndarray | None = None  # (N_kept,) predicted thinned ESS
+    ess_thin: np.ndarray | None = None  # (N_kept,) per-replication thinned ESS (the ESS rule)
     ess_ok: float = 1.0  # fraction of replications with ess_thin ≥ min_ess·L
     ess_kept: np.ndarray | None = None  # (N_kept,) empirical min-over-quantities ESS (diagnostic)
-    ess_pooled: np.ndarray | None = None  # (Q,) kept-draw ESS from pooled autocovariances
+    ess_pooled: np.ndarray | None = None  # (Q,) pooled kept-draw ESS (diagnostic)
+    checks_ok: bool = False  # all non-γ checks held (fail-safe default)
 
     @property
     def N(self) -> int:
@@ -165,8 +191,12 @@ class SBCResult:
 
     @property
     def p_bonferroni(self) -> float:
-        """``min(1, Q·min p)``: the stage p-value for the Gandy–Scott wrapper."""
-        return bonferroni(self.p)
+        """The stage value for :func:`~rai_bvar.validation.sequential.gandy_scott`: the
+        Bonferroni-adjusted γ p-value ``min(1, Q·min p)`` when ``checks_ok``, otherwise ``0.0``
+        (failed replications, an empty data-only filter or a failed ESS rule fail the test; they
+        are never a marginal result that a larger rerun could overturn). ``bonferroni(self.p)``
+        gives the γ value alone."""
+        return bonferroni(self.p) if self.checks_ok else 0.0
 
     def table(self):
         """A ``pandas.DataFrame`` of γ and p per quantity, smallest p first."""
@@ -244,7 +274,7 @@ def _thinned_ess(tau: np.ndarray, t: np.ndarray, L: int) -> np.ndarray:
     return L * (1.0 - rho_t) / (1.0 + rho_t)
 
 
-#: ECDF levels of the kept-draw ESS rule: tails (tail-ESS) and quartiles (bulk)
+#: ECDF levels of the ``ess_pooled`` diagnostic: tails (tail-ESS) and quartiles (bulk)
 KEPT_LEVELS = (0.05, 0.25, 0.5, 0.75, 0.95)
 
 
@@ -346,20 +376,21 @@ def _blocks(indices: np.ndarray, size: int):
 
 def _decide(
     names: tuple[str, ...], ranks: np.ndarray, L: int, alpha: float, failed: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, tuple[str, ...], list[str]]:
-    reasons: list[str] = []
+) -> tuple[np.ndarray, np.ndarray, tuple[str, ...], list[str], list[str]]:
+    """γ test (Bonferroni over ``Q``; Holm lists the failures) and the failed-replication check:
+    ``(gamma, p, failing, γ reasons, other reasons)``."""
     if ranks.shape[0] == 0:
-        reasons.append("no replication survived the data-only filter")
-        nan = np.full(len(names), np.nan)
-        return nan, np.zeros(len(names)), names, reasons
+        empty = "no replication survived the data-only filter"
+        return np.full(len(names), np.nan), np.zeros(len(names)), names, [], [empty]
     gammas, pvals = gamma_test(ranks, L)
     reject = holm_reject(pvals, alpha)
     failing = tuple(n for n, r in zip(names, reject, strict=True) if r)
+    gamma_reasons, other = [], []
     if failing:
-        reasons.append(f"γ test (Bonferroni over {len(names)} at α = {alpha:g}): {failing}")
+        gamma_reasons.append(f"γ test (Bonferroni over {len(names)} at α = {alpha:g}): {failing}")
     if failed.any():
-        reasons.append(f"{int(failed.sum())} replication(s) failed (non-finite quantities)")
-    return gammas, pvals, failing, reasons
+        other.append(f"{int(failed.sum())} replication(s) failed (non-finite quantities)")
+    return gammas, pvals, failing, gamma_reasons, other
 
 
 def sbc(
@@ -432,21 +463,25 @@ def sbc(
                     acov_sum += acov.sum(axis=0)
                     var_sq += (acov[..., 0] ** 2).sum(axis=0)
 
-    gammas, pvals, failing, reasons = _decide(names, ranks, cfg.L, cfg.alpha, failed)
+    gammas, pvals, failing, gamma_reasons, other = _decide(names, ranks, cfg.L, cfg.alpha, failed)
+    # the ESS rule (DESIGN §9.6): per-replication thinned ESS ≥ min_ess·L for ≥ ess_coverage
     ess_thin = _thinned_ess(tau, thin, cfg.L)
     ess_ok = float(np.mean(ess_thin >= cfg.min_ess * cfg.L)) if n_kept else 0.0
     if n_kept and ess_ok < cfg.ess_coverage:
-        reasons.append(
+        other.append(
             f"thinned ESS ≥ {cfg.min_ess:g}·L in only {100 * ess_ok:.1f}% of replications "
             f"(need {100 * cfg.ess_coverage:g}%; raise t_max or pilot)"
         )
+    # second ESS gate (module doc): catches pilots that underestimate the IAT
     ess_pooled = _pooled_ess(acov_sum, var_sq, cfg.L, cfg.pooled_min_reps) if cfg.L >= 4 else None
-    if ess_pooled is not None and np.any(low := ess_pooled < cfg.min_ess * cfg.L):
-        slow = tuple(n for n, lo in zip(names, low, strict=True) if lo)
-        reasons.append(
-            f"kept draws: pooled ESS < {cfg.min_ess:g}·L for {slow} (the pilot underestimates "
-            "the IAT; raise pilot, burn or iat_factor)"
-        )
+    if ess_pooled is not None:
+        low = np.isfinite(ess_pooled) & (ess_pooled < cfg.min_ess * cfg.L)
+        if low.any():
+            other.append(
+                f"pooled kept-draw ESS below {cfg.min_ess:g}·L for {[names[q] for q in np.flatnonzero(low)]}: "
+                "the pilot underestimates the IAT (raise pilot, burn or iat_factor)"
+            )
+    reasons = gamma_reasons + other
     return SBCResult(
         names=names,
         ranks=ranks,
@@ -466,6 +501,7 @@ def sbc(
         ess_ok=ess_ok,
         ess_kept=ess_kept,
         ess_pooled=ess_pooled,
+        checks_ok=not other,
     )
 
 
@@ -477,10 +513,11 @@ def sbc_sequential(
     k: int = 3,
     delta: int = 4,
 ) -> tuple[SequentialResult, list[SBCResult]]:
-    """:func:`sbc` inside the Gandy–Scott wrapper at ``cfg.alpha``: stage ``s`` uses
+    """:func:`sbc` inside the Gandy–Scott wrapper at ``cfg.alpha`` (DESIGN §9.6): stage ``s`` uses
     :func:`~rai_bvar.validation.sequential.stage_seed` and ``N`` multiplied by ``Δ`` after stage 1.
-    A stage whose replications failed or whose ESS rule failed returns ``q = 0`` (failed fits
-    fail the test; they are not a marginal result)."""
+    The stage value is :attr:`SBCResult.p_bonferroni`, so a stage whose replications failed or
+    whose ESS rule failed returns ``q = 0`` (failed fits fail the test; they are not a marginal
+    result)."""
     results: list[SBCResult] = []
 
     def run(stage: int) -> float:
@@ -489,8 +526,7 @@ def sbc_sequential(
             model, quantities, names, replace(cfg, seed=stage_seed(cfg.seed, stage), N=cfg.N * m)
         )
         results.append(res)
-        gamma_only = all(r.startswith("γ test") for r in res.reasons)
-        return res.p_bonferroni if gamma_only else 0.0
+        return res.p_bonferroni
 
     return gandy_scott(run, cfg.alpha, k, delta), results
 
@@ -563,7 +599,8 @@ def block_sbc(
             finite[start : start + size] = fin
     kept = np.flatnonzero(keep)
     failed = ~finite[kept]
-    gammas, pvals, failing, reasons = _decide(names, ranks[kept], L, alpha, failed)
+    gammas, pvals, failing, gamma_reasons, other = _decide(names, ranks[kept], L, alpha, failed)
+    reasons = gamma_reasons + other
     return SBCResult(
         names=names,
         ranks=ranks[kept],
@@ -577,4 +614,48 @@ def block_sbc(
         n_total=int(N),
         kept=kept,
         failed=failed,
+        checks_ok=not other,
     )
+
+
+def block_sbc_sequential(
+    joint_sample: Callable,
+    conditional_draws: Callable,
+    stat: Callable,
+    N: int = 200,
+    L: int = 99,
+    seed: int = 0,
+    *,
+    names: tuple[str, ...] | None = None,
+    alpha: float = 1e-3,
+    composition: int = 0,
+    max_abs_data: float | None = None,
+    rep_block: int = 200,
+    k: int = 3,
+    delta: int = 4,
+) -> tuple[SequentialResult, list[SBCResult]]:
+    """:func:`block_sbc` inside the Gandy–Scott wrapper at family level ``alpha`` (Tier B,
+    DESIGN §9.4: ``k = 3``, ``Δ = 4``, fresh keys per stage): stage ``s`` uses
+    :func:`~rai_bvar.validation.sequential.stage_seed` ``(seed, s)`` and ``N`` multiplied by ``Δ``
+    after stage 1. The stage value is :attr:`SBCResult.p_bonferroni`, so a stage with failed
+    replications returns ``q = 0`` and fails at once."""
+    results: list[SBCResult] = []
+
+    def run(stage: int) -> float:
+        res = block_sbc(
+            joint_sample,
+            conditional_draws,
+            stat,
+            N=N * stage_multiplier(stage, delta),
+            L=L,
+            seed=stage_seed(seed, stage),
+            names=names,
+            alpha=alpha,
+            composition=composition,
+            max_abs_data=max_abs_data,
+            rep_block=rep_block,
+        )
+        results.append(res)
+        return res.p_bonferroni
+
+    return gandy_scott(run, alpha, k, delta), results
