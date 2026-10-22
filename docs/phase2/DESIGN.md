@@ -548,6 +548,54 @@ class EqOut:         e: f64[n, T_pad]; log_lam: f64[n, T_pad]       # equation-p
 class SweepCtx:      data: EngineData; prior: PriorArrays; cache: FitCache; eq_out: EqOut | Empty
 ```
 
+### 2.10 Contract additions made during the WP1 freeze (owner sign-off pending; §13 rule 2)
+
+Draw containers (`state.py`). §3, §5.3 and §7.2 use these types without defining them:
+
+```text
+StructDraw:   a: f64[n, n−1]
+LinearDraw:   gamma: f64[n, k]                                        γ_i = δ_i + M_c a_i
+CCCMDraw:     Pi: f64[k, n]
+GlobDraw:     mean: CCCMDraw | Empty; coef: Empty; vol: Empty; struct: Empty    mirrors GlobalState
+ConstantDraw: log_lam: f64[n]
+SVDraw:       h_T, mu, phi, sigma: f64[n]                             h_T = h[T_eff]
+SVRWDraw:     h_T, sigma: f64[n]
+OutlierDraw:  log_p, log1m_p: f64[n]
+TDraw:        nu: f64[n]
+OutlierTDraw: log_p, log1m_p, nu: f64[n]
+VolDraw:      core: ConstantDraw | SVDraw | SVRWDraw; trans: OutlierDraw | TDraw | OutlierTDraw | Empty
+ParamDraw:    glob: GlobDraw; mean: LinearDraw | Empty; struct: StructDraw; vol: VolDraw
+PathDraw:     h: f64[n, T_pad+1]; log_scale2: f64[n, T_pad]           2 log o + log τ
+```
+
+- `MeanBlock.extract_global(glob) -> GlobDraw` fills `.mean` and leaves the other parts `Empty()`.
+- `state.py` helpers: `state_template`, `prior_template`, `draw_template(static)` (structure, shapes and
+  dtypes implied by a `StaticConfig`); `check_state_invariants(st, static, T_eff) -> list[str]` (§2.8; the only
+  non-finite value allowed is `status.min_pivot = +inf`); `leaf_path`; `Coupling.zeros`, `Coupling.__add__`;
+  `StepInfo.success`, `StepInfo.merge`; `Status.initial` (`min_pivot = +inf`); `FitCache.empty`.
+- `protocols.py`: `KernelBase` is a frozen dataclass with a keyword-only field
+  `overrides: tuple[(name, callable), ...]` (names from `INTERNALS`; part of equality and hashing, so an
+  overridden kernel never shares a cache entry with the production kernel), `impl(name)` and
+  `with_overrides(mapping)`. `OVERRIDABLE = KERNEL_SLOTS ∪ INTERNALS`. `SupportsCollapsedQuadratic`;
+  `MCMCNumericalError(..., chain=None)` pickles; `Batching` is an `IntEnum`.
+- `registry.py` freezes the class paths: `structure.recursive:Recursive`, `mean.linear:LinearStructural`,
+  `mean.linear_reduced:{ReducedEq, CCCMStep}` (kinds `linear_reduced`, `cccm`), `mean.zero:ZeroMean`,
+  `coef.fixed:FixedDiagonal`, `vol.constant:ConstantCore`, `vol.sv:SVCore` (AR and RW),
+  `vol.transitory:{NoTransitory, OutlierScale, TScale, OutlierTScale}`, `vol.robust:VolBlockImpl` (kind
+  `vol_block`).
+- `keys.py` (§5.6): `PRNG_IMPL = "threefry2x32"` is passed to `random.key`, so `jax_default_prng_impl` cannot
+  change a stream, and keys of any other implementation raise `TypeError`. `Sub.Z` is an alias of `Sub.S`
+  (value 0). `Tier` (`U=0, B=1, G=2, S=3, M=4, A=5, P=6`, append-only) for `validation_key`. `forecast_key`
+  always folds `i` (`i = 0` for draw-level randomness). `step_key` accepts only a uint32 counter (int32 and
+  int64 arrays raise; E7); other indices of any integer dtype are cast to uint32; all arguments are scalars
+  (batches through `vmap`).
+- `config.py`: `Shapes.of(n, lags, n_det, T_pad)`, `Shapes.P`, `Shapes.P_x`; `n ≤ MAX_EQUATIONS = 999`
+  (error codes). `validate_composition` adds to §3.8 item 2: `coupled` holds exactly when some prior block is
+  λ-scaled; Mode II only with `linear_structural`; any `const_path` other than `weighted` needs
+  `linear_structural` and constant weights; `fixed_factor` also needs `not coef.varies`; `rw` and
+  `zero_offset` need the SV core; `outlier_K ≥ 2` and the `ν > 2` rule apply only when outliers or t are used.
+  Field validation of `MeanStatic` requires `gram_tile > 0` exactly when `gram == "packed_tiled"`.
+
 ---
 
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
@@ -1229,7 +1277,8 @@ validation: fold_in(key(seed), Stream.VALIDATION) → tier → composition id �
   (mean, contemp, CCCM) `Z=0` (CCCM folds `j` before `Sub.Z`).
 - **All counters are uint32 with explicit casts** (`it0 + j·thin + r` computed from `uint32` operands; the
   `fori_loop` index is cast before use). The host asserts `burn + ⌈draws/chunk⌉·chunk·thin < 2³²`.
-- One consumer per key; uniforms used under a log use `minval=tiny`; `rbg`/`unsafe_rbg` forbidden; a test runs a
+- One consumer per key; uniforms used under a log use `minval=tiny`; `rbg`/`unsafe_rbg` forbidden (`keys.PRNG_IMPL`
+  is pinned at root creation and other implementations raise; §2.10); a test runs a
   full sweep under `jax.debug_key_reuse(True)` (N07 §4.1).
 - **Seeds.** `fit(seed=…)` overrides `MCMCSettings.seed`. The backtest passes a per-origin fit seed to MCMC models
   (§11.6), in addition to the data salt (which keeps chain noise independent across windows even when a user fits

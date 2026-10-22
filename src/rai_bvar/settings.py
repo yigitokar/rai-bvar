@@ -1,0 +1,179 @@
+"""MCMC settings, runtime knobs and in-loop forecast plans (DESIGN §11.2; fixes E14, E15).
+
+Pure Python, so ``import rai_bvar`` stays free of JAX (D-31).
+
+* ``MCMCSettings`` is **part of the model spec** (``BVAR.mcmc``): every field can change the
+  draws, so it enters the spec hash and the backtest cache key. ``gram`` and ``const_path`` are
+  resolved by deterministic shape rules (DESIGN §3.7.2, §10.5), never by machine properties.
+* ``Runtime`` is **not** in the spec: it holds only knobs whose bitwise invariance is tested
+  (chunk size, devices, storage location, replay copies; DESIGN §5.1, §5.2, §5.6).
+* ``FitPlan`` requests forecasts computed inside the sampling loop (DESIGN §5.8).
+"""
+
+from __future__ import annotations
+
+import math
+import os
+from dataclasses import dataclass
+from typing import Literal
+
+import numpy as np
+
+_U32 = 2**32
+
+
+def _int(obj: object, name: str, minimum: int, *, optional: bool = False) -> None:
+    value = getattr(obj, name)
+    if optional and value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int | np.integer):
+        raise TypeError(f"{type(obj).__name__}.{name} must be an int, got {value!r}")
+    if int(value) < minimum:
+        raise ValueError(f"{type(obj).__name__}.{name} must be at least {minimum}, got {value}")
+    object.__setattr__(obj, name, int(value))
+
+
+def _float(obj: object, name: str) -> float:
+    value = getattr(obj, name)
+    if isinstance(value, bool) or not isinstance(value, int | float | np.integer | np.floating):
+        raise TypeError(f"{type(obj).__name__}.{name} must be a number, got {value!r}")
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"{type(obj).__name__}.{name} must be finite, got {value!r}")
+    object.__setattr__(obj, name, value)
+    return value
+
+
+def _choice(obj: object, name: str, options: tuple[str, ...]) -> None:
+    if getattr(obj, name) not in options:
+        raise ValueError(
+            f"{type(obj).__name__}.{name} must be one of {options}, got {getattr(obj, name)!r}"
+        )
+
+
+def _bool(obj: object, name: str) -> None:
+    value = getattr(obj, name)
+    if not isinstance(value, bool | np.bool_):
+        raise TypeError(f"{type(obj).__name__}.{name} must be a bool, got {value!r}")
+    object.__setattr__(obj, name, bool(value))
+
+
+@dataclass(frozen=True)
+class MCMCSettings:
+    """Sampler settings; part of the spec because results depend on every field.
+
+    ``burn`` sweeps are run exactly (never rounded to a chunk), then ``draws`` kept draws per chain,
+    one every ``thin`` sweeps. ``warm_burn`` (default ``max(250, burn // 4)``) replaces ``burn``
+    for warm-started backtest fits (DESIGN §5.5). Parameter draws are stored every
+    ``⌈draws/store_max⌉``-th kept draw; ``store="paths"`` also stores latent paths every
+    ``path_thin``-th stored draw (DESIGN §5.3). ``t_bucket`` pads ``T_eff`` up to a multiple
+    (``T_pad``) so one compiled program serves many windows (D-23). ``converged`` needs every
+    primary monitor to have R-hat < ``rhat_max`` and bulk ESS > ``ess_min`` (DESIGN §8.2).
+    """
+
+    chains: int = 4
+    draws: int = 2000
+    burn: int = 1000
+    thin: int = 1
+    warm_burn: int | None = None
+    seed: int = 0
+    store: Literal["params", "paths"] = "params"
+    store_max: int = 2500
+    path_thin: int = 10
+    t_bucket: int = 32
+    gram: Literal["auto", "packed", "packed_tiled", "batched"] = "auto"
+    const_path: Literal["auto", "cholesky"] = "auto"
+    rhat_max: float = 1.01
+    ess_min: float = 400.0
+
+    def __post_init__(self) -> None:
+        for name, minimum in (
+            ("chains", 1),
+            ("draws", 1),
+            ("burn", 0),
+            ("thin", 1),
+            ("seed", 0),
+            ("store_max", 1),
+            ("path_thin", 1),
+            ("t_bucket", 1),
+        ):
+            _int(self, name, minimum)
+        _int(self, "warm_burn", 0, optional=True)
+        if self.seed >= 2**63:
+            raise ValueError(f"MCMCSettings.seed must be below 2**63, got {self.seed}")
+        _choice(self, "store", ("params", "paths"))
+        _choice(self, "gram", ("auto", "packed", "packed_tiled", "batched"))
+        _choice(self, "const_path", ("auto", "cholesky"))
+        if not _float(self, "rhat_max") > 1.0:
+            raise ValueError("MCMCSettings.rhat_max must exceed 1")
+        if not _float(self, "ess_min") >= 0.0:
+            raise ValueError("MCMCSettings.ess_min must be non-negative")
+        sweeps = max(self.burn, self.resolved_warm_burn) + self.draws * self.thin
+        if sweeps >= _U32:
+            raise ValueError(
+                f"burn + draws·thin = {sweeps} sweeps exceeds the uint32 sweep counter (2**32); "
+                "reduce draws or thin"
+            )
+
+    @property
+    def resolved_warm_burn(self) -> int:
+        """Burn-in sweeps of a warm-started fit: ``warm_burn`` or ``max(250, burn // 4)``."""
+        return max(250, self.burn // 4) if self.warm_burn is None else self.warm_burn
+
+    @property
+    def store_thin(self) -> int:
+        """Kept draws per stored parameter draw: ``⌈draws/store_max⌉``."""
+        return -(-self.draws // self.store_max)
+
+
+@dataclass(frozen=True)
+class Runtime:
+    """Execution knobs that never change the draws (bitwise-invariance tested; DESIGN §5.6).
+
+    ``devices="auto"`` shards chains over the local devices when there are at least two and they
+    divide ``chains`` (see ``rb.set_cpu_devices``); ``chunk`` kept draws run per compiled call;
+    ``memory_budget_gb`` only decides whether the storage plan raises; ``storage_dir`` selects a
+    memory-mapped host store; ``replay`` keeps a host copy of each chunk's start state so a
+    numerical failure can be replayed deterministically (D-18).
+    """
+
+    devices: int | Literal["auto"] = "auto"
+    chunk: int = 250
+    memory_budget_gb: float = 2.0
+    storage_dir: str | None = None
+    replay: bool = True
+    progress: bool = False
+
+    def __post_init__(self) -> None:
+        if self.devices != "auto":
+            _int(self, "devices", 1)
+        _int(self, "chunk", 1)
+        if not _float(self, "memory_budget_gb") > 0.0:
+            raise ValueError("Runtime.memory_budget_gb must be positive")
+        if self.storage_dir is not None:
+            if not isinstance(self.storage_dir, str | os.PathLike):
+                raise TypeError(
+                    f"Runtime.storage_dir must be a path or None, got {self.storage_dir!r}"
+                )
+            object.__setattr__(self, "storage_dir", os.fspath(self.storage_dir))
+        _bool(self, "replay")
+        _bool(self, "progress")
+
+
+@dataclass(frozen=True)
+class FitPlan:
+    """Forecasts computed inside the sampling loop (DESIGN §5.8): ``fit.forecast(horizon, draws,
+    seed)`` returns them when the arguments match. Needed only by models that cannot store their
+    draws (Phase 4 BART forests, Phase 5 TVP paths)."""
+
+    horizon: int
+    draws: int = 1000
+    seed: int = 0
+
+    def __post_init__(self) -> None:
+        _int(self, "horizon", 1)
+        _int(self, "draws", 1)
+        _int(self, "seed", 0)
+
+
+__all__ = ["FitPlan", "MCMCSettings", "Runtime"]

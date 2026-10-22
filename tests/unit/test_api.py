@@ -212,14 +212,23 @@ def test_conjugate_minnesota_with_inverse_wishart_runs_on_the_analytic_engine(qd
     ids=["structural", "reduced", "structural-cross", "reduced-cross-mh"],
 )
 @pytest.mark.parametrize("vol", ["iw", "ig"])
-def test_non_conjugate_forms_need_the_mcmc_engine(prior, vol):
-    with pytest.raises(NotImplementedError, match="MCMC"):
-        rb.BVAR(mean=rb.Linear(prior=prior), vol=rb.Constant(prior=vol))
+def test_non_conjugate_forms_resolve_to_the_mcmc_engine(prior, vol):
+    """Phase 2: structural and reduced forms run on the MCMC engine (SPEC §4.5). The reduced
+    form has no conjugate NIW covariance, and hyperparameter MH arrives in Phase 3."""
+    build = lambda: rb.BVAR(mean=rb.Linear(prior=prior), vol=rb.Constant(prior=vol))  # noqa: E731
+    if prior.form == "reduced" and vol == "iw":
+        with pytest.raises(ValueError, match="iw_equivalent"):
+            build()
+    elif prior.hierarchy == "mh":
+        with pytest.raises(NotImplementedError, match="MCMC"):
+            build()
+    else:
+        assert build().engine == "mcmc"
 
 
 def test_conjugate_form_requires_the_inverse_wishart_covariance():
-    with pytest.raises(ValueError, match=r"Constant\(prior='iw'\)"):
-        rb.BVAR(vol=rb.Constant(prior="ig"))
+    with pytest.raises(ValueError, match=r"requires Constant\(prior='iw'\)"):
+        rb.BVAR(mean=rb.Linear(prior=rb.Minnesota(form="conjugate")), vol=rb.Constant(prior="ig"))
 
 
 @dataclass(frozen=True)

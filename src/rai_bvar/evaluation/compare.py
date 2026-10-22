@@ -43,17 +43,25 @@ class Entry:
 
 
 def grid(factory: Callable[..., Model], **axes: Sequence[Any]) -> list[Entry]:
-    """Cartesian product of component choices, e.g. ``grid(BVAR, mean=[...], vol=[...])``."""
+    """Cartesian product of component choices, e.g. ``grid(BVAR, mean=[...], vol=[...])``.
+
+    A factory with a ``harmonise_grid(combos)`` classmethod (``BVAR``) rewrites the combinations
+    first, so ``auto`` components resolve alike in every arm (DESIGN §11.4); labels are taken
+    from the rewritten components.
+    """
     keys = list(axes)
+    combos = [dict(zip(keys, c, strict=True)) for c in itertools.product(*axes.values())]
+    harmonise = getattr(factory, "harmonise_grid", None)
+    if callable(harmonise):
+        combos = harmonise(combos)
     entries = []
-    for combo in itertools.product(*(axes[k] for k in keys)):
-        kwargs = dict(zip(keys, combo, strict=True))
-        labels = {k: _label(v) for k, v in kwargs.items()}
+    for kwargs in combos:
+        labels = {k: _label(kwargs[k]) for k in keys}
         model = factory(**kwargs)
         # prefer the model's own axes (pairs with plain models in compare/verdict) when they
         # cover every grid key; coarse axes such as {"model": name} fall back to the labels
         model_axes = dict(getattr(model, "axes", None) or {})
-        axes_ = model_axes if model_axes and set(kwargs) <= set(model_axes) else labels
+        axes_ = model_axes if model_axes and set(keys) <= set(model_axes) else labels
         entries.append(Entry(" × ".join(labels.values()), model, axes_))
     return entries
 

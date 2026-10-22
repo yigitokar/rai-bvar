@@ -24,7 +24,20 @@ class FittedModel(Protocol):
 
 @runtime_checkable
 class Model(Protocol):
-    """A model specification: immutable, picklable, and fit afresh at every forecast origin."""
+    """A model specification: immutable, picklable, and fit afresh at every forecast origin.
+
+    The protocol needs only ``fit(data)``. Optional capabilities (DESIGN §11.3, §11.6) are
+    declared by boolean attributes; the backtest passes the matching keywords only to models
+    that set them, so every other model is called exactly as ``fit(data)``:
+
+    * ``uses_fit_seed``: ``fit(data, seed=<int>)`` takes a per-origin fit seed (MCMC ``BVAR``);
+    * ``supports_warm_start``: ``fit(data, init=<previous final state>)`` warm-starts the
+      sampler (opt-in in backtests);
+    * ``requires_in_loop_forecast``: ``fit(data, plan=FitPlan(...))`` must compute forecasts
+      inside the sampling loop (no Phase 2 model).
+
+    ``BVAR.fit`` also takes ``runtime=Runtime(...)`` (execution knobs outside the spec).
+    """
 
     @property
     def name(self) -> str: ...
