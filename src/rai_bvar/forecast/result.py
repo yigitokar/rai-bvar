@@ -4,23 +4,93 @@ Each ``(chain, draw)`` slice of ``paths`` is one joint path over horizons and va
 generated from one parameter draw. ``cond_mean`` and ``cond_chol`` hold the Gaussian moments of
 ``y_{T+h}`` given that draw and the simulated path up to ``T+h−1``, which makes the log
 predictive density computable by Rao-Blackwellisation instead of density estimation.
+
+Optional accelerator variables (DESIGN §7.3, D-20; never contract fields, ignored by
+``check_structure`` and every other consumer) may ride along in the dataset; MCMC forecasts
+attach them:
+
+* ``cond_A (chain, draw, variable, variable_)``, unit lower triangular, and ``cond_scale (chain,
+  draw, horizon, variable)`` with ``cond_chol = A⁻¹ diag(cond_scale)``: the factored density
+  ``log N = −½ j log 2π − Σ_{i<j} log ℓ_i − ½‖(A(y − m))_{:j} ⊘ ℓ_{:j}‖²`` of a leading block
+  ``{0..j−1}`` (``(A⁻¹)₁₁ = (A₁₁)⁻¹``), O(n²) per draw without a triangular solve;
+* ``cond_scale_persistent (chain, draw, horizon, variable)`` (``exp(½ log λ^pers)``) and the
+  transitory parameters ``log_p``, ``log1m_p``, ``nu (chain, draw, variable)`` for the opt-in
+  transitory Rao-Blackwellisation (``rb_transitory=True``; N03 §2.2, §5.3).
 """
 
 from __future__ import annotations
 
 import json
+import math
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-from scipy.special import logsumexp
+from scipy.special import gammaln, logsumexp
 
 from rai_bvar.linalg import marginal_chol, mvn_logpdf_chol
 
 DIMS = ("chain", "draw", "horizon", "variable")
 CHOL_DIMS = (*DIMS, "variable_")
+_LOG_2PI = math.log(2.0 * math.pi)
+_TRANSITORY = ("none", "outlier", "t", "outlier_t")
+
+
+def transitory_log_density(
+    z: np.ndarray,
+    kind: str,
+    *,
+    log_p: np.ndarray | None = None,
+    log1m_p: np.ndarray | None = None,
+    nu: np.ndarray | None = None,
+    K: int = 20,
+    t_scale: str = "standardized",
+) -> np.ndarray:
+    """``log f(z)`` of the transitory-integrated standardised shock (N03 §2.2), elementwise:
+
+    =========  ==============================================================================
+    none       ``log φ(z)``
+    outlier    ``log Σ_k w_k k⁻¹ φ(z/k)``, ``w_1 = 1 − p``, ``w_k = p/(K − 1)`` (``k = 2..K``)
+    t          ``log t_{c,ν}(z)``, ``c = ν − 2`` (standardized) or ``ν`` (unit)
+    outlier_t  ``log Σ_k w_k k⁻¹ t_{c,ν}(z/k)``
+    =========  ==============================================================================
+
+    with ``log t_{c,ν}(z) = lnΓ((ν+1)/2) − lnΓ(ν/2) − ½ log(πc) − ((ν+1)/2) log(1 + z²/c)``.
+    ``log_p``, ``log1m_p`` and ``nu`` broadcast against ``z``.
+    """
+    if kind not in _TRANSITORY:
+        raise ValueError(f"kind must be one of {_TRANSITORY}, got {kind!r}")
+    z = np.asarray(z, dtype=np.float64)
+    if kind in ("t", "outlier_t"):
+        nu = np.asarray(nu, dtype=np.float64)
+        c = nu - 2.0 if t_scale == "standardized" else nu
+        const = gammaln(0.5 * (nu + 1.0)) - gammaln(0.5 * nu) - 0.5 * np.log(np.pi * c)
+
+        def base(x: np.ndarray) -> np.ndarray:
+            return const - 0.5 * (nu + 1.0) * np.log1p(x * x / c)
+
+    else:
+
+        def base(x: np.ndarray) -> np.ndarray:
+            return -0.5 * (_LOG_2PI + x * x)
+
+    if kind in ("none", "t"):
+        return base(z)
+    if K < 2:
+        raise ValueError(f"the outlier grid needs K >= 2, got {K}")
+    log_p = np.asarray(log_p, dtype=np.float64)
+    log1m_p = np.asarray(log1m_p, dtype=np.float64)
+    terms = []
+    for k in range(1, K + 1):
+        log_w = log1m_p if k == 1 else log_p - math.log(K - 1)
+        if kind == "outlier_t":
+            terms.append(log_w - math.log(k) + base(z / k))
+        else:
+            terms.append(log_w - math.log(k) - 0.5 * (_LOG_2PI + (z / k) ** 2))
+    return logsumexp(np.stack(np.broadcast_arrays(*terms)), axis=0)
 
 
 class ForecastResult:
@@ -43,8 +113,14 @@ class ForecastResult:
         origin: pd.Period,
         paths_level: np.ndarray | None = None,
         attrs: Mapping[str, Any] | None = None,
+        extra: Mapping[str, tuple[tuple[str, ...], np.ndarray]] | None = None,
     ) -> ForecastResult:
-        """Build from arrays shaped ``(draw, H, n)`` or ``(chain, draw, H, n)``."""
+        """Build from arrays shaped ``(draw, H, n)`` or ``(chain, draw, H, n)``.
+
+        ``extra`` maps names to ``(dims, array)`` of optional accelerator variables (module
+        docstring); dims use the dataset's dimension names, and an array without the leading
+        ``chain`` axis that ``dims`` names gets one. They are never contract fields.
+        """
 
         def with_chain(a: np.ndarray, core: int) -> np.ndarray:
             a = np.asarray(a, dtype=np.float64)
@@ -68,6 +144,16 @@ class ForecastResult:
         }
         if paths_level is not None:
             data["paths_level"] = (DIMS, with_chain(paths_level, 2))
+        for name, (dims, array) in (extra or {}).items():
+            if name in data or name in coords:
+                raise ValueError(f"extra variable {name!r} clashes with a contract field")
+            dims = tuple(str(d) for d in dims)
+            array = np.asarray(array)
+            if dims and dims[0] == "chain" and array.ndim == len(dims) - 1:
+                array = array[None]
+            if array.ndim != len(dims):
+                raise ValueError(f"extra variable {name!r}: {array.ndim} axes for dims {dims}")
+            data[name] = (dims, array)
         meta = {"origin": str(origin), "freq": origin.freqstr}
         for key, value in (attrs or {}).items():
             meta[key] = (
@@ -127,11 +213,27 @@ class ForecastResult:
         variables: Sequence[str] | None = None,
         *,
         return_mcse: bool = False,
+        rb_transitory: bool = False,
     ):
         """Rao-Blackwellised log predictive density of ``y_{T+h}`` (all or a subset of variables).
 
         ``log p̂ = logsumexp_s log N(y; m_s, Σ_s) − log S``. With ``return_mcse`` the delta-method
-        Monte Carlo standard error of ``log p̂`` (independent draws) is returned as well.
+        Monte Carlo standard error of ``log p̂`` is returned as well: ``sd(w)/(√S·mean(w))`` for
+        the weights ``w_s = exp(log p_s − max)`` of independent draws, multiplied by ``√(S/ESS)``
+        with ``ESS = diagnostics.ess_mean(w)`` on the ``(chain, draw)`` array when
+        ``attrs["engine"] == "mcmc"`` (autocorrelated draws; DESIGN §7.3).
+
+        A subset that is a leading block ``{0..j−1}`` of the ordering (in any order: the density
+        is invariant to permuting ``y``) uses the exact marginal factor ``L[:j, :j]`` (``L``
+        is lower triangular), or the factored ``(cond_A, cond_scale)`` variables when present;
+        other subsets factor ``L[idx]`` by QR (``linalg.marginal_chol``).
+
+        ``rb_transitory=True`` (opt-in; DESIGN §7.3, N03 §5.3 item 2, CCMM S.11–S.16) integrates
+        the transitory scales of ``T+h`` out analytically: ``log p(y_{1:j}) = Σ_{i<j}[−½ log
+        λ^pers_i + log f_i(η_i)]``, ``η_i = e^{−½ log λ^pers_i}(A(y − m))_i``, ``f_i`` from
+        :func:`transitory_log_density`. It needs the extras ``cond_A``,
+        ``cond_scale_persistent`` and the transitory parameters (MCMC forecasts) and a full or
+        leading-block subset; otherwise it warns and falls back to the drawn-scale estimator.
         """
         if not 1 <= horizon <= self.horizon:
             raise ValueError(f"horizon must be in 1..{self.horizon}")
@@ -141,17 +243,89 @@ class ForecastResult:
             y = y[idx]
         if y.size != idx.size:
             raise ValueError("y must have one value per selected variable")
-        mean = self.stacked("cond_mean")[:, horizon - 1][:, idx]
-        chol = self.stacked("cond_chol")[:, horizon - 1]
-        # a reordering of all variables also needs a new factor, not just a subset
-        chol = chol if np.array_equal(idx, np.arange(chol.shape[-1])) else marginal_chol(chol, idx)
-        logp = mvn_logpdf_chol(y, mean, chol)
+        j = idx.size
+        leading = bool(np.array_equal(np.sort(idx), np.arange(j)))
+        if leading:  # reorder to the ordering: same joint density, leading-block factor
+            order = np.argsort(idx)
+            idx, y = idx[order], y[order]
+        h = horizon - 1
+        logp = None
+        if rb_transitory and self._ds.attrs.get("transitory") == "none":
+            rb_transitory = False  # no transitory scale: the estimator below is already exact
+        if rb_transitory:
+            missing = self._rb_missing() if leading else "a leading block of the ordering"
+            if missing is None:
+                logp = self._rb_logp(y, h, j)
+            else:
+                warnings.warn(
+                    f"rb_transitory=True needs {missing}; using the drawn-scale estimator",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        if logp is None and leading and "cond_A" in self._ds and "cond_scale" in self._ds:
+            logp = self._factored_logp(y, h, j)
+        if logp is None:
+            mean = self.stacked("cond_mean")[:, h][:, idx]
+            chol = self.stacked("cond_chol")[:, h]
+            chol = chol[..., :j, :j] if leading else marginal_chol(chol, idx)
+            logp = mvn_logpdf_chol(y, mean, chol)
         lpd = float(logsumexp(logp) - np.log(logp.size))
         if not return_mcse:
             return lpd
         w = np.exp(logp - logp.max())
         mcse = float(w.std(ddof=1) / (np.sqrt(w.size) * w.mean())) if w.size > 1 else np.nan
+        if self._ds.attrs.get("engine") == "mcmc" and mcse > 0:
+            mcse *= self._ess_factor(w)
         return lpd, mcse
+
+    def _ess_factor(self, w: np.ndarray) -> float:
+        """``√(S/ESS)`` of the weights on the ``(chain, draw)`` array; 1 when the ESS is
+        undefined (fewer than 10 draws per chain, or constant weights)."""
+        from rai_bvar.diagnostics import ess_mean
+
+        chains = w.reshape(self._ds.sizes["chain"], self._ds.sizes["draw"])
+        ess = ess_mean(chains)
+        return math.sqrt(w.size / ess) if np.isfinite(ess) and ess > 0 else 1.0
+
+    def _factored_logp(self, y: np.ndarray, h: int, j: int) -> np.ndarray:
+        """``log N`` of the leading block ``{0..j−1}`` from ``(cond_A, cond_scale)`` (module
+        docstring), per stacked draw."""
+        A = self.stacked("cond_A")[:, :j, :j]
+        ell = self.stacked("cond_scale")[:, h, :j]
+        r = np.einsum("sij,sj->si", A, y - self.stacked("cond_mean")[:, h, :j]) / ell
+        return -0.5 * j * _LOG_2PI - np.log(ell).sum(axis=-1) - 0.5 * np.einsum("si,si->s", r, r)
+
+    def _rb_missing(self) -> str | None:
+        """What the transitory Rao-Blackwellisation lacks, or ``None``."""
+        kind = self._ds.attrs.get("transitory")
+        if kind not in _TRANSITORY:
+            return "the attribute 'transitory' (MCMC forecasts)"
+        need = ["cond_A", "cond_scale_persistent"]
+        need += {
+            "outlier": ["log_p", "log1m_p"],
+            "t": ["nu"],
+            "outlier_t": ["log_p", "log1m_p", "nu"],
+        }.get(kind, [])
+        absent = [name for name in need if name not in self._ds]
+        return f"the variables {absent}" if absent else None
+
+    def _rb_logp(self, y: np.ndarray, h: int, j: int) -> np.ndarray:
+        """``Σ_{i<j}[−½ log λ^pers_i + log f_i(η_i)]`` per stacked draw (N03 §5.3)."""
+        attrs = self._ds.attrs
+        kind = attrs["transitory"]
+        A = self.stacked("cond_A")[:, :j, :j]
+        ell = self.stacked("cond_scale_persistent")[:, h, :j]
+        eta = np.einsum("sij,sj->si", A, y - self.stacked("cond_mean")[:, h, :j]) / ell
+        params = {
+            name: self.stacked(name)[:, :j]
+            for name in ("log_p", "log1m_p", "nu")
+            if name in self._ds
+        }
+        logf = transitory_log_density(
+            eta, kind, K=int(attrs.get("outlier_K", 20)),
+            t_scale=str(attrs.get("t_scale", "standardized")), **params,
+        )  # fmt: skip
+        return (logf - np.log(ell)).sum(axis=-1)
 
     # ------------------------------------------------------------------ summaries
 

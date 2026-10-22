@@ -1,0 +1,436 @@
+"""Structural ``Linear`` mean: the fused ``(δ_i, a_i)`` draw (DESIGN §3.7.2; D-10, D-14, D-25, D-26;
+N05 §4.1, §5.1, §7.1–7.4).
+
+Equation ``i`` of ``A y_t = Γ x_t + Λ_t^{½} ε_t`` in δ-coordinates ``θ_i = [δ_i | a_i]``
+(``q = k + n − 1`` slots, ``a``-slot ``k + j`` active iff ``j < i``; DESIGN §2.3)::
+
+    y_i = F θ_i + e_i,   F = [X | X M_c − Y_{:, :n−1}],   γ_i = δ_i + M_c a_i   (D3: E[γ_i | a_i] = M ã_i)
+    θ_i ~ N(meanθ, diag(1/precθ)),   meanθ = [pm.mean | cm.mean],   precθ = [pm.prec | cm.prec]
+
+``pm`` is the λ-free coefficient prior of ``CoefPrior.moments_eq`` (divided here by
+``λ_i = exp(log_scale)`` in Mode II, ``coef_scaling="lambda"``); ``cm`` comes from the structure
+with its λ-scaling applied (Mode II, ``iw_equivalent``). With weights ``w_t = m_t/λ_eff,i,t`` and
+``cθ`` the active-slot mask, the exact conditional is (N05 §5.1)::
+
+    K = (cθ ⊗ cθ) ⊙ Fᵀdiag(w)F + diag(precθ),   b = precθ ⊙ meanθ + cθ ⊙ Fᵀ(w ⊙ y_i),   θ ~ N(K⁻¹b, K⁻¹)
+
+Inactive slots have mean 0, precision 1 and zero data columns, so ``K`` is block diagonal and the
+active draw equals the unpadded draw with ``z[:k+i]`` (D-15); the draw is masked afterwards.
+
+Four static paths (``MeanStatic.const_path``, resolved in ``resolve.py``; all draw the same law):
+
+* ``weighted`` (any time-varying weights): ``Fᵀdiag(w)F = weighted_gram(w, FF | F)`` (packed
+  Khatri–Rao by default, D-25), Jacobi-scaled Cholesky and two triangular solves (D-14);
+* ``cholesky_const`` (Constant core, any scaling; the oracle of the two fast paths):
+  ``Fᵀdiag(w)F = G_const/λ_i``, ``Fᵀ(w ⊙ y_i) = FtY[:, i]/λ_i``;
+* ``eigen`` (Mode I × Constant): per fit ``G̃ = d^{−½}(cθ⊗cθ ⊙ G_const)d^{−½} = Q diag(g) Qᵀ``
+  with ``d = precθ``; per sweep ``θ = d^{−½}Q(v ⊙ (u1 + u2/λ) + √v ⊙ z)``, ``v = 1/(1 + g/λ)``
+  (``O(q²)``, N05 §7.4);
+* ``fixed_factor`` (Mode II × Constant): ``K = K̃/λ_i`` with ``K̃`` λ-free, so per fit
+  ``Lc = chol(sK̃s)``, ``θ̂ = K̃⁻¹r̃``; per sweep ``θ = θ̂ + √λ_i·s ⊙ Lc⁻ᵀz`` (N05 §5.1).
+
+On the Constant paths the weights are ``m_t/λ_i``, so ``1/λ_i = w_0`` (row 0 is always real).
+
+Coupling (D-30, DESIGN §4.7): Mode II returns ``Coupling(k + i, ½ Σ_active P̃θ(θ − meanθ)²)`` with
+the λ-free ``P̃θ``; ``iw_equivalent`` the same sums over the active ``a``-slots; Mode I zeros.
+
+Overridable internals (DESIGN §4.9): ``structural_gamma(δ, a, M_c) -> γ`` and
+``linear_conditional(ctx, pm, cm, cache, shared) -> GaussianPrec``. Overriding either switches the
+draw to the Cholesky path through ``linear_conditional``; overriding ``structural_gamma`` (which must
+be affine with ``∂γ/∂δ = I``) also rebuilds the design in the kernel as
+``[X | X·∂γ/∂a − Y_{:, :n−1}]``, so draws, fitted values, residuals and stored ``γ`` all follow the
+override (mutant M8, "D3 centring dropped").
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from dataclasses import dataclass
+from typing import Any, ClassVar
+
+import jax
+import jax.numpy as jnp
+from jax import lax, random
+
+from rai_bvar.components.structure.recursive import contemp_prior, slot_mask
+from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before any computation)
+from rai_bvar.engines.mcmc.config import MeanStatic, Scaling, StaticConfig
+from rai_bvar.engines.mcmc.keys import Key, Sub, sub_key
+from rai_bvar.engines.mcmc.linalg import (
+    eigen_draw,
+    eigen_prepare,
+    fixed_factor_draw,
+    fixed_factor_prepare,
+    precision_draw,
+    weighted_gram,
+)
+from rai_bvar.engines.mcmc.protocols import Batching, KernelBase
+from rai_bvar.engines.mcmc.state import (
+    Coupling,
+    Empty,
+    EngineData,
+    EqContext,
+    EqPrior,
+    FitCache,
+    GaussianDiag,
+    GaussianPrec,
+    GlobalState,
+    GlobDraw,
+    LinearDraw,
+    LinearEq,
+    PriorArrays,
+    SharedPrior,
+    StepInfo,
+)
+
+Array = jax.Array
+PyTree = Any
+
+_HIGHEST = lax.Precision.HIGHEST  # full float64 products on every backend (CPU ignores it)
+_LOG_2PI = 1.8378770664093453
+_FAST_PATHS = frozenset({"eigen", "fixed_factor"})
+
+__all__ = ["LinearStructural", "theta_prior_arrays"]
+
+
+def theta_prior_arrays(prior_i: EqPrior, i: Array, n: int) -> GaussianDiag:
+    """λ-free prior of ``θ_i = [δ_i | a_i]`` from the arrays (the ``FixedDiagonal`` moments and the
+    ``Recursive`` ``a`` prior without scaling): the per-fit caches of the ``eigen`` (Mode I) and
+    ``fixed_factor`` (Mode II, λ-free ``P̃θ``) paths."""
+    c = prior_i.coef
+    cm = contemp_prior(prior_i, slot_mask(i, n))
+    mean0 = jnp.asarray(c.mean0, jnp.float64)
+    cmask = jnp.concatenate([jnp.ones_like(mean0), cm.cmask])
+    on = cmask > 0
+    return GaussianDiag(
+        mean=jnp.where(on, jnp.concatenate([mean0, cm.mean]), 0.0),
+        prec=jnp.where(on, jnp.concatenate([jnp.asarray(c.prec0, jnp.float64), cm.prec]), 1.0),
+        cmask=cmask,
+    )
+
+
+@dataclass(frozen=True)
+class LinearStructural(KernelBase):
+    """``MeanBlock`` of the structural Linear mean with D3 centring (DESIGN §3.7.2).
+
+    Static fields: ``static`` (``MeanStatic``: path, Gram, ``coef_scaling``), ``contemp_scaling``
+    (``StructStatic.contemp_scaling``: whether the ``a`` prior is λ-scaled, which decides the
+    coupling of ``iw_equivalent``) and ``n`` (equations). Build it with :meth:`from_static`.
+    """
+
+    static: MeanStatic
+    contemp_scaling: Scaling
+    n: int
+
+    fuses_contemp: ClassVar[bool] = True
+    batching: ClassVar[Batching] = Batching.VMAP
+    float32_leaves: ClassVar[frozenset[str]] = frozenset()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.static.kind != "linear_structural":
+            raise ValueError(
+                f"LinearStructural needs MeanStatic(kind='linear_structural'), got {self.static.kind!r}"
+            )
+        if self.contemp_scaling not in ("none", "lambda"):
+            raise ValueError(
+                f"contemp_scaling must be 'none' or 'lambda', got {self.contemp_scaling!r}"
+            )
+        if self.static.coef_scaling == "lambda" and self.contemp_scaling != "lambda":
+            raise ValueError(
+                "Mode II (coef_scaling='lambda') scales a_i too: contemp_scaling must be 'lambda' "
+                "(build the kernel with LinearStructural.from_static)"
+            )
+        if isinstance(self.n, bool) or not isinstance(self.n, int) or self.n < 1:
+            raise ValueError(f"n must be a positive integer, got {self.n!r}")
+
+    @classmethod
+    def from_static(cls, static: StaticConfig) -> LinearStructural:
+        """The mean of a composition: ``static.mean``, ``static.struct.contemp_scaling`` and
+        ``static.shapes.n``."""
+        return cls(static.mean, contemp_scaling=static.struct.contemp_scaling, n=static.shapes.n)
+
+    # ----------------------------------------------------------------- static helpers
+
+    @property
+    def coef_scaled(self) -> bool:
+        """Mode II: the δ prior is λ-scaled."""
+        return self.static.coef_scaling == "lambda"
+
+    @property
+    def contemp_scaled(self) -> bool:
+        """Mode II or ``iw_equivalent``: the ``a`` prior is λ-scaled."""
+        return self.contemp_scaling == "lambda"
+
+    def _overridden(self, name: str) -> bool:
+        return any(key == name for key, _ in self.overrides)
+
+    @property
+    def draw_path(self) -> str:
+        """The path :meth:`sample_eq` takes: ``const_path``, except that an overridden internal
+        sends the fast paths through ``linear_conditional`` (``cholesky_const``)."""
+        path = self.static.const_path
+        custom = self._overridden("structural_gamma") or self._overridden("linear_conditional")
+        if path in _FAST_PATHS and custom:
+            return "cholesky_const"
+        return path
+
+    # ----------------------------------------------------------------- prior and conditional
+
+    def theta_prior(self, ctx: EqContext, pm: GaussianDiag, cm: GaussianDiag) -> GaussianDiag:
+        """Prior of ``θ_i`` with the λ-scaling applied: ``pm.prec·exp(−log_scale)`` in Mode II,
+        ``cm`` as given; inactive slots mean 0, precision 1."""
+        pprec = pm.prec * jnp.exp(-ctx.log_scale) if self.coef_scaled else pm.prec
+        cmask = jnp.concatenate([pm.cmask, cm.cmask])
+        on = cmask > 0
+        return GaussianDiag(
+            mean=jnp.where(on, jnp.concatenate([pm.mean, cm.mean]), 0.0),
+            prec=jnp.where(on, jnp.concatenate([pprec, cm.prec]), 1.0),
+            cmask=cmask,
+        )
+
+    def structural_gamma(self, delta: Array, a: Array, Mc: Array) -> Array:
+        """``γ_i = δ_i + M_c a_i`` (D3; N05 §4.1)."""
+        return delta + jnp.matmul(Mc, a, precision=_HIGHEST)
+
+    def _design(
+        self, ctx: EqContext, cache: FitCache, shared: SharedPrior, *, batched: bool = False
+    ) -> tuple[Array, Array | None, str, int]:
+        """``(F, FF, gram mode, tile)``: the cached δ-design, or the in-kernel design
+        ``[X | X·∂γ/∂a + cols]`` when ``structural_gamma`` is overridden (``cols = −ỹ_{<}``)."""
+        if self._overridden("structural_gamma"):
+            k, m = shared.Mc.shape
+            X = cache.F[:, :k]
+            sg = self.impl("structural_gamma")
+            J = jax.jacfwd(lambda a: sg(jnp.zeros((k,), jnp.float64), a, shared.Mc))(
+                jnp.zeros((m,), jnp.float64)
+            )
+            F = jnp.concatenate([X, jnp.matmul(X, J, precision=_HIGHEST) + ctx.cols], axis=1)
+            return F, None, "batched", 0
+        if batched or self.static.gram != "packed":
+            mode = "batched" if batched else self.static.gram
+            return cache.F, None, mode, self.static.gram_tile
+        return cache.F, cache.FF, "packed", 0
+
+    def _conditional(
+        self,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag,
+        cache: FitCache,
+        shared: SharedPrior,
+        *,
+        batched: bool,
+    ) -> GaussianPrec:
+        pr = self.theta_prior(ctx, pm, cm)
+        c = pr.cmask
+        w = ctx.weights
+        const = self.static.const_path != "weighted" and not batched
+        if const and not self._overridden("structural_gamma"):
+            inv_lam = w[0]  # weights m_t/λ_i: row 0 is always real (T_eff ≥ 1)
+            G = cache.G_const * inv_lam
+            fty = jnp.take(cache.FtY, ctx.i, axis=1) * inv_lam
+        else:
+            F, FF, mode, tile = self._design(ctx, cache, shared, batched=batched)
+            G = weighted_gram(w, F=F, FF=FF, mode=mode, q=F.shape[1], tile=tile)
+            fty = jnp.matmul(F.T, w * ctx.target, precision=_HIGHEST)
+        # exactly symmetric: the packed Gram is v[pos] and G_const is mirrored (WP4, WP5)
+        K = c[:, None] * G * c[None, :] + jnp.diag(pr.prec)
+        return GaussianPrec(K=K, b=pr.prec * pr.mean + c * fty)
+
+    def linear_conditional(
+        self,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> GaussianPrec:
+        """The exact conditional ``θ_i | λ_eff,i, y ~ N(K⁻¹b, K⁻¹)`` (module docstring; N05 §5.1)
+        with the path's Gram: ``weighted_gram(w, FF | F)`` on the weighted path, ``G_const·w_0`` and
+        ``FtY[:, i]·w_0`` on the Constant paths. ``pm`` is λ-free (Mode II scales it here)."""
+        return self._conditional(ctx, pm, cm, cache, shared, batched=False)
+
+    # ----------------------------------------------------------------- caches and init
+
+    def prepare(self, data: EngineData, prior: PriorArrays, base: FitCache) -> FitCache:
+        """Per-equation caches of the fast paths (DESIGN §2.5): ``EigenCache`` (``eigen``,
+        ``d = precθ`` λ-free) or ``FixedFactorCache`` (``fixed_factor``, ``K̃ = cθ⊗cθ ⊙ G_const +
+        diag(P̃θ)``, ``r̃ = P̃θ ⊙ meanθ + cθ ⊙ FtY[:, i]``); otherwise ``base`` unchanged."""
+        path = self.static.const_path
+        if path not in _FAST_PATHS:
+            return base
+        n = self.n
+        G = base.G_const
+
+        def one(i: Array, prior_i: EqPrior) -> PyTree:
+            pr = theta_prior_arrays(prior_i, i, n)
+            c = pr.cmask
+            fty = jnp.take(base.FtY, i, axis=1)
+            if path == "eigen":
+                return eigen_prepare(G, pr.prec, pr.mean, fty, c)
+            K_tilde = c[:, None] * G * c[None, :] + jnp.diag(pr.prec)
+            return fixed_factor_prepare(K_tilde, pr.prec * pr.mean + c * fty)
+
+        eq = jax.vmap(one)(jnp.arange(n, dtype=jnp.int32), prior.eq)
+        return dataclasses.replace(base, eq=eq)
+
+    def fitted_reduced(self, glob: GlobalState, data: EngineData) -> None:
+        return None
+
+    def init_eq(
+        self,
+        key: Key,
+        a_i: Array,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag,
+        cache_i: PyTree,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> tuple[LinearEq, Array]:
+        """One exact draw of ``(δ_i, a_i)`` with the weights of ``ctx`` (the runner passes
+        ``m_t·ι/ψ_ι``, DESIGN §5.4), on any path: Gram ``Fᵀ(w ⊙ F)`` from ``cache.F``."""
+        cond = self._conditional(ctx, pm, cm, cache, shared, batched=True)
+        theta, _ = precision_draw(cond.K, cond.b, self._noise(key, pm, cm))
+        return self._split(theta, pm, cm)
+
+    # ----------------------------------------------------------------- the equation step
+
+    def _noise(self, key: Key, pm: GaussianDiag, cm: GaussianDiag) -> Array:
+        q = pm.mean.shape[-1] + cm.mean.shape[-1]
+        return random.normal(sub_key(key, Sub.Z), (q,), dtype=jnp.float64)
+
+    def _split(self, theta: Array, pm: GaussianDiag, cm: GaussianDiag) -> tuple[LinearEq, Array]:
+        k = pm.mean.shape[-1]
+        theta = jnp.where(jnp.concatenate([pm.cmask, cm.cmask]) > 0, theta, 0.0)
+        return LinearEq(delta=theta[:k]), theta[k:]
+
+    def draw_core(
+        self,
+        z: Array,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag,
+        cache_i: PyTree,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> tuple[Array, StepInfo]:
+        """Unmasked ``θ_i`` for injected noise ``z ~ N(0, I_q)`` on :attr:`draw_path` (D-17)."""
+        path = self.draw_path
+        if path == "eigen":
+            return eigen_draw(cache_i, 1.0 / ctx.weights[0], z)
+        if path == "fixed_factor":
+            theta = fixed_factor_draw(cache_i, jnp.exp(ctx.log_scale), z)
+            return theta, StepInfo(jnp.all(jnp.isfinite(theta)), jnp.full((), jnp.inf))
+        cond = self.impl("linear_conditional")(ctx, pm, cm, cache, shared)
+        return precision_draw(cond.K, cond.b, z)
+
+    def sample_eq(
+        self,
+        key: Key,
+        ms: LinearEq,
+        a_i: Array,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag | None,
+        cache_i: PyTree,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> tuple[LinearEq, Array, Coupling, StepInfo]:
+        """Joint draw of ``(δ_i, a_i) | λ_eff,i`` (DESIGN §4.2 S1; ``z`` from ``Sub.Z``); returns
+        the new state, the new ``a_i``, the coupling and the step info. ``ok`` requires a finite
+        draw and a positive factorisation (eigen: ``g ≥ −1e-10·max g``)."""
+        if cm is None:
+            raise ValueError("LinearStructural fuses the contemporaneous step: cm is required")
+        theta, info = self.draw_core(self._noise(key, pm, cm), ctx, pm, cm, cache_i, cache, shared)
+        new, a = self._split(theta, pm, cm)
+        return new, a, self.coupling(new.delta, a, ctx, pm, cm), info
+
+    def conditional_eq(
+        self,
+        ms: LinearEq,
+        a_i: Array,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag | None,
+        cache_i: PyTree,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> GaussianPrec:
+        """The exposed exact conditional of ``θ_i = [δ_i | a_i]`` (DESIGN §3.1 rule 3)."""
+        if cm is None:
+            raise ValueError("LinearStructural fuses the contemporaneous step: cm is required")
+        return self.impl("linear_conditional")(ctx, pm, cm, cache, shared)
+
+    def coupling(
+        self, delta: Array, a: Array, ctx: EqContext, pm: GaussianDiag, cm: GaussianDiag
+    ) -> Coupling:
+        """DESIGN §4.7: λ-free quadratic forms over the λ-scaled active coordinates."""
+        if not (self.coef_scaled or self.contemp_scaled):
+            return Coupling.zeros()
+        prec_a = cm.prec * jnp.exp(ctx.log_scale)  # λ-free P̃ of the a-slots
+        quad = jnp.sum(jnp.where(cm.cmask > 0, prec_a * (a - cm.mean) ** 2, 0.0))
+        n_active = jnp.sum(cm.cmask)
+        if self.coef_scaled:
+            quad = quad + jnp.sum(jnp.where(pm.cmask > 0, pm.prec * (delta - pm.mean) ** 2, 0.0))
+            n_active = n_active + jnp.sum(pm.cmask)
+        return Coupling(n_active=n_active, quad=0.5 * quad)
+
+    # ----------------------------------------------------------------- views and densities
+
+    def fitted_eq(
+        self, ms: LinearEq, a_i: Array, ctx: EqContext, cache: FitCache, shared: SharedPrior
+    ) -> Array:
+        """``g_i = Xγ_i`` over rows (D3 term included; 0 on padded rows), ``X = F[:, :k]``."""
+        k = ms.delta.shape[-1]
+        gamma = self.impl("structural_gamma")(ms.delta, a_i, shared.Mc)
+        return jnp.matmul(cache.F[:, :k], gamma, precision=_HIGHEST)
+
+    def coefficients_eq(self, ms: LinearEq, a_i: Array, shared: SharedPrior) -> Array:
+        """``δ_i``: what the coefficient prior governs."""
+        return ms.delta
+
+    def log_prior_eq(
+        self,
+        ms: LinearEq,
+        a_i: Array,
+        pm: GaussianDiag,
+        cm: GaussianDiag | None,
+        shared: SharedPrior,
+        *,
+        log_scale: Array | float = 0.0,
+    ) -> Array:
+        """``Σ_active log N(θ; meanθ, 1/precθ)``: ``pm`` λ-free (divided by ``exp(log_scale)`` in
+        Mode II, as in :meth:`sample_eq`), ``cm`` as the structure returns it (scaled); ``cm=None``
+        gives the δ part only."""
+        prec_d = (
+            pm.prec * jnp.exp(-jnp.asarray(log_scale, jnp.float64)) if self.coef_scaled else pm.prec
+        )
+
+        def part(x: Array, mean: Array, prec: Array, mask: Array) -> Array:
+            lp = 0.5 * (jnp.log(prec) - _LOG_2PI - prec * (x - mean) ** 2)
+            return jnp.sum(jnp.where(mask > 0, lp, 0.0))
+
+        out = part(ms.delta, pm.mean, prec_d, pm.cmask)
+        if cm is not None:
+            out = out + part(a_i, cm.mean, cm.prec, cm.cmask)
+        return out
+
+    def extract_eq(self, ms: LinearEq, a_i: Array, shared: SharedPrior) -> LinearDraw:
+        """``LinearDraw(gamma = δ_i + M_c a_i)``."""
+        return LinearDraw(gamma=self.impl("structural_gamma")(ms.delta, a_i, shared.Mc))
+
+    def extract_global(self, glob: GlobalState) -> GlobDraw:
+        return GlobDraw(mean=Empty(), coef=Empty(), vol=Empty(), struct=Empty())
+
+    def future_eq(self, key: Key, md: LinearDraw, H: int) -> Empty:
+        return Empty()
+
+    def predict_eq(self, md: LinearDraw, fut: PyTree, x: Array, h: Array, gfut: PyTree) -> Array:
+        """``g_i(x) = γ_i'x``."""
+        return jnp.dot(md.gamma, x, precision=_HIGHEST)
+
+    def predict_reduced(self, gd: GlobDraw, x: Array, h: Array, gfut: PyTree) -> Array:
+        """``f64[n]`` zeros (no reduced-form part)."""
+        return jnp.zeros((self.n,), jnp.float64)

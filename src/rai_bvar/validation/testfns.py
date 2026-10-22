@@ -1,0 +1,226 @@
+"""Geweke test functions and SBC test quantities (DESIGN §9.5, §9.6; N06 §3.4, §4.4; N03 §7.2).
+
+:func:`test_functions` returns an ordered ``{name: (value, finite)}`` dict. ``finite`` is a static
+flag: the function has **finite variance under p(θ, y)** (Geweke 2004 eq. 2), which a z-test
+needs (N06 §3.4). It depends on the prior's tails (``reference.PriorTails``, computed from the
+concrete prior unless ``tails`` is given): e.g. ``h²`` under a ``Beta(·, 2)`` prior on
+``(φ+1)/2``, ``σ²`` under ``σ² ~ IG(c₀ ≤ 2)``, or ``δ²`` under Mode II with IG shape ≤ 2.
+Infinite-variance functions are reported with ``finite=False`` and are dropped from Geweke sets;
+SBC ranks need no moments and use them all.
+
+Contents, by source:
+
+* every scalar parameter and the square where finite; latent states at fixed dates; within-block
+  cross-products (``μφ``, ``φσ``, ``p·N_1``, ``ν·mean log τ``) — the per-kind references;
+* the D3 centring cross-moment ``a_ij·γ_{i,(lag1,j)}`` and ``γ_{i,(lag1,j)}`` (N05 §13.3), the
+  reduced-form own first lag ``B_{(lag1,i),i}`` of ``B = (A⁻¹Γ)'`` and ``‖Γ − AM'‖²_F``
+  (DESIGN §9.6; ``M'`` = ``prior.eq.coef.mean0``, so under D3 it equals ``Σ_i ‖δ_i − m_i‖²``;
+  structural means);
+* cross-equation products ``π_{l,j1}π_{l,j2}`` (reduced form; in the ``linear_reduced`` reference);
+* the exact log-likelihood, ``log p(θ)``, per-equation ``Σ_t e²/λ_eff`` and, with a transitory
+  scale, the transitory-marginal log-likelihood ``Σ_t log p(e_t | h_t, p, ν)`` (N03 §2.2, §7.2);
+* data functions on the log scale or bounded only (``mean_t log y²``, first autocorrelations of
+  ``y`` and ``log y²``, ``mean tanh y``, sample correlations): raw data moments have infinite
+  mean under SV priors (N06 §3.4). ``raw_moments=True`` adds ``mean y²``, cross moments and
+  first autocovariances, flagged finite only for an uncoupled Constant core without transitory
+  scale and ``E[λ²] < ∞`` (IG shape > 2; N06 §3.4).
+
+Names: ``"eq{i}.{slot}.{name}"`` (slots ``struct``, ``mean``, ``core``, ``trans``, ``joint``),
+``"glob.mean.{name}"``, ``"joint.{name}"`` (cross-equation), ``"loglik"``, ``"log_prior"`` and
+``"data.{name}"``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+import jax
+import jax.numpy as jnp
+
+from rai_bvar.engines.mcmc import _jax  # noqa: F401  (float64 before any computation)
+from rai_bvar.engines.mcmc.config import StaticConfig
+from rai_bvar.engines.mcmc.state import ChainState, EngineData, PriorArrays
+from rai_bvar.validation.log_joint import log_prior, loglik_terms, residuals
+from rai_bvar.validation.reference import (
+    PriorTails,
+    effective_log_var,
+    prior_tails,
+    references_for,
+    transitory_log_density,
+)
+from rai_bvar.validation.simulate import structural_gamma, unit_lower
+
+Array = jax.Array
+_F64 = jnp.float64
+TestFns = dict[str, tuple[Array, bool]]
+
+
+def _slice(tree: Any, i: int) -> Any:
+    return jax.tree.map(lambda x: x[i], tree)
+
+
+def _masked_mean(x: Array, m: Array) -> Array:
+    return jnp.sum(jnp.where(m > 0, x, 0.0)) / jnp.sum(m)
+
+
+def _acf1(x: Array, m: Array) -> Array:
+    """First autocorrelation over the real rows ``t < T_eff`` (pairs with ``m_t m_{t−1} = 1``)."""
+    xc = jnp.where(m > 0, x - _masked_mean(x, m), 0.0)
+    num = jnp.sum(xc[1:] * xc[:-1] * m[1:] * m[:-1])
+    return num / jnp.sum(xc**2)
+
+
+def _data_functions(data: EngineData, raw_moments: bool, log_ok: bool, raw_ok: bool) -> TestFns:
+    """``log_ok``: ``E[(log y²)²] < ∞`` (needs ``E h² < ∞`` under SV); ``raw_ok``: ``E y⁴ < ∞``."""
+    Y, m = data.Y, data.tmask
+    n = Y.shape[1]
+    out: TestFns = {}
+    log_y2 = jnp.where(m[:, None] > 0, jnp.log(jnp.where(m[:, None] > 0, Y**2, 1.0)), 0.0)
+    for i in range(n):
+        out[f"data.mean_log_y2[{i}]"] = (_masked_mean(log_y2[:, i], m), log_ok)
+        out[f"data.mean_tanh_y[{i}]"] = (_masked_mean(jnp.tanh(Y[:, i]), m), True)
+        out[f"data.acf1_y[{i}]"] = (_acf1(Y[:, i], m), True)
+        out[f"data.acf1_log_y2[{i}]"] = (_acf1(log_y2[:, i], m), True)
+    mean = jnp.sum(Y * m[:, None], axis=0) / jnp.sum(m)
+    Yc = (Y - mean) * m[:, None]
+    sd = jnp.sqrt(jnp.sum(Yc**2, axis=0))
+    for i in range(n):
+        for j in range(i + 1, n):
+            out[f"data.corr_y[{i},{j}]"] = (jnp.sum(Yc[:, i] * Yc[:, j]) / (sd[i] * sd[j]), True)
+    if raw_moments:
+        T = jnp.sum(m)
+        for i in range(n):
+            out[f"data.mean_y2[{i}]"] = (jnp.sum(Y[:, i] ** 2) / T, raw_ok)
+            out[f"data.acov1_y[{i}]"] = (jnp.sum(Y[1:, i] * Y[:-1, i]) / T, raw_ok)
+            for j in range(i + 1, n):
+                out[f"data.mean_yy[{i},{j}]"] = (jnp.sum(Y[:, i] * Y[:, j]) / T, raw_ok)
+    return out
+
+
+def raw_moments_finite(static: StaticConfig, tails: PriorTails) -> bool:
+    """Raw data moments have finite variance (``E y⁴ < ∞``; N06 §3.4): an uncoupled Constant core
+    without transitory scale (``y`` is linear in ``√λ_i ε``) and ``E[λ²] < ∞``. Under coupling the
+    lag coefficients carry ``√λ``, so ``y_T`` involves ``λ^{T/2}`` and high moments diverge."""
+    return static.vol.constant_weights and not static.vol.coupled and tails.lam > 2.0
+
+
+def test_functions(
+    st: ChainState,
+    data: EngineData,
+    prior: PriorArrays,
+    static: StaticConfig,
+    *,
+    raw_moments: bool = False,
+    tails: PriorTails | None = None,
+) -> TestFns:
+    """Every test function of one chain state and dataset (module docstring); ordered dict.
+    ``tails`` defaults to ``prior_tails(static, prior)`` (needs a concrete ``prior``)."""
+    tails = prior_tails(static, prior) if tails is None else tails
+    refs = references_for(static)
+    n, n_det = static.shapes.n, static.shapes.n_det
+    m = data.tmask
+    h_ok = tails.h2 > 1.0  # E h² < ∞: log-likelihoods and log-scale data functions
+    out: TestFns = {}
+
+    def add(prefix: str, fns: TestFns) -> None:
+        for name, (val, fin) in fns.items():
+            out[f"{prefix}.{name}"] = (jnp.asarray(val, _F64), bool(fin))
+
+    for i in range(n):
+        eq_i = _slice(st.eq, i)
+        add(f"eq{i}.struct", refs.structure.test_functions_eq(eq_i.struct, m, i=i, tails=tails))
+        add(f"eq{i}.mean", refs.mean.test_functions_eq(eq_i.mean, m, i=i, tails=tails))
+        add(f"eq{i}.coef", refs.coef.test_functions_eq(eq_i.coef, m, i=i, tails=tails))
+        add(f"eq{i}.core", refs.core.test_functions_eq(eq_i.vol.core, m, i=i, tails=tails))
+        add(f"eq{i}.trans", refs.trans.test_functions_eq(eq_i.vol.trans, m, i=i, tails=tails))
+    add("glob.mean", refs.mean.test_functions_global(st.glob.mean, tails=tails))
+
+    if static.mean.kind == "linear_structural":
+        # λ-scaling (Mode II: a and δ; iw_equivalent: a) puts √λ_i in a_i and γ_i. A path product
+        # of A⁻¹ never uses row j's own a_j next to γ_j, so B is linear in each √λ_j: Var(B) and
+        # Var(γ) need E λ; a·γ = a·δ + M_jj a² needs E λ² when a is scaled.
+        sa = static.struct.contemp_scaling == "lambda"
+        sd = static.mean.coef_scaling == "lambda"
+        lam1 = not (sa or sd) or tails.lam > 1.0
+        cross = tails.lam > 2.0 if sa else (tails.lam > 1.0 if sd else True)
+        gamma = structural_gamma(st, prior)
+        A = unit_lower(st.eq.struct.a)
+        B = jax.scipy.linalg.solve_triangular(A, gamma, lower=True, unit_diagonal=True).T
+        for i in range(n):
+            for j in range(i):
+                g = gamma[i, n_det + j]  # γ_{i,(lag 1, variable j)}
+                out[f"eq{i}.joint.gamma_lag1_{j}"] = (g, lam1)
+                out[f"eq{i}.joint.a{j}*gamma_lag1_{j}"] = (st.eq.struct.a[i, j] * g, cross)
+            out[f"eq{i}.joint.B_own1"] = (B[n_det + i, i], lam1)
+        dev = gamma - A @ prior.eq.coef.mean0  # Γ − AM' (D3: row i is δ_i − m_i)
+        out["joint.gamma_minus_AM_sq"] = (jnp.sum(dev**2), not sd or tails.lam > 2.0)
+
+    terms = loglik_terms(st, data, prior, static)
+    out["loglik"] = (jnp.sum(terms), h_ok)
+    out["log_prior"] = (log_prior(st, prior, static, m), True)
+    e = residuals(st, data, prior, static)
+    lv = effective_log_var(st.eq.vol, static)
+    live = m[None, :] > 0
+    rss = jnp.sum(jnp.where(live, e**2 * jnp.exp(-jnp.where(live, lv, 0.0)), 0.0), axis=1)
+    for i in range(n):
+        out[f"eq{i}.joint.rss_std"] = (rss[i], True)  # χ²_T under the joint
+        if n > 1:  # with one equation it is "loglik" itself
+            out[f"eq{i}.joint.loglik"] = (jnp.sum(terms[i]), h_ok)
+    if static.vol.transitory != "none":
+        lp = jnp.where(live, effective_log_var(st.eq.vol, static, "persistent"), 0.0)
+        log_z2 = jnp.where(live, jnp.log(jnp.where(live, e**2, 1.0)) - lp, 0.0)
+        dens = jax.vmap(lambda lz, tr: transitory_log_density(lz, tr, static))(
+            log_z2, st.eq.vol.trans
+        )
+        marg = jnp.sum(jnp.where(live, dens - 0.5 * lp, 0.0), axis=1)  # log f(e/√λ) − ½ log λ
+        for i in range(n):
+            out[f"eq{i}.joint.loglik_marginal"] = (marg[i], h_ok)
+    out.update(_data_functions(data, raw_moments, h_ok, raw_moments_finite(static, tails)))
+    return out
+
+
+def engine_data_template(static: StaticConfig, T_eff: int) -> EngineData:
+    """Zero-filled :class:`EngineData` with the shapes of ``static`` (for shape-only tracing)."""
+    s = static.shapes
+    z = jnp.zeros
+    return EngineData(
+        Y=z((s.T_pad, s.n), _F64),
+        X=z((s.T_pad, s.k), _F64),
+        tmask=(jnp.arange(s.T_pad) < T_eff).astype(_F64),
+        T_eff=jnp.asarray(T_eff, jnp.int32),
+        hist=z((s.lags, s.n), _F64),
+        t_last=jnp.zeros((), _F64),
+    )
+
+
+def test_function_spec(
+    static: StaticConfig,
+    prior: PriorArrays,
+    T_eff: int,
+    *,
+    raw_moments: bool = False,
+    tails: PriorTails | None = None,
+    fn: Callable[..., TestFns] = test_functions,
+) -> dict[str, bool]:
+    """Ordered ``{name: finite}`` of :func:`test_functions`, found by tracing shapes only."""
+    from rai_bvar.engines.mcmc.state import state_template
+
+    tails = prior_tails(static, prior) if tails is None else tails
+    flags: dict[str, bool] = {}
+
+    def run(st: ChainState, data: EngineData) -> dict[str, Array]:
+        d = fn(st, data, prior, static, raw_moments=raw_moments, tails=tails)
+        flags.update({k: f for k, (_, f) in d.items()})
+        return {k: v for k, (v, _) in d.items()}
+
+    tmpl = jax.tree.map(jnp.asarray, state_template(static))
+    jax.eval_shape(run, tmpl, engine_data_template(static, T_eff))
+    return flags
+
+
+__all__ = ["engine_data_template", "raw_moments_finite", "test_function_spec", "test_functions"]
+
+# pytest collects module-level names starting with "test" from test modules that import them.
+test_functions.__test__ = False  # type: ignore[attr-defined]
+test_function_spec.__test__ = False  # type: ignore[attr-defined]

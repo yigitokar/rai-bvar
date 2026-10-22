@@ -25,6 +25,7 @@ dependencies = [
     "pandas>=2.2",
     "xarray>=2024.10",
     "scoringrules>=0.11",
+    "jax>=0.12",  # MCMC engine (float64 enabled on import; SPEC §8)
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,12 @@ addopts = "-ra --strict-markers"
 markers = [
     "slow: long-running statistical tests (nightly)",
     "network: downloads data from the internet (nightly)",
+    "geweke: Geweke joint-distribution tests of the MCMC engine (docs/phase2/DESIGN.md §9.5)",
+    "sbc: simulation-based calibration of the MCMC engine (DESIGN §9.6; nightly)",
+    "mutation: mutation suite, every mutant must fail some tier (DESIGN §9.7; weekly)",
+    "bench: performance benchmarks such as BENCH-P2 (DESIGN §10; pre-release)",
+    "parity_long: long parity runs against R oracles (DESIGN §9.9; nightly)",
+    "weekly: weekly-tier tests (DESIGN §9.10)",
 ]
 filterwarnings = ["error::RuntimeWarning"]
 

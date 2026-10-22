@@ -15,6 +15,18 @@ In conjugate form (Kadiyala & Karlsson 1997; GLP 2015):
 
 The Kronecker structure forces equal tightness on own and cross lags, so ``cross`` must be 1
 in conjugate form.
+
+Phase 2 (DESIGN §6.1–6.2, §11.1; D-10, D-11, D-19):
+
+* ``form="auto"`` (default) is resolved by ``BVAR``: ``"conjugate"`` when the volatility is a
+  ``Constant`` with prior ``"auto"``/``"iw"`` (the analytic engine), ``"structural"`` otherwise.
+  The resolved form is stored, so Phase 1 models keep their specs. An unresolved ``auto`` form is
+  labelled by its analytic resolution (``conjugate``), so Phase 1 labels are unchanged; it admits
+  ``cross = contemp = 1`` only (choose ``"structural"`` or ``"reduced"`` explicitly otherwise).
+* ``contemp`` (``κ_a``) scales the prior variance of the contemporaneous coefficients,
+  ``a_ij ~ N(0, κ_a ψ_i/(ι ψ_j))`` in Mode I (N05 §4.1–4.4); it must be 1 in conjugate form.
+* ``cross`` (``κ_c``) scales the prior **standard deviation** of cross lags in the structural and
+  reduced forms (N05 §2; N04 §3.1).
 """
 
 from __future__ import annotations
@@ -74,15 +86,16 @@ class Minnesota:
     soc_scope: Literal["persistent", "all"] = "persistent"
     mean: float | Mapping[str, float] | None = None
     cross: float = 1.0
+    contemp: float = 1.0
     var_const: float = 1e7
-    form: Literal["conjugate", "structural", "reduced"] = "conjugate"
+    form: Literal["auto", "conjugate", "structural", "reduced"] = "auto"
     hierarchy: Literal["fixed", "eb", "mh"] = "eb"
     hyper: Literal["auto"] | tuple[str, ...] = "auto"
     hyperpriors: GLPHyperpriors = field(default_factory=GLPHyperpriors)
     mh: MHSettings = field(default_factory=MHSettings)
 
     def __post_init__(self) -> None:
-        for name in ("lambda_", "alpha", "cross", "var_const", "soc", "sur"):
+        for name in ("lambda_", "alpha", "cross", "contemp", "var_const", "soc", "sur"):
             value = getattr(self, name)
             if value is not None:
                 if isinstance(value, bool) or not np.isfinite(float(value)):
@@ -90,17 +103,26 @@ class Minnesota:
                 object.__setattr__(self, name, float(value))
         if self.soc_scope not in ("persistent", "all"):
             raise ValueError("soc_scope must be 'persistent' or 'all'")
-        if self.form not in ("conjugate", "structural", "reduced"):
-            raise ValueError("form must be 'conjugate', 'structural' or 'reduced'")
+        if self.form not in ("auto", "conjugate", "structural", "reduced"):
+            raise ValueError("form must be 'auto', 'conjugate', 'structural' or 'reduced'")
         if self.hierarchy not in ("fixed", "eb", "mh"):
             raise ValueError("hierarchy must be 'fixed', 'eb' or 'mh'")
-        if self.form == "conjugate" and self.cross != 1.0:
-            raise ValueError(
-                "cross-variable shrinkage (cross != 1) is impossible in conjugate form; "
-                "use form='structural' or 'reduced'"
+        if self.form in ("auto", "conjugate"):
+            auto = " (form='auto' resolves to it with Constant() volatility)" * (
+                self.form == "auto"
             )
-        if self.lambda_ <= 0 or self.alpha <= 0 or self.var_const <= 0:
-            raise ValueError("lambda_, alpha and var_const must be positive")
+            if self.cross != 1.0:
+                raise ValueError(
+                    f"cross-variable shrinkage (cross != 1) is impossible in conjugate form{auto}; "
+                    "use form='structural' or 'reduced'"
+                )
+            if self.contemp != 1.0:
+                raise ValueError(
+                    f"contemporaneous shrinkage (contemp != 1) is impossible in conjugate form{auto}; "
+                    "use form='structural' or 'reduced'"
+                )
+        if self.lambda_ <= 0 or self.alpha <= 0 or self.var_const <= 0 or self.contemp <= 0:
+            raise ValueError("lambda_, alpha, contemp and var_const must be positive")
         for name in ("soc", "sur"):
             value = getattr(self, name)
             if value is not None and value <= 0:
@@ -153,8 +175,10 @@ class Minnesota:
 
     @property
     def label(self) -> str:
-        """Form, hierarchy, dummies and every setting that differs from the defaults."""
-        parts = [self.form, self.hierarchy]
+        """Form, hierarchy, dummies and every setting that differs from the defaults.
+
+        An unresolved ``form="auto"`` shows as ``conjugate`` (its analytic resolution)."""
+        parts = ["conjugate" if self.form == "auto" else self.form, self.hierarchy]
         dummies = "+".join(d.upper() for d in ("soc", "sur") if getattr(self, d) is not None)
         parts += [dummies] if dummies else []
         default = Minnesota()
@@ -164,6 +188,7 @@ class Minnesota:
             "psi",
             "mean",
             "cross",
+            "contemp",
             "var_const",
             "hyper",
             "hyperpriors",
