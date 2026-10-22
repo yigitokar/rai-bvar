@@ -48,3 +48,30 @@ def spec_hash(model: Model) -> str:
 def spec_hash_of(spec: dict[str, Any]) -> str:
     payload = json.dumps(spec, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def seed_label(seed: SeedLike, rng: np.random.Generator | None = None) -> str:
+    """A reproducible description of the randomness a forecast uses, for its attrs (SPEC §7).
+
+    Call it right after building ``rng`` and before drawing. A Generator that has already been
+    advanced is labelled by a digest of its current state, so different draws never share a
+    label.
+    """
+    if isinstance(seed, int | np.integer) and not isinstance(seed, bool):
+        return str(int(seed))
+    if isinstance(seed, np.random.SeedSequence):
+        return f"SeedSequence(entropy={seed.entropy}, spawn_key={tuple(seed.spawn_key)})"
+    gen = rng if rng is not None else seed if isinstance(seed, np.random.Generator) else None
+    if gen is None:
+        return "unknown"
+    bitgen = gen.bit_generator
+    seq = getattr(bitgen, "seed_seq", None)
+    digest = _state_digest(bitgen.state)
+    if isinstance(seq, np.random.SeedSequence) and digest == _state_digest(type(bitgen)(seq).state):
+        return f"SeedSequence(entropy={seq.entropy}, spawn_key={tuple(seq.spawn_key)})"
+    return f"{type(bitgen).__name__}(state={digest[:16]})"
+
+
+def _state_digest(state: dict) -> str:
+    payload = json.dumps(state, sort_keys=True, default=lambda a: np.asarray(a).tolist())
+    return hashlib.sha256(payload.encode()).hexdigest()

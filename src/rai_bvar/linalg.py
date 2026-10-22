@@ -39,16 +39,31 @@ def qr_least_squares(X: np.ndarray, Y: np.ndarray, *, rtol: float = 1e-10):
     return B, R, Y - X @ B
 
 
-def gram_cholesky(A: np.ndarray, *, rtol: float = 1e-12) -> np.ndarray:
-    """Lower Cholesky factor of ``A'A`` computed from the QR of ``A`` (never forms ``A'A``)."""
+def gram_cholesky(
+    A: np.ndarray, *, rtol: float = 1e-12, ref_norms: np.ndarray | None = None
+) -> np.ndarray:
+    """Lower Cholesky factor of ``A'A`` computed from the QR of ``A`` (never forms ``A'A``).
+
+    Raises when a column is (numerically) a combination of the previous ones: ``|R_jj|`` is
+    compared with ``rtol · ref_j``. ``ref_norms`` defaults to the column norms of ``A`` (unit
+    free); callers whose ``A`` is the result of a cancellation (residuals, demeaned data) pass
+    the norms before cancellation so that exactly fitted columns are caught.
+    """
     A = np.asarray(A, dtype=np.float64)
     if A.shape[0] < A.shape[1]:
         raise np.linalg.LinAlgError(f"A'A is singular: A has fewer rows than columns {A.shape}")
-    R = np.linalg.qr(A, mode="r")
-    R = positive_diagonal(R, upper=True)
-    diag = np.diag(R)
-    if diag.size and diag.min() <= rtol * diag.max():
-        raise np.linalg.LinAlgError("A'A is (numerically) singular: no silent jitter (SPEC §8)")
+    R = positive_diagonal(np.linalg.qr(A, mode="r"), upper=True)
+    ref = (
+        np.linalg.norm(A, axis=0) if ref_norms is None else np.asarray(ref_norms, dtype=np.float64)
+    )
+    ref = np.where(ref > 0, ref, 1.0)
+    bad = np.flatnonzero(np.diag(R) <= rtol * ref)
+    if bad.size:
+        j = int(bad[0])
+        raise np.linalg.LinAlgError(
+            f"A'A is (numerically) singular at column {j} (|R_jj| / ref = {np.diag(R)[j] / ref[j]:.2g}); "
+            "no silent jitter (SPEC §8)"
+        )
     return R.T
 
 
@@ -78,14 +93,19 @@ def sample_inverse_wishart_chol(
 def sample_matrix_normal(
     mean: np.ndarray, row_upper: np.ndarray, col_chol: np.ndarray, rng: np.random.Generator
 ) -> np.ndarray:
-    """Draws of ``B ~ MN(mean, (RᵀR)⁻¹, ΣΣ)`` given ``R`` upper triangular and Cholesky factors of Σ.
+    """Draws of ``B ~ MN(mean, (RᵀR)⁻¹, Σ)`` given ``R`` upper triangular and Cholesky factors of Σ.
 
-    ``col_chol`` has shape ``(size, n, n)``; the result has shape ``(size, k, n)``.
+    ``col_chol`` has shape ``(size, n, n)``; the result has shape ``(size, k, n)``. At most two
+    arrays of the output's size are alive at once.
     """
     size, k, n = col_chol.shape[0], mean.shape[0], mean.shape[1]
-    Z = rng.standard_normal((size, k, n))
-    W = solve_triangular(row_upper, Z, lower=False)
-    return mean + W @ np.swapaxes(col_chol, -1, -2)
+    W = solve_triangular(
+        row_upper, rng.standard_normal((size, k, n)), lower=False, overwrite_b=True
+    )
+    out = np.matmul(W, np.swapaxes(col_chol, -1, -2))
+    del W
+    out += mean
+    return out
 
 
 def mvn_logpdf_chol(y: np.ndarray, mean: np.ndarray, chol: np.ndarray) -> np.ndarray:

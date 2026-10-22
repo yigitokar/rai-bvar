@@ -30,7 +30,7 @@ from rai_bvar.evaluation.backtest import (
     backtest,
 )
 from rai_bvar.evaluation.significance import diebold_mariano, model_confidence_set
-from rai_bvar.models.base import Model
+from rai_bvar.models.base import Model, spec_hash
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,12 @@ def grid(factory: Callable[..., Model], **axes: Sequence[Any]) -> list[Entry]:
     for combo in itertools.product(*(axes[k] for k in keys)):
         kwargs = dict(zip(keys, combo, strict=True))
         labels = {k: _label(v) for k, v in kwargs.items()}
-        entries.append(Entry(" × ".join(labels.values()), factory(**kwargs), labels))
+        model = factory(**kwargs)
+        # prefer the model's own axes (pairs with plain models in compare/verdict) when they
+        # cover every grid key; coarse axes such as {"model": name} fall back to the labels
+        model_axes = dict(getattr(model, "axes", None) or {})
+        axes_ = model_axes if model_axes and set(kwargs) <= set(model_axes) else labels
+        entries.append(Entry(" × ".join(labels.values()), model, axes_))
     return entries
 
 
@@ -219,11 +224,14 @@ class CompareResult:
                     "axis": ",".join(diff) or "(none)",
                     "horizon": h,
                 }
-                if len(diff) > 1:
-                    row |= {
-                        "verdict": "not comparable",
-                        "reasons": f"differs along {diff}; a verdict needs exactly one axis (SPEC R2)",
-                    }
+                same_spec = spec_hash(entries[name].model) == spec_hash(entries[ref].model)
+                if len(diff) > 1 or (not diff and not same_spec):
+                    reason = (
+                        f"differs along {diff}; a verdict needs exactly one axis (SPEC R2)"
+                        if diff
+                        else "the specs differ but no declared axis does; a verdict needs exactly one axis (SPEC R2)"
+                    )
+                    row |= {"verdict": "not comparable", "reasons": reason}
                     rows.append(row)
                     continue
                 m, r = common[name], common[ref]
@@ -305,7 +313,7 @@ def _entries(models) -> list[Entry]:
 
 
 def _label(value: Any) -> str:
-    return str(getattr(value, "name", None) or value)
+    return str(getattr(value, "label", None) or getattr(value, "name", None) or value)
 
 
 def _differing_axes(a: Mapping[str, str], b: Mapping[str, str]) -> list[str]:

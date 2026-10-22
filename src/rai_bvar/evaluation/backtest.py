@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
+import warnings
 import zlib
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -120,6 +122,7 @@ class BacktestResult:
     scores: xr.Dataset  # dims (origin, horizon[, variable])
     seconds: float
     cached: int
+    warnings: dict[str, list[str]] = field(default_factory=dict)  # message → origins (SPEC §10.6)
 
     @property
     def origins(self) -> list[str]:
@@ -173,15 +176,24 @@ def backtest(
     else:
         with ProcessPoolExecutor(max_workers=None if n_jobs < 0 else n_jobs) as pool:
             outputs = list(pool.map(_run_origin, *zip(*tasks, strict=True)))
-    scores = xr.concat([ds for ds, _ in outputs], dim="origin")
+    by_message: dict[str, list[str]] = {}
+    for ds, _, passthrough in outputs:
+        for message in filter(None, str(ds.attrs.get("warnings", "")).split("\n")):
+            by_message.setdefault(message, []).append(str(ds["origin"].values[0]))
+        for category, message, filename, lineno in passthrough:  # e.g. RuntimeWarnings from workers
+            warnings.warn_explicit(message, category, filename, lineno)
+    _emit_aggregated(by_message, len(outputs), name or model.name)
+    scores = xr.concat([ds for ds, _, _ in outputs], dim="origin")
+    scores.attrs.pop("warnings", None)
     return BacktestResult(
+        warnings=by_message,
         name=name or model.name,
         axes=dict(axes if axes is not None else model.axes),
         spec=model.spec(),
         window=window,
         scores=scores,
         seconds=time.perf_counter() - start,
-        cached=sum(hit for _, hit in outputs),
+        cached=sum(hit for _, hit, _ in outputs),
     )
 
 
@@ -230,24 +242,36 @@ def _run_origin(
     draws: int,
     seed: int,
     cache: Cache | None,
-) -> tuple[xr.Dataset, bool]:
+) -> tuple[xr.Dataset, bool, list]:
     available = (data if isinstance(data, VARData) else data(origin)).upto(origin)
     sample = window.select(available)
     truth = realized.realized(origin, horizon)
     key = _cache_key(model, sample, truth, origin, window, horizon, draws, seed)
     if cache is not None and (hit := cache.get(key)) is not None:
-        return hit, True
+        return hit, True, []
     rng = np.random.default_rng([seed, zlib.crc32(str(origin).encode())])
-    forecast = model.fit(sample).forecast(horizon, draws, seed=rng)
-    scores = score_forecast(forecast, truth, rng=rng).expand_dims(origin=[str(origin)])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        forecast = model.fit(sample).forecast(horizon, draws, seed=rng)
+    messages, passthrough = [], []
+    for w in caught:  # user warnings are aggregated across origins; others go back to the caller
+        if issubclass(w.category, UserWarning):
+            if str(w.message) not in messages:
+                messages.append(str(w.message))
+        else:
+            passthrough.append((w.category, str(w.message), w.filename, w.lineno))
+    scores = score_forecast(forecast, truth, rng=rng)
+    scores["converged"] = float(forecast.dataset.attrs.get("converged", 1))
+    scores = scores.expand_dims(origin=[str(origin)])
     scores.attrs = {
         "sample_start": str(sample.first),
         "sample_end": str(sample.last),
         "n_obs": len(sample),
+        "warnings": "\n".join(messages),
     }
     if cache is not None:
         cache.put(key, scores)
-    return scores, False
+    return scores, False, passthrough
 
 
 def _cache_key(model, sample, truth, origin, window, horizon, draws, seed) -> str:
@@ -274,3 +298,20 @@ __all__ = [
     "backtest",
     "estimate_cost",
 ]
+
+
+def _emit_aggregated(by_message: dict[str, list[str]], n_origins: int, model: str) -> None:
+    """One warning per distinct message; messages that differ only in numbers are grouped."""
+    groups: dict[str, list[tuple[str, list[str]]]] = {}
+    for message, origins in by_message.items():
+        key = re.sub(r"[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?", "#", message)
+        groups.setdefault(key, []).append((message, origins))
+    for items in groups.values():
+        origins = sorted({o for _, o_list in items for o in o_list})
+        example = items[0][0]
+        more = f" (and {len(items) - 1} variants with other numbers)" if len(items) > 1 else ""
+        warnings.warn(
+            f"{model}: {example}{more} [at {len(origins)} of {n_origins} origins: {origins[0]}..{origins[-1]}]",
+            UserWarning,
+            stacklevel=3,
+        )

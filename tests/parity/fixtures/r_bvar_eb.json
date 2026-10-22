@@ -1,0 +1,489 @@
+{
+  "meta": {
+    "generator": "tools/make_r_fixtures.R",
+    "r_version": "R version 4.1.2 (2021-11-01)",
+    "platform": "x86_64-apple-darwin17.0",
+    "bvar_version": "1.0.5",
+    "mvtnorm_version": "1.1.3",
+    "jsonlite_version": "1.8.3",
+    "coda_version": "0.19.4.1",
+    "blas": "/Library/Frameworks/R.framework/Versions/4.1/Resources/lib/libRblas.0.dylib",
+    "lapack": "3.9.0",
+    "created": "2026-10-21T21:19:02-0400",
+    "documentation": "tests/parity/BVAR_PARAMETRIZATION.md",
+    "layout": "Coefficient matrices are k x n (rows: const, then lag 1 block in variable order, ..., lag p block; columns: equations), y_t = B'x_t + u_t. Matrices are row-major nested lists."
+  },
+  "description": "(c) Posterior mode of h maximising log p(Y | h) + log p(h) (Gamma hyperpriors, natural scale, no Jacobian), within the hyperprior bounds; alpha and psi fixed. bvar_optim: BVAR's own optim() result from bvar(). mode_bvar_objective: BVAR's objective (BVAR:::bv_ml) maximised to high precision from there. mode/log_posterior: the exact objective (QR-based, exact dummy-only marginal likelihood) maximised to high precision; identical to the BVAR objective when bvar_is_exact. For sim_p4_zero_lambda_soc_sur_glp BVAR's objective is degenerate (mode at the lower bounds) because its dummy term is not exact for b = 0.",
+  "datasets": {
+    "qd": {
+      "file": "qd_small_levels.csv",
+      "md5": "c22c97ea5e6417f8659fbaa48d0f5e56",
+      "variables": ["GDPC1", "GDPCTPI", "FEDFUNDS"],
+      "T": 240,
+      "first": "1960Q1",
+      "last": "2019Q4"
+    },
+    "sim": {
+      "file": "sim_var3.csv",
+      "md5": "ebb857088b5bb7d19e18f788232b1397",
+      "variables": ["y1", "y2", "y3"],
+      "T": 200,
+      "first": "1970Q1",
+      "last": "2019Q4"
+    }
+  },
+  "runs": [
+    {
+      "id": "qd_p4_rw_lambda",
+      "dataset": "qd",
+      "lags": 4,
+      "mean": 1,
+      "alpha": 2,
+      "var_const": 10000000,
+      "psi": [0.600450393313047, 0.0568147228872916, 0.685636121152208],
+      "psi_source": "arima_ml_variance",
+      "soc": null,
+      "sur": null,
+      "ybar0": null,
+      "hyper": ["lambda"],
+      "hyperpriors": {
+        "lambda": {
+          "mode": 0.2,
+          "sd": 0.4,
+          "lower": 0.0001,
+          "upper": 5
+        }
+      },
+      "bvar_is_exact": true,
+      "bvar_optim": {
+        "par": {
+          "lambda": 0.296669182654215
+        },
+        "value": -620.998276982772,
+        "convergence": 0,
+        "message": "CONVERGENCE: REL_REDUCTION_OF_F <= FACTR*EPSMCH",
+        "counts": {
+          "function": 11,
+          "gradient": 11
+        },
+        "method": "stats::optim L-BFGS-B on the natural scale, numerical gradient (ndeps = 1e-3)"
+      },
+      "mode_bvar_objective": {
+        "lambda": 0.29666771330138
+      },
+      "log_posterior_bvar_objective": -620.998276977495,
+      "at_bound_bvar_objective": {
+        "lambda": false
+      },
+      "mode": {
+        "lambda": 0.296667399776388
+      },
+      "log_posterior": -620.998276982713,
+      "log_ml": -621.28602379049,
+      "log_hyperprior": {
+        "lambda": 0.287746807777099
+      },
+      "grad_log_scale": [-1.85366388905095e-05],
+      "at_bound": {
+        "lambda": false
+      },
+      "laplace_sd": {
+        "lambda": 0.0567945831706772
+      }
+    },
+    {
+      "id": "qd_p4_rw_lambda_soc_sur_glp",
+      "dataset": "qd",
+      "lags": 4,
+      "mean": 1,
+      "alpha": 2,
+      "var_const": 10000000,
+      "psi": [0.600450393313047, 0.0568147228872916, 0.685636121152208],
+      "psi_source": "arima_ml_variance",
+      "soc": 1,
+      "sur": 1,
+      "ybar0": "glp",
+      "hyper": ["lambda", "soc", "sur"],
+      "hyperpriors": {
+        "lambda": {
+          "mode": 0.2,
+          "sd": 0.4,
+          "lower": 0.0001,
+          "upper": 5
+        },
+        "soc": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        },
+        "sur": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        }
+      },
+      "bvar_is_exact": true,
+      "bvar_optim": {
+        "par": {
+          "lambda": 0.445532341934517,
+          "soc": 0.44680656967223,
+          "sur": 0.9561473973875
+        },
+        "value": -584.177434115854,
+        "convergence": 0,
+        "message": "CONVERGENCE: REL_REDUCTION_OF_F <= FACTR*EPSMCH",
+        "counts": {
+          "function": 19,
+          "gradient": 19
+        },
+        "method": "stats::optim L-BFGS-B on the natural scale, numerical gradient (ndeps = 1e-3)"
+      },
+      "mode_bvar_objective": {
+        "lambda": 0.445533146148125,
+        "soc": 0.446806736605617,
+        "sur": 0.956150871128326
+      },
+      "log_posterior_bvar_objective": -584.177434109862,
+      "at_bound_bvar_objective": {
+        "lambda": false,
+        "soc": false,
+        "sur": false
+      },
+      "mode": {
+        "lambda": 0.445531251775791,
+        "soc": 0.446805437490741,
+        "sur": 0.956147050104187
+      },
+      "log_posterior": -584.177434124756,
+      "log_ml": -582.380415578565,
+      "log_hyperprior": {
+        "lambda": 0.0715110787651456,
+        "soc": -1.13768960327609,
+        "sur": -0.730840021680345
+      },
+      "grad_log_scale": [-5.18411980010569e-06, 2.21120899368543e-06, 7.27595761418342e-07],
+      "at_bound": {
+        "lambda": false,
+        "soc": false,
+        "sur": false
+      },
+      "laplace_sd": {
+        "lambda": 0.0865495050993397,
+        "soc": 0.204183424915178,
+        "sur": 0.380477036490969
+      }
+    },
+    {
+      "id": "qd_p4_rw_lambda_soc_sur_bvar",
+      "dataset": "qd",
+      "lags": 4,
+      "mean": 1,
+      "alpha": 2,
+      "var_const": 10000000,
+      "psi": [0.600450393313047, 0.0568147228872916, 0.685636121152208],
+      "psi_source": "arima_ml_variance",
+      "soc": 1,
+      "sur": 1,
+      "ybar0": "bvar",
+      "hyper": ["lambda", "soc", "sur"],
+      "hyperpriors": {
+        "lambda": {
+          "mode": 0.2,
+          "sd": 0.4,
+          "lower": 0.0001,
+          "upper": 5
+        },
+        "soc": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        },
+        "sur": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        }
+      },
+      "bvar_is_exact": true,
+      "bvar_optim": {
+        "par": {
+          "lambda": 0.442987725772253,
+          "soc": 0.418707259482072,
+          "sur": 0.911828122229908
+        },
+        "value": -585.20755382155,
+        "convergence": 0,
+        "message": "CONVERGENCE: REL_REDUCTION_OF_F <= FACTR*EPSMCH",
+        "counts": {
+          "function": 17,
+          "gradient": 17
+        },
+        "method": "stats::optim L-BFGS-B on the natural scale, numerical gradient (ndeps = 1e-3)"
+      },
+      "mode_bvar_objective": {
+        "lambda": 0.442987150161442,
+        "soc": 0.418702412057337,
+        "sur": 0.911849649693384
+      },
+      "log_posterior_bvar_objective": -585.207553812913,
+      "at_bound_bvar_objective": {
+        "lambda": false,
+        "soc": false,
+        "sur": false
+      },
+      "mode": {
+        "lambda": 0.442988713113431,
+        "soc": 0.418705832649592,
+        "sur": 0.911841467074975
+      },
+      "log_posterior": -585.207553828247,
+      "log_ml": -583.350298031356,
+      "log_hyperprior": {
+        "lambda": 0.0759871299980941,
+        "soc": -1.19732229257444,
+        "sur": -0.735920634314387
+      },
+      "grad_log_scale": [6.53699316899292e-07, -2.89901436190121e-07, -8.12860889709555e-07],
+      "at_bound": {
+        "lambda": false,
+        "soc": false,
+        "sur": false
+      },
+      "laplace_sd": {
+        "lambda": 0.0866107109275674,
+        "soc": 0.225412277455881,
+        "sur": 0.372311706003894
+      }
+    },
+    {
+      "id": "sim_p4_zero_lambda",
+      "dataset": "sim",
+      "lags": 4,
+      "mean": 0,
+      "alpha": 2,
+      "var_const": 10000000,
+      "psi": [1.11369846905326, 0.75880121255425, 0.489013141314002],
+      "psi_source": "arima_ml_variance",
+      "soc": null,
+      "sur": null,
+      "ybar0": null,
+      "hyper": ["lambda"],
+      "hyperpriors": {
+        "lambda": {
+          "mode": 0.2,
+          "sd": 0.4,
+          "lower": 0.0001,
+          "upper": 5
+        }
+      },
+      "bvar_is_exact": true,
+      "bvar_optim": {
+        "par": {
+          "lambda": 0.241585635208929
+        },
+        "value": -787.317736430133,
+        "convergence": 0,
+        "message": "CONVERGENCE: REL_REDUCTION_OF_F <= FACTR*EPSMCH",
+        "counts": {
+          "function": 8,
+          "gradient": 8
+        },
+        "method": "stats::optim L-BFGS-B on the natural scale, numerical gradient (ndeps = 1e-3)"
+      },
+      "mode_bvar_objective": {
+        "lambda": 0.241583044830011
+      },
+      "log_posterior_bvar_objective": -787.317736427836,
+      "at_bound_bvar_objective": {
+        "lambda": false
+      },
+      "mode": {
+        "lambda": 0.241583044885152
+      },
+      "log_posterior": -787.317736427836,
+      "log_ml": -787.650325404135,
+      "log_hyperprior": {
+        "lambda": 0.332588976298686
+      },
+      "grad_log_scale": [0],
+      "at_bound": {
+        "lambda": false
+      },
+      "laplace_sd": {
+        "lambda": 0.0382160957907917
+      }
+    },
+    {
+      "id": "sim_p4_rw_lambda_soc_sur_glp",
+      "dataset": "sim",
+      "lags": 4,
+      "mean": 1,
+      "alpha": 2,
+      "var_const": 10000000,
+      "psi": [1.11369846905326, 0.75880121255425, 0.489013141314002],
+      "psi_source": "arima_ml_variance",
+      "soc": 1,
+      "sur": 1,
+      "ybar0": "glp",
+      "hyper": ["lambda", "soc", "sur"],
+      "hyperpriors": {
+        "lambda": {
+          "mode": 0.2,
+          "sd": 0.4,
+          "lower": 0.0001,
+          "upper": 5
+        },
+        "soc": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        },
+        "sur": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        }
+      },
+      "bvar_is_exact": true,
+      "bvar_optim": {
+        "par": {
+          "lambda": 0.256461832342317,
+          "soc": 0.966107442153035,
+          "sur": 0.621525376173301
+        },
+        "value": -774.278384385247,
+        "convergence": 0,
+        "message": "CONVERGENCE: REL_REDUCTION_OF_F <= FACTR*EPSMCH",
+        "counts": {
+          "function": 19,
+          "gradient": 19
+        },
+        "method": "stats::optim L-BFGS-B on the natural scale, numerical gradient (ndeps = 1e-3)"
+      },
+      "mode_bvar_objective": {
+        "lambda": 0.256459915911206,
+        "soc": 0.966127149192512,
+        "sur": 0.621526760143736
+      },
+      "log_posterior_bvar_objective": -774.278384384194,
+      "at_bound_bvar_objective": {
+        "lambda": false,
+        "soc": false,
+        "sur": false
+      },
+      "mode": {
+        "lambda": 0.256459915691634,
+        "soc": 0.96612715064727,
+        "sur": 0.621526760372777
+      },
+      "log_posterior": -774.278384384194,
+      "log_ml": -772.98506733225,
+      "log_hyperprior": {
+        "lambda": 0.323223131760531,
+        "soc": -0.730186932011368,
+        "sur": -0.886353251693374
+      },
+      "grad_log_scale": [2.27373675443232e-08, -5.6843418860808e-09, -1.13686837721616e-08],
+      "at_bound": {
+        "lambda": false,
+        "soc": false,
+        "sur": false
+      },
+      "laplace_sd": {
+        "lambda": 0.0464548856201541,
+        "soc": 0.675326357483781,
+        "sur": 0.279713639548268
+      }
+    },
+    {
+      "id": "sim_p4_zero_lambda_soc_sur_glp",
+      "dataset": "sim",
+      "lags": 4,
+      "mean": 0,
+      "alpha": 2,
+      "var_const": 10000000,
+      "psi": [1.11369846905326, 0.75880121255425, 0.489013141314002],
+      "psi_source": "arima_ml_variance",
+      "soc": 1,
+      "sur": 1,
+      "ybar0": "glp",
+      "hyper": ["lambda", "soc", "sur"],
+      "hyperpriors": {
+        "lambda": {
+          "mode": 0.2,
+          "sd": 0.4,
+          "lower": 0.0001,
+          "upper": 5
+        },
+        "soc": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        },
+        "sur": {
+          "mode": 1,
+          "sd": 1,
+          "lower": 0.0001,
+          "upper": 50
+        }
+      },
+      "bvar_is_exact": false,
+      "bvar_optim": {
+        "par": {
+          "lambda": 0.392160791634098,
+          "soc": 0.0001,
+          "sur": 0.0001
+        },
+        "value": -565.492708539611,
+        "convergence": 0,
+        "message": "CONVERGENCE: REL_REDUCTION_OF_F <= FACTR*EPSMCH",
+        "counts": {
+          "function": 32,
+          "gradient": 32
+        },
+        "method": "stats::optim L-BFGS-B on the natural scale, numerical gradient (ndeps = 1e-3)"
+      },
+      "mode_bvar_objective": {
+        "lambda": 0.392157469284425,
+        "soc": 0.0001,
+        "sur": 0.0001
+      },
+      "log_posterior_bvar_objective": -565.492708513804,
+      "at_bound_bvar_objective": {
+        "lambda": false,
+        "soc": true,
+        "sur": true
+      },
+      "mode": {
+        "lambda": 0.207956203260423,
+        "soc": 0.330504256109512,
+        "sur": 0.616551327879549
+      },
+      "log_posterior": -748.507959006373,
+      "log_ml": -746.523572876162,
+      "log_hyperprior": {
+        "lambda": 0.344275048722007,
+        "soc": -1.4373535731651,
+        "sur": -0.891307605767943
+      },
+      "grad_log_scale": [0, 0, 0],
+      "at_bound": {
+        "lambda": false,
+        "soc": false,
+        "sur": false
+      },
+      "laplace_sd": {
+        "lambda": 0.0282983847933213,
+        "soc": 0.0644311873041289,
+        "sur": 0.277105568818628
+      }
+    }
+  ]
+}
