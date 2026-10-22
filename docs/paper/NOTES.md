@@ -29,22 +29,26 @@ re-derived before it goes into the paper).
    the table or the indicator pmf (M11, M12) are not bugs there; they are bugs of the
    auxiliary-mixture sampler only. Likewise the uncorrected non-centred move (M7) is invisible with
    the 10-component table at test sizes and becomes detectable with a deliberately coarse
-   one-component table. Evidence: `tests/mutation/mutants.py` module docstring. Status: to check
-   (mutation suite being re-run).
+   one-component table. Evidence: `tests/mutation/mutants.py` module docstring and `EVIDENCE`.
+   Status: verified (mutation suite re-run on x86-64 Linux, 2026-10-22: M11/M12 caught under
+   `exact=False`, M7 caught with `COARSE1`).
 4. **Parameter ranks are blind to the CCM-2019 triangular-step error; the log-likelihood rank is
    not.** Whole-scan one-block invariance does not catch M1 at N = 1000, block-conditional SBC of
    one column with the log-likelihood as a statistic does. Evidence: `mutants.py` (M1 evidence),
-   N06 §7.3. Status: to check.
+   N06 §7.3. Status: block SBC catch verified (log-likelihood p 2.8e-11 vs control min p 0.10);
+   the whole-scan "not caught" observation is recorded, not re-run.
 5. **Per-replication SBC ESS cannot be certified from L = 99 kept draws.** The design was amended to
    predict per-replication ESS from the pilot IAT and add a pooled kept-draw ESS gate. Evidence:
    DESIGN §9.6 erratum. Status: verified (design change; the reasoning is in the erratum).
 6. **SBC thinning cap.** With `t_max = 50` the ESS rule failed on slow-mixing datasets (outlier/t
    rows) while the γ test was clean; `t_max = 200` covers every replication observed. Evidence:
    `tests/sbc/test_sbc_compositions.py` docstring. Status: recorded.
-7. **Geweke "error 2" (simulator draws fresh latents)** is caught by Geweke tests (M3). Status: to
-   check.
+7. **Geweke "error 2" (simulator draws fresh latents)** is caught by Geweke tests (M3, max |z|
+   23.5 vs control 2.59). Status: verified.
 8. **Every mutant must be caught by some tier** (DESIGN §9.7): the table of mutant × catching tier
-   with statistics is a natural paper table. Status: to check (being re-run).
+   with statistics is a natural paper table. Status: verified, 33/33 mutant × tier checks caught
+   with passing controls (`tests/mutation`, ~10 min with a warm compilation cache). Re-run on
+   the release commit for the paper table (`RAI_BVAR_VALIDATION_RECORD=<dir>` writes the JSON).
 
 ## C. Engineering lessons
 
