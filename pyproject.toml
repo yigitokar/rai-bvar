@@ -25,6 +25,7 @@ dependencies = [
     "pandas>=2.2",
     "xarray>=2024.10",
     "scoringrules>=0.11",
+    "jax>=0.12",  # MCMC engine (float64 enabled on import; SPEC §8)
 ]
 
 [project.optional-dependencies]
