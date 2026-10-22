@@ -65,7 +65,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax, random
 
-from rai_bvar.engines.mcmc import _jax, keys
+from rai_bvar.engines.mcmc import _blas, _jax, keys
 from rai_bvar.engines.mcmc import data as data_mod
 from rai_bvar.engines.mcmc import monitor as monitor_mod
 from rai_bvar.engines.mcmc.compose import Program, compose
@@ -930,7 +930,9 @@ def run_chains(
     the stored draws exceed the memory budget.
     """
     t_start = time.perf_counter()
-    with _jax.x64(), _CompileTimer() as ct:
+    # one OpenBLAS thread for jaxlib's LAPACK calls while the chains run: no result changes,
+    # oversubscription removed (engines.mcmc._blas; WP24)
+    with _jax.x64(), _blas.single_thread(), _CompileTimer() as ct:
         if fns.program is None or fns.chain is None:
             raise TypeError("fns must come from make_runner")
         if static != fns.program.static:
