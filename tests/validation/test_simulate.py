@@ -446,7 +446,7 @@ def test_composition_table_matches_design():
     assert [J.composition_id(c) for c in J.COMPOSITIONS] == [*range(1, 18), *range(201, 205)]
     # WP25 dummy rows: (n_dummy small, const_path, coef_scaling)
     for name, (m, path, cs) in {
-        "structural_constant_dummies": (3, "cholesky_const", "none"),
+        "structural_constant_dummies": (3, "eigen", "none"),
         "structural_mode2_constant_dummies": (3, "fixed_factor", "lambda"),
         "reduced_constant_dummies": (4, "weighted", "none"),
         "structural_sv_dummies": (3, "weighted", "none"),

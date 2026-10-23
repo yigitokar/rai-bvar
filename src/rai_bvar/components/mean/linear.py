@@ -37,12 +37,12 @@ the λ-free ``P̃θ``; ``iw_equivalent`` the same sums over the active ``a``-slo
 SOC/SUR dummy rows (WP25; ``MeanStatic.n_dummy = m > 0``; N05 §7.7): ``m`` prior rows with the
 δ-design ``F_d = [X_d | X_d M_c − Y_d[:, :n−1]]`` (``FitCache.dummy``) and targets ``y_{d,i} =
 Y_d[:, i]`` join every equation's regression, ``K += w_d (cθ⊗cθ ⊙ F_dᵀF_d)``,
-``b += w_d cθ ⊙ F_dᵀy_{d,i}``, on every path (``fixed_factor``: in ``K̃``, λ-free); the weight is
-the fixed ``w_d = dummy_w_i = 1/σ̄_i²`` in Mode I and ``iw_equivalent`` (the rows are part of the
-Gaussian prior), and ``w_d = dummy_w_i/λ_i`` in Mode II, where the rows are like data rows and the
-coupling counts them: ``n_active += m``, ``quad += ½ dummy_w_i Σ_d (y_{d,i} − F_dθ_i)²``. The
-``eigen`` path needs a diagonal prior precision, so Mode I with rows resolves to ``cholesky_const``.
-Without rows (``m = 0``) none of this is traced.
+``b += w_d cθ ⊙ F_dᵀy_{d,i}``, on every path (``fixed_factor``: in ``K̃``, λ-free; ``eigen``: in the
+dense prior precision ``P = diag(precθ) + w_d(cθ⊗cθ ⊙ F_dᵀF_d)`` of ``linalg.eigen_prepare_dense``,
+N05 §7.7); the weight is the fixed ``w_d = dummy_w_i = 1/σ̄_i²`` in Mode I and ``iw_equivalent``
+(the rows are part of the Gaussian prior), and ``w_d = dummy_w_i/λ_i`` in Mode II, where the rows
+are like data rows and the coupling counts them: ``n_active += m``,
+``quad += ½ dummy_w_i Σ_d (y_{d,i} − F_dθ_i)²``. Without rows (``m = 0``) none of this is traced.
 
 Overridable internals (DESIGN §4.9): ``structural_gamma(δ, a, M_c) -> γ`` and
 ``linear_conditional(ctx, pm, cm, cache, shared) -> GaussianPrec``. Overriding either switches the
@@ -69,6 +69,7 @@ from rai_bvar.engines.mcmc.keys import Key, Sub, sub_key
 from rai_bvar.engines.mcmc.linalg import (
     eigen_draw,
     eigen_prepare,
+    eigen_prepare_dense,
     fixed_factor_draw,
     fixed_factor_prepare,
     precision_draw,
@@ -340,13 +341,17 @@ class LinearStructural(KernelBase):
             return base
         n = self.n
         G = base.G_const
-        if path == "eigen" and self.static.n_dummy:
-            raise ValueError("the eigen path needs a diagonal prior precision: no dummy rows")
 
         def one(i: Array, prior_i: EqPrior) -> PyTree:
             pr = theta_prior_arrays(prior_i, i, n)
             c = pr.cmask
             fty = jnp.take(base.FtY, i, axis=1)
+            if path == "eigen" and self.static.n_dummy:  # dense prior precision (WP25)
+                d = base.dummy
+                w = jnp.take(d.w, i)
+                P = jnp.diag(pr.prec) + w * (c[:, None] * d.G * c[None, :])
+                b0 = pr.prec * pr.mean + w * c * jnp.take(d.FtY, i, axis=1)
+                return eigen_prepare_dense(G, P, b0, fty, c)
             if path == "eigen":
                 return eigen_prepare(G, pr.prec, pr.mean, fty, c)
             Gi = G

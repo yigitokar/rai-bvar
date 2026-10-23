@@ -828,7 +828,9 @@ _ALL: tuple[Mutant, ...] = (
 #: control; t_crit 4.1–4.5), B and S Bonferroni q or min p (mutant / control). Re-run
 #: independently on x86-64 Linux (4 CPUs) the same day: all 33 mutant × tier checks caught, every
 #: control passed, the statistics equal to the digits shown (M2: G 705 / 2.47). M17–M18 (WP25)
-#: add four checks, recorded on the M1 Pro only.
+#: add four checks, recorded on an Apple M5 Max (arm64, macOS 26.6) and reproduced independently
+#: on x86-64 Linux the same day (``-k "M17 or M18"``: 4 passed): M17 U 0.0602 / 2.25e-15, G max |z|
+#: 23.15 / 2.44 (t_crit 4.26); M18 U 0.405 / 2.35e-14, G 99.7 / 2.61 (t_crit 4.40).
 EVIDENCE: dict[str, str] = {
     "M1": "U 1.70 / 1.6e-14; B (π_0 block SBC) loglik p 2.8e-11 / min p 0.10; G 20.8 / 3.03; "
     "one-block invariance of the whole CCCM scan: q 0.29 (not caught)",
@@ -849,8 +851,8 @@ EVIDENCE: dict[str, str] = {
     "M14": "U 14.9 / 9e-15; G 325 / 3.03",
     "M15": "U 0.457 / 6e-17; B q 1.8e-14 / 1.0; G 50.5 / 2.34",
     "M16": "G 264 / 1.99 (λ ≈ 0.01, exact=False; control offset 1e-12)",
-    "M17": "U 0.060 / 2.4e-15; G 23.1 (eq0.mean.delta1^2) / 2.44 (2026-10-22, WP25, M1 Pro)",
-    "M18": "U 0.405 / 2.9e-14; G 99.7 (glob.mean.Pi[1,0]) / 2.61 (2026-10-22, WP25, M1 Pro)",
+    "M17": "U 0.060 / 2.4e-15; G 23.1 (eq0.mean.delta1^2) / 2.44 (2026-10-22, WP25, Apple M5 Max; x86-64 alike)",
+    "M18": "U 0.405 / 2.9e-14; G 99.7 (glob.mean.Pi[1,0]) / 2.61 (2026-10-22, WP25, Apple M5 Max; x86-64 alike)",
 }
 MUTANTS: dict[str, Mutant] = {m.id: dataclasses.replace(m, evidence=EVIDENCE[m.id]) for m in _ALL}
 

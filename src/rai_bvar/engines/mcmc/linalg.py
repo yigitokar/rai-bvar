@@ -38,6 +38,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
+from jax.scipy.linalg import solve_triangular
 
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before any computation)
 from rai_bvar.engines.mcmc.state import EigenCache, FixedFactorCache, StepInfo
@@ -51,6 +52,7 @@ _EIG_NEG_TOL = 1e-10  # eigen path: eigenvalues ≥ −1e-10·max|eigenvalue| (D
 __all__ = [
     "eigen_draw",
     "eigen_prepare",
+    "eigen_prepare_dense",
     "fixed_factor_draw",
     "fixed_factor_prepare",
     "gram_from_packed",
@@ -258,6 +260,42 @@ def eigen_prepare(G: Array, d: Array, mean0: Array, fty: Array, cmask: Array) ->
     """
     d_half = jnp.sqrt(d)
     Gt = (cmask[:, None] * G * cmask[None, :]) / (d_half[:, None] * d_half[None, :])
+    Q, g = _graded_eigh(Gt)
+    u1 = Q.T @ (d_half * mean0)
+    u2 = Q.T @ (cmask * fty / d_half)
+    return EigenCache(Q=Q, g=g, d_half=d_half, u1=u1, u2=u2)
+
+
+def eigen_prepare_dense(G: Array, P: Array, b0: Array, fty: Array, cmask: Array) -> EigenCache:
+    """:func:`eigen_prepare` for a **dense** λ-free prior precision (Mode I × Constant with SOC/SUR
+    dummy rows; WP25, N05 §7.7: "the eigen trick then needs a dense ``P₀^{−½}``").
+
+    Inputs: ``G = Fᵀ D_m F`` (unmasked), ``P`` the dense λ-free prior precision (``diag(precθ) +
+    w_d(cmask⊗cmask ⊙ F_dᵀF_d)``; 1 on the diagonal of inactive slots), ``b0 = P μ`` its linear
+    term (``precθ ⊙ meanθ + w_d cmask ⊙ F_dᵀy_d``), ``fty = Fᵀ D_m y_i``, ``cmask = cmaskθ``. With
+    ``P = L_P L_Pᵀ`` and ``G̃ = L_P⁻¹(cmask⊗cmask ⊙ G)L_P⁻ᵀ = Q diag(g) Qᵀ`` (the graded
+    decomposition of :func:`eigen_prepare`): ``K = L_P(I + G̃/λ)L_Pᵀ``, so
+    ``θ = L_P⁻ᵀQ(v ⊙ u1 + u2/(λ + g) + √v ⊙ z)`` with ``u1 = QᵀL_P⁻¹b0``, ``u2 = QᵀL_P⁻¹(cmask ⊙ fty)``.
+    The cache stores ``L_P⁻ᵀQ`` as ``Q`` and ``d_half = 1``, so :func:`eigen_draw` is unchanged
+    (``O(q²)`` per sweep). A failed Cholesky of ``P`` leaves NaN in ``g`` (``ok = False``).
+    """
+    q = P.shape[0]
+    L = lax.linalg.cholesky(0.5 * (P + P.T), symmetrize_input=False)
+    Gm = cmask[:, None] * G * cmask[None, :]
+    W = solve_triangular(L, Gm, lower=True)  # L⁻¹ Gm
+    Gt = solve_triangular(L, W.T, lower=True)  # L⁻¹ Gm L⁻ᵀ (Gm symmetric)
+    Gt = 0.5 * (Gt + Gt.T)
+    Q, g = _graded_eigh(Gt)
+    g = jnp.where(jnp.all(jnp.isfinite(L)), g, jnp.nan)
+    u1 = Q.T @ solve_triangular(L, b0, lower=True)
+    u2 = Q.T @ solve_triangular(L, cmask * fty, lower=True)
+    Qc = solve_triangular(L.T, Q, lower=False)  # L⁻ᵀ Q
+    return EigenCache(Q=Qc, g=g, d_half=jnp.ones((q,), Qc.dtype), u1=u1, u2=u2)
+
+
+def _graded_eigh(Gt: Array) -> tuple[Array, Array]:
+    """``Gt = Q diag(g) Qᵀ`` by the graded factorisation of :func:`eigen_prepare` (``g`` NaN when
+    ``Gt`` is not PSD)."""
     delta = jnp.sqrt(jnp.diagonal(Gt))
     live = delta > 0.0
     dpos = jnp.where(live, delta, 1.0)
@@ -273,9 +311,7 @@ def eigen_prepare(G: Array, d: Array, mean0: Array, fty: Array, cmask: Array) ->
     U, sv, _ = lax.linalg.svd(R.T, full_matrices=False, algorithm=lax.linalg.SvdAlgorithm.QR)
     Q = jnp.zeros_like(U).at[order].set(U)
     g = jnp.where(psd, sv * sv, jnp.nan)
-    u1 = Q.T @ (d_half * mean0)
-    u2 = Q.T @ (cmask * fty / d_half)
-    return EigenCache(Q=Q, g=g, d_half=d_half, u1=u1, u2=u2)
+    return Q, g
 
 
 def eigen_draw(c: EigenCache, lam: Array, z: Array) -> tuple[Array, StepInfo]:

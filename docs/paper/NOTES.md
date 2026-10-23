@@ -80,22 +80,29 @@ re-derived before it goes into the paper).
     and there is no closed-form prior sampler; the log prior is still exact up to a constant.
     Evidence: `validation/dummies.py`, `tests/validation/test_reference_dummies.py`. Status:
     verified.
-14. **Dummy rows break the diagonal prior precision,** so the O(q²) eigen fast path of Mode I ×
-    Constant falls back to the exact Cholesky path (`cholesky_const`) when dummies are on; Mode
-    II keeps its fixed-factor path because its rows are λ-free like the data. Status: verified
-    (design decision; `resolve_const_path`).
+14. **Dummy rows break the diagonal prior precision, but the O(q²) eigen fast path survives**: with
+    `P = L_P L_Pᵀ` dense, `K = L_P(I + L_P⁻¹GL_P⁻ᵀ/λ)L_Pᵀ`, one per-fit eigendecomposition again
+    gives every λ in O(q²), and storing `L_P⁻ᵀQ` keeps the per-sweep draw code unchanged. At
+    `n = 20, p = 4, T = 300` (Mode I × Constant) it is 0.46 ms/sweep against 1.53 for the
+    per-sweep Cholesky; the two agree within DESIGN §9.3's rounding envelope. Mode II keeps its
+    fixed-factor path (rows λ-free like the data). Status: verified (`test_dense_eigen_path_*`;
+    Geweke G-small over 7 seeds and G-full on the eigen path; timing on an Apple M5 Max under a
+    concurrent load of 3–5).
 15. **A "wrong weight" dummy bug is loud.** Weighting Mode I rows by the current `1/λ_i` instead of
     the fixed `1/σ̄_i²` (N05 §7.7's warning; M17) gives Geweke max |z| 23 (control 2.4); dropping
     the rows from the CCCM step (M18) gives 100 (control 2.6), at 3–6 s per G-small run. The
     reference is written in covariance form (`m × m` systems), the kernels in precision form
     (`q × q` Gram updates), which keeps the two implementations algebraically distinct. Status:
-    verified (`tests/mutation`).
+    verified (`tests/mutation`; Apple M5 Max and, independently, x86-64 Linux: M17 U 0.0602, G
+    23.15; M18 U 0.405, G 99.7). The independent x86 review also caught four further injected
+    bugs (Mode II rows weighted 1/σ̄², rows counted twice in the λ step, CCCM rows weighted by
+    `(Σ⁻¹)_jj`, fixed-factor weight 2w).
 16. **Adding the feature left every existing composition bitwise unchanged.** With
     `MeanStatic.n_dummy = 0` no dummy code is traced; 537 arrays (prior draws, simulated data,
     caches, three production sweeps of all 17 compositions and 7 block configurations, and 7
     end-to-end EB fits with forecasts) were identical bit for bit before and after the change on
     one machine. Evidence: WP25 report; `test_dummy_path_is_closed_without_dummies`. Status:
-    recorded (M1 Pro, one run).
+    recorded (Apple M5 Max, one run).
 
 ## Before submission
 

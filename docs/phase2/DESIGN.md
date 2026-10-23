@@ -629,9 +629,12 @@ code is traced and pre-WP25 programs are unchanged. `prior_template` emits them 
 `U`, `E`, `W`); Mode II's coupling adds `m` to `n_active` and `½w_iΣ_d(y_{d,i} − F_dθ_i)²` to `quad`;
 `cccm_core`/`cccm_conditional_j` take a keyword-only `dummy=(G, FtY, w)`; the monitor's log prior
 adds the rows' factor (up to its constant). The rows are never time steps: not in `EngineData`,
-`tmask`/`T_eff`, the likelihood or the LPD. (3) Path rule (§3.7.2): Mode I × Constant with dummies
-resolves to `cholesky_const` (the diagonal `eigen` path is illegal with `n_dummy > 0`; the dense
-`P₀^{−½}` eigen variant of N05 §7.7 is not implemented); Mode II keeps `fixed_factor`. (4) EB
+`tmask`/`T_eff`, the likelihood or the LPD. (3) Path rule (§3.7.2) unchanged by the rows: Mode I ×
+Constant keeps `eigen` on the dense prior precision `P = diag(precθ) + w_d(cθ⊗cθ ⊙ F_dᵀF_d)`
+(`linalg.eigen_prepare_dense`: `G̃ = L_P⁻¹GL_P⁻ᵀ` by the graded decomposition, the cache stores
+`L_P⁻ᵀQ` with `d_half = 1`, so `eigen_draw` is unchanged; N05 §7.7), equal to `cholesky_const`
+within the §9.3 path-vs-path envelope and 0.46 vs 1.53 ms/sweep at `n = 20, p = 4, T = 300`
+(Apple M5 Max); Mode II keeps `fixed_factor`. (4) EB
 (§6.5): the conjugate twin keeps `soc`, `sur`, `soc_scope`, so their EB values are plugged into the
 rows; `hierarchy="mh"` stays `NotImplementedError`. (5) Validation: the reference conditions the base
 prior on the rows (Bayes' rule, covariance form; Matheron draws; Mode II integrates θ for

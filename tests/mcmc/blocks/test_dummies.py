@@ -198,7 +198,7 @@ def test_weights_hyper_and_errors():
 @pytest.mark.parametrize(
     ("vol", "form", "path", "mode"),
     [
-        (rb.Constant("ig"), "structural", "cholesky_const", "I"),
+        (rb.Constant("ig"), "structural", "eigen", "I"),
         (rb.Constant("iw"), "structural", "fixed_factor", "II"),
         (rb.Constant("iw_equivalent"), "structural", "cholesky_const", "iw_equivalent"),
         (rb.SV(), "structural", "weighted", "I"),
@@ -207,7 +207,7 @@ def test_weights_hyper_and_errors():
     ids=["modeI", "modeII", "iw_eq", "sv", "reduced"],
 )
 def test_resolve_builds_the_rows(vol, form, path, mode):
-    """``resolve``: ``n_dummy``, the path rule (Mode I → ``cholesky_const``), the arrays of the
+    """``resolve``: ``n_dummy``, the path rule (unchanged by the rows), the arrays of the
     builders and ``hyper`` (``soc``, ``sur``, ``n_dummy``); no dummies → ``Empty`` everywhere."""
     data = var_data()
     prior = rb.Minnesota(form=form, soc=1.5, sur=0.8, hierarchy="fixed")
@@ -240,8 +240,8 @@ def test_contract_and_legality():
     assert tmpl.shared.dummies.Y.shape == (3, 2) and tmpl.shared.dummies.X.shape == (3, 3)
     assert tmpl.eq.coef.dummy_w.shape == (2,)
     st = on.static
-    with pytest.raises(ValueError, match="dense"):
-        validate_composition(st.struct, replace(st.mean, const_path="eigen"), st.coef, st.vol)
+    assert st.mean.const_path == "eigen"  # dense prior precision with rows (eigen_prepare_dense)
+    validate_composition(st.struct, st.mean, st.coef, st.vol)
     with pytest.raises(ValueError, match="zero mean"):
         MeanStatic(kind="zero", n_dummy=2)
     _, data = problem(spec, 0)
@@ -745,3 +745,83 @@ def test_fit_with_dummies_end_to_end():
     assert "dummy rows" in fit.summary().attrs["implied_reduced_form"]["dummies"]
     fc = fit.forecast(2, draws=20, seed=1)
     assert np.all(np.isfinite(np.asarray(fc.draws.values if hasattr(fc, "draws") else fc.paths)))
+
+
+# =========================================================================== dense eigen path
+
+
+def _path_moments(spec: JointSpec, st, data, i: int) -> tuple[np.ndarray, np.ndarray, int]:
+    """Mean and covariance of equation ``i``'s ``θ_i`` draw on ``spec``'s path, read off the
+    production ``draw_core`` with injected noise (``z = 0`` and ``z = e_r``), active block only."""
+    program, cache, ctx, pm, cm = views(spec, st, data)
+    M = program.mean
+    ctx_i, pm_i, cm_i = eq_slice(ctx, i), eq_slice(pm, i), eq_slice(cm, i)
+    cache_i = Empty() if isinstance(cache.eq, Empty) else eq_slice(cache.eq, i)
+    q_act = spec.static.shapes.k + i
+
+    @jax.jit
+    def draw(z):
+        return M.draw_core(z, ctx_i, pm_i, cm_i, cache_i, cache, spec.prior.shared)[0]
+
+    q = spec.static.shapes.q
+    mean = np.asarray(draw(jnp.zeros(q)))[:q_act]
+    C = np.stack([np.asarray(draw(jnp.eye(q)[r]))[:q_act] - mean for r in range(q)], axis=1)
+    return mean, C @ C.T, q_act
+
+
+def _envelope(spec: JointSpec, st, data, i: int) -> tuple[float, float]:
+    """DESIGN §9.3 item 1 path-vs-path tolerances ``(mean: 2e-12 + 5εκ(1 + t), cov: 2e-12 + 5εκ)``
+    with ``κ = cond(sKs)`` of the Jacobi-scaled posterior precision and ``t`` its largest t-ratio."""
+    program, cache, ctx, pm, cm = views(spec, st, data)
+    cond = program.mean.conditional_eq(None, None, eq_slice(ctx, i), eq_slice(pm, i),
+                                       eq_slice(cm, i), Empty(), cache, spec.prior.shared)  # fmt: skip
+    q_act = spec.static.shapes.k + i
+    K, b = np.asarray(cond.K)[:q_act, :q_act], np.asarray(cond.b)[:q_act]
+    s = 1.0 / np.sqrt(np.diag(K))
+    kappa = np.linalg.cond(s[:, None] * K * s[None, :])
+    mean = np.linalg.solve(K, b)
+    t = np.max(np.abs(mean) / np.sqrt(np.diag(np.linalg.inv(K))))
+    eps = np.finfo(np.float64).eps
+    return 2e-12 + 5 * eps * kappa * (1 + t), 2e-12 + 5 * eps * kappa
+
+
+def _assert_paths_agree(eig: JointSpec, chol: JointSpec, st, data) -> None:
+    for i in range(eig.static.shapes.n):
+        m_e, V_e, _ = _path_moments(eig, st, data, i)
+        m_c, V_c, _ = _path_moments(chol, st, data, i)
+        tol_m, tol_v = _envelope(chol, st, data, i)
+        sd = np.sqrt(np.diag(V_c))
+        assert np.max(np.abs(m_e - m_c) / sd) <= tol_m, (i, np.max(np.abs(m_e - m_c) / sd), tol_m)
+        rel = np.abs(V_e - V_c) / np.sqrt(np.outer(np.diag(V_c), np.diag(V_c)))
+        assert np.max(rel) <= tol_v, (i, np.max(rel), tol_v)
+
+
+def test_dense_eigen_path_with_dummies_equals_cholesky_const_test_prior():
+    """Mode I × Constant with SOC/SUR rows on the ``eigen`` path (dense prior precision,
+    ``linalg.eigen_prepare_dense``; N05 §7.7) equals ``cholesky_const`` to rounding: mean and
+    covariance of the injected-noise draw within the DESIGN §9.3 path-vs-path envelope."""
+    eig = joint_spec("structural_constant_dummies", n=3)
+    chol = joint_spec("structural_constant_dummies", n=3, const_path="cholesky_const")
+    assert eig.static.mean.const_path == "eigen"
+    for seed in range(3):
+        st, data = problem(eig, 600 + seed)
+        _assert_paths_agree(eig, chol, st, data)
+
+
+@pytest.mark.parametrize("n", [3, 6])
+def test_dense_eigen_path_with_dummies_equals_cholesky_const_minnesota(n):
+    """The same on resolved Minnesota problems (level data, ``var_const = 1e7``: the graded case
+    of ``eigen_prepare``) with the production rows and weights ``ι/ψ_i``."""
+    data = var_data(n=n, seed=20 + n)
+    prior = rb.Minnesota(form="structural", soc=1.3, sur=0.7, hierarchy="fixed", lambda_=0.3)
+    model = rb.BVAR(mean=rb.Linear(prior=prior), vol=rb.Constant("ig"), lags=2)
+    r = resolve(model, data, rb.Runtime())
+    assert r.static.mean.const_path == "eigen" and r.static.mean.n_dummy == n + 1
+    st = _fixed_state(r.static, np.log(np.linspace(0.05, 2.0, n)))
+    prior_j = jax.tree.map(jnp.asarray, r.prior)
+    eig = JointSpec("eig", r.static, prior_j, _fixed_design(r))
+    chol_static = dataclasses.replace(
+        r.static, mean=replace(r.static.mean, const_path="cholesky_const")
+    )
+    chol = JointSpec("chol", chol_static, prior_j, _fixed_design(r))
+    _assert_paths_agree(eig, chol, st, jax.tree.map(jnp.asarray, r.data))

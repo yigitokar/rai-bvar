@@ -293,8 +293,8 @@ def validate_composition(
     4. ``coupled`` needs the Constant core, and holds exactly when some prior block is λ-scaled;
     5. a constant-path other than ``weighted`` belongs to ``linear_structural`` and needs
        time-constant weights (Constant core, no transitory scale);
-    6. ``eigen`` needs Mode I, a non-varying coefficient prior and no dummy rows (SOC/SUR rows make
-       the prior precision dense, N05 §7.7; WP25 routes them to ``cholesky_const``);
+    6. ``eigen`` needs Mode I and a non-varying coefficient prior (with SOC/SUR dummy rows it uses
+       the dense prior precision, ``linalg.eigen_prepare_dense``; N05 §7.7, WP25);
     7. ``fixed_factor`` needs Mode II and a non-varying coefficient prior;
     8. ``rw`` and ``zero_offset`` are SV options (``rw`` ignores ``h0``);
     9. outliers need ``outlier_K >= 2``;
@@ -336,11 +336,6 @@ def validate_composition(
             )
     if mean.const_path == "eigen" and (mode != "I" or COEF_VARIES[coef.kind]):
         raise ValueError("const_path='eigen' needs Mode I and a non-varying coefficient prior")
-    if mean.const_path == "eigen" and mean.n_dummy:
-        raise ValueError(
-            "const_path='eigen' needs a diagonal prior precision; SOC/SUR dummy rows make it dense "
-            "(N05 §7.7): use 'cholesky_const'"
-        )
     if mean.const_path == "fixed_factor" and (mode != "II" or COEF_VARIES[coef.kind]):
         raise ValueError(
             "const_path='fixed_factor' needs Mode II and a non-varying coefficient prior"

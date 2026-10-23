@@ -23,9 +23,9 @@ data)`` always resolves the same way, E14):
                tile (a multiple of 512 packed columns) such that T_pad·tile·8 ≤ 64 MiB;
                P = q(q+1)/2 (structural δ-design) or k(k+1)/2 (reduced form, packed X)
     const_path "auto" → structural Linear × Constant without a transitory scale and with a
-               non-varying coefficient prior: Mode I "eigen" ("cholesky_const" with SOC/SUR
-               dummy rows, which make the prior precision dense; N05 §7.7, WP25), Mode II
-               "fixed_factor", iw_equivalent "cholesky_const"; anything else "weighted" (§3.7.2).
+               non-varying coefficient prior: Mode I "eigen" (with SOC/SUR dummy rows on the
+               dense prior precision; N05 §7.7, WP25), Mode II "fixed_factor", iw_equivalent
+               "cholesky_const"; anything else "weighted" (§3.7.2).
                "cholesky" → "cholesky_const" where weights are time-constant, else "weighted"
                (the general Cholesky path): the fast paths are off either way
     cccm_precompute ⇔ n·k²·8·C ≤ 512 MiB
@@ -155,15 +155,15 @@ def resolve_gram(setting: str, T_pad: int, P: int) -> tuple[str, int]:
     return setting, 0
 
 
-def resolve_const_path(setting: str, static_parts: Any, *, dummies: bool = False) -> str:
+def resolve_const_path(setting: str, static_parts: Any) -> str:
     """``MeanStatic.const_path`` from ``MCMCSettings.const_path`` (DESIGN §3.7.2 path rule).
 
     ``static_parts`` is ``api.static_parts(model)``. The fast paths need the structural ``Linear``
     mean, time-constant weights (Constant core, no transitory scale) and a non-varying
-    coefficient prior; ``"cholesky"`` turns them off. ``dummies`` (WP25): SOC/SUR rows make the
-    Mode I prior precision dense, so the diagonal ``eigen`` path gives way to ``cholesky_const``
-    (exact; the dense-``P₀^{−½}`` eigen variant of N05 §7.7 is not implemented). Mode II keeps
-    ``fixed_factor``: its rows are λ-free like the data.
+    coefficient prior; ``"cholesky"`` turns them off. SOC/SUR dummy rows (WP25) do not change the
+    path: with them the Mode I prior precision is dense and ``eigen`` factors it
+    (``linalg.eigen_prepare_dense``, N05 §7.7; 0.46 vs 1.53 ms/sweep for ``cholesky_const`` at
+    ``n = 20, p = 4, T = 300``), and Mode II's ``fixed_factor`` holds the λ-free rows.
     """
     if setting not in ("auto", "cholesky"):
         raise ValueError(f"unknown const_path setting {setting!r}")
@@ -175,8 +175,6 @@ def resolve_const_path(setting: str, static_parts: Any, *, dummies: bool = False
         return "weighted"
     mean = MeanStatic(kind=static_parts.mean_kind, coef_scaling=static_parts.coef_scaling)
     mode = scaling_mode(static_parts.struct, mean)
-    if mode == "I" and dummies:
-        return "cholesky_const"
     return {"I": "eigen", "II": "fixed_factor", "iw_equivalent": "cholesky_const"}[mode]
 
 
@@ -239,7 +237,7 @@ def resolve(
     mean_static = MeanStatic(
         kind=parts.mean_kind,
         coef_scaling=parts.coef_scaling,
-        const_path=resolve_const_path(settings.const_path, parts, dummies=n_dummy > 0),
+        const_path=resolve_const_path(settings.const_path, parts),
         gram=gram,
         gram_tile=tile,
         cccm_precompute=resolve_cccm_precompute(n, shapes.k, settings.chains),

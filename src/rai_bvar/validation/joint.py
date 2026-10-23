@@ -525,13 +525,10 @@ OVERRIDE_KEYS: frozenset[str] = (
 )
 
 
-def _const_path(mean: str, vol: VolStatic, mode: str, dummies: bool = False) -> str:
-    """The resolve rule of DESIGN §3.7.2 (``const_path="auto"``); Mode I with dummy rows takes
-    ``cholesky_const`` (WP25, ``resolve.resolve_const_path``)."""
+def _const_path(mean: str, vol: VolStatic, mode: str) -> str:
+    """The resolve rule of DESIGN §3.7.2 (``const_path="auto"``; with dummy rows too, WP25)."""
     if mean != "linear_structural" or not vol.constant_weights:
         return "weighted"
-    if mode == "I" and dummies:
-        return "cholesky_const"
     return {"I": "eigen", "II": "fixed_factor", "iw_equivalent": "cholesky_const"}[mode]
 
 
@@ -576,7 +573,7 @@ def joint_spec(name: str, size: Literal["small", "full"] = "small", **overrides:
     mean_kw: dict[str, Any] = {
         "kind": d.mean,
         "coef_scaling": "lambda" if d.mode == "II" else "none",
-        "const_path": _const_path(d.mean, vol, d.mode, d.dummies),
+        "const_path": _const_path(d.mean, vol, d.mode),
         "n_dummy": n + 1 if d.dummies else 0,  # SOC rows of every variable + the SUR row
     }
     mean_kw.update({k: v for k, v in overrides.items() if k in _MEAN_FIELDS})
