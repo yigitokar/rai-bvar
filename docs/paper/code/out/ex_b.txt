@@ -1,0 +1,39 @@
+macOS-26.6.2-arm64-arm-64bit | rai-bvar 0.0.1
+mcmc | BVAR(Minnesota(structural, eb), SV, p=2, mcmc=45b567) | structural | {'mean': 'Linear', 'prior': 'Minnesota(structural, eb)', 'vol': 'SV', 'lags': '2', 'deterministic': 'c', 'outliers': 'none'}
+prior mode: Mode I | hyper: {'hierarchy': 'eb', 'lambda': 0.24549046712778935, 'alpha': 2.0, 'cross': 1.0, 'contemp': 1.0, 'var_const': 10000000.0, 'eb_method': 'conjugate_twin', 'eb_converged': True, 'offset_rule': 'relative', 'c_rel': 1e-12} | converged: False
+                    mean     sd   rhat  ess_bulk
+quantity                                        
+loglik          1928.304  7.948  1.031   179.391
+B_own1[gdp]        0.461  0.069  1.000  3010.071
+B_own1[prices]     0.558  0.065  0.999  2735.739
+B_own1[rate]       0.948  0.054  1.001  3537.035
+mu[gdp]          -10.108  0.129  1.003   665.300
+mu[prices]       -11.834  0.160  1.001   757.856
+mu[rate]          -2.892  0.155  1.002   692.202
+phi[gdp]           0.806  0.118  1.035   131.873
+phi[prices]        0.831  0.111  1.034   125.015
+phi[rate]          0.861  0.110  1.017   197.937
+sigma[gdp]         0.156  0.112  1.036   134.415
+sigma[prices]      0.200  0.113  1.042   109.911
+sigma[rate]        0.088  0.062  1.008   362.438
+h_T[gdp]         -10.226  0.356  1.009   756.713
+h_T[prices]      -11.766  0.361  1.010  1264.266
+h_T[rate]         -2.831  0.246  1.002   887.965
+ForecastResult(origin=2019Q3, horizon=4, variables=['gdp', 'prices', 'rate'], samples=2000) | engine attr: mcmc
+joint LPD h=1 and MCSE: (8.575356603927622, 0.007996504228586188)
+marginal LPD (rate): -0.4000308979305567
+IRFResult(horizon=8, variables=['gdp', 'prices', 'rate'], shock_size='sd', samples=500)
+response     gdp  prices    rate
+horizon                         
+0         0.0000     0.0  0.2397
+4        -0.0002     0.0  0.1230
+8        -0.0001    -0.0  0.0456
+Linear x Constant {'mean': 'Linear', 'prior': 'Minnesota(structural, eb)', 'vol': 'Constant', 'lags': '2', 'deterministic': 'c', 'outliers': 'none'}
+Linear x SV {'mean': 'Linear', 'prior': 'Minnesota(structural, eb)', 'vol': 'SV', 'lags': '2', 'deterministic': 'c', 'outliers': 'none'}
+                           origins   dlpd  dlpd_mcse  dm_pvalue  tests_valid  in_mcs_25  converged
+model             horizon                                                                         
+Linear x Constant 1             11  0.000      0.000        NaN         True       True        1.0
+Linear x SV       1             11 -0.107      0.102      0.842         True       True        0.0
+         model          reference axis  horizon       verdict
+0  Linear x SV  Linear x Constant  vol        1  inconclusive
+ΔLPD=-0.11 (MC s.e. 0.10, not precise enough); DM p=0.421 (valid: rolling window); MCS25: model in, reference in; converged at only 0% of origins

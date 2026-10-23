@@ -1,0 +1,111 @@
+\section{Limitations}\label{sec:limitations}
+% Drafting notes (not typeset): every limitation below is stated with its evidence tag. Numbers of
+% the Clark-Ravazzolo acceptance run are \acc{} placeholders (grammar: header of 11_replication.tex);
+% first-full-run numbers are wrapped in \fullrun{}.
+
+\paragraph{Scope.}
+The package implements Phases~0--2 of its roadmap. The mean axis is linear and the prior axis is
+the Minnesota family (conjugate, structural and reduced form, with dummy-observation priors and the
+GLP hierarchy); the volatility axis is the one that is populated. % [V] src/rai_bvar/validation/joint.py l.454-480; dossier 01 §2.1
+Global-local priors, common stochastic volatility and conditional forecasts (Phase~3), BART means,
+generalised impulse responses and approximate leave-future-out cross-validation
+\citep[Phase~4;][]{burkner2020approximate}, time-varying parameters, threshold and Markov switching,
+factor and order-invariant SV (Phase~5), and identification beyond the recursive scheme (Phase~6)
+are roadmap items, not features; for the methods see, for example, \citet{huber2022inference},
+\citet{clark2023tail}, \citet{gruber2025forecasting}, \citet{kastner2019sparse},
+\citet{chan2024large} and \citet{bertsche2022identification}. % [R] SPEC.md §13; dossier 01 §7
+That later components plug in without editing the sweep, runner or forecast modules is a design
+intention that no component has yet tested. The data layer rejects missing values inside the
+sample, has no mixed-frequency support, and ships no real-time vintages; it only provides the hook
+for them. % [R] SPEC.md §1.3, §5.5, §5.7; dossier 01 §7, unsupported item 3
+
+\paragraph{The verdict engine.}
+The verdict rule is implemented and unit-tested, but its statistical properties are not
+established. The size and power study on simulated data-generating processes that the
+specification calls for has not been implemented, so we claim no false-positive rate for
+``better''. % [V] no tests/dgp/ directory (dossier 01 §8.2); SPEC.md §10.5
+What exists are tests of the Diebold--Mariano size and power, of MCS behaviour and of the verdict
+logic. % [V] tests/unit/test_significance.py::test_dm_size_under_null, ::test_dm_power_and_direction, ::test_mcs_eliminates_clearly_worse_models_first, ::test_mcs_keeps_equivalent_models; tests/integration/test_compare.py
+The MCSE of a total $\Delta$LPD adds the two models' per-origin MCSEs in quadrature,
+although both models' forecasts at an origin draw on random streams derived from the same backtest
+seed and origin; whether the factor of three is conservative is unknown. % [V] src/rai_bvar/evaluation/compare.py _mcse_total l.337-338; backtest.py docstring l.232
+Under expanding windows a ``better'' verdict can only come through the MCS, whose validity in that
+setting is open \citep[cf.][]{hansen2011model}. Verdicts are per horizon, with no rule
+that combines horizons. The Diebold--Mariano long-run variance uses a rectangular kernel with
+$h - 1$ autocovariances and falls back to Bartlett weights \citep{newey1987simple} only if that
+estimate is not positive, whereas the specification states a Newey--West variance. % [V] src/rai_bvar/evaluation/significance.py l.35-53; [R] SPEC.md §9.3 l.447; dossier 02 §15 D1
+\todo{TODO 10: implement the verdict-engine DGP size and power study, or keep it as future work
+here.}
+
+\paragraph{The convergence gate.}
+SV fits routinely miss the $\hat R < 1.01$ and bulk ESS $> 400$ targets. The prototype pilot
+predicted this, through $\phi$ and $\sigma$, at the default budget of $4 \times 2000$ draws, at
+which no SV arm of the quick Clark--Ravazzolo run converged at any origin. It persists at larger
+budgets: all six runs of the performance benchmark ($4 \times 10{,}000$ draws) report
+\code{converged = False}, and in the first full Clark--Ravazzolo run ($4 \times 5000$) SV(rw)
+converged at \fullrun{57--82\%} of origins across orderings. % [R] docs/phase2/09_pilot.md item 6, §3.3 (split-R-hat 1.03-1.06, bulk ESS ~200 at draws = 2000); [R] benchmarks/reports/clark_ravazzolo_quick.json converged = 0.0 for every SV arm, both samples (quick run predates f60d736, OUTLINE risk 19: context only); [R] tests/bench/baseline.json summary.converged (3 repeats x cold/warm, settings.draws 10000, commit deb3929); [FULL: orderings.per_ordering[*].converged_sv]
+Near the threshold the converged count moves with the seed: \fullrun{72} against \fullrun{69} of
+106 origins for the same models in the identity ordering, and $71$ and $63$ at the main-stage seeds
+against \fullrun{63} and \fullrun{60} at the ordering-stage seeds in the two worst orderings. % [FULL: converged.full['SV(rw)'], orderings.per_ordering[0,8,9].converged_sv]; [PREREG] item 1
+The gate is strict by design, and the price is that users need larger budgets than the defaults:
+the acceptance run used $4 \times 20{,}000$ draws, and SV(rw) converged there at
+\acc{converged.full['SV(rw)']} of origins. The default \code{MCMCSettings} (2000 draws) are
+unchanged. \todo{TODO 33: decide the convergence-gate policy for SV at the default budget.}
+
+\paragraph{Log scores.}
+The path-conditioned estimator remains the default at $h > 1$. The path-integrated estimator is
+opt-in and covers MCMC forecasts of linear or zero means only; analytic, benchmark and pooled
+forecasts raise at $h > 1$. % [V] b9c66c0: tests/unit/test_scores_lpd_method.py, tests/unit/test_lpd_integrated.py; DESIGN D-34
+It removes the path-conditioning error but not the Monte Carlo error: it is still an average over
+the forecast's parameter and volatility-path draws, whose weights concentrate in the tails. In the
+review of the estimator at a crisis origin, SV(rw)'s $1000$-draw estimate varied across forecast
+seeds by more than its delta-method MCSE, and the values with $80{,}000$ forecast draws still
+differed by about $1.3$ nats per arm across fit seeds, an MCMC component that more forecast draws
+do not remove. % [PREREG] item 3, "Stated in advance"; [R] NOTES 8b addendum (main repo, b9c66c0: SV(rw) sd 1.4 across forecast seeds vs delta-method MCSE 0.45-0.94; 80,000-draw values differ by ~1.3 nats across fit seeds)
+All scores are on the transformed (model) scale. The Monte Carlo noise of the subsampled energy and
+variogram scores is not reported, and there is no simulation-based calibration of $y_{T+h}$ for
+$h > 1$. % [R] dossier 02 §12.2, §15 D2; dossier 04 §7.2 (SBC predictive quantities are h_{T+1}, y_{T+1} only), §15 Q12
+
+\paragraph{The ordering diagnostic.}
+The noise floor of \code{ordering_sensitivity} in the replication rests on one replicate
+(\code{noise_reps=1}), and in backtest mode it has no MCSE term. In the first full run it flagged
+the order-invariant \code{Constant} arm as material, at two $h > 1$ cells. % [FULL: orderings.results.Constant.material]; src/rai_bvar/structural/ordering.py module docstring l.32
+In the acceptance run the flag is \acc{orderings.results.Constant.material}.
+\todo{TODO 26: decide \code{noise_reps} for future runs.}
+
+\paragraph{Validation evidence.}
+Geweke tests and SBC run at $n \leq 3$; the realistic size ($n = 20$, $p = 4$, $T = 300$) is
+covered only by the analytic twins, and only for constant-volatility compositions. Our parity
+tier has no external VAR-level oracle for structural Mode~I $\times$ SV. % [V] tests/analytic/test_mcmc_twin.py (A3); dossier 04 §9, §10
+At the commit of the acceptance run, the replication's primary arm, reduced form $\times$ SV(rw),
+and its Student-$t$ variant have no registered Geweke or SBC row and are not among the 12 MCMC
+compositions of the contract tests;
+their correctness rests on their validated parts (\cref{sec:validation-coverage}). % [V] at c823d20 (= HEAD d58c9ef for code): src/rai_bvar/validation/joint.py _COMPOSITIONS (RW only in row 14, structural_sv_rw); tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS (12 entries). Row 18 reduced_sv_rw and a reduced-SV(rw) contract fit were committed later, in 7f410dc (TODO 3, Section 11 caveats): revise if the release includes them
+The composition-level G-full, SBC and Tier~B runs and the weekly tier have no committed run record
+yet. % [REL] docs/paper/data/release/{geweke_full,sbc,block}.jsonl. Untracked records exist in the paper worktree, docs/paper/figures/data/validation_record/{geweke,sbc}.jsonl (G-full and SBC rows; the tier G-full row of reduced_sv has passed = false, seed 20261023; its G-full-inexact row passes): when they are committed, this sentence needs a successor that reports them
+The test-prior design rule $r \leq 5$ is a derivation for the scalar conjugate model, unverified for
+$\phi$, $\sigma$, $p$ and $\nu$, and low relative numerical efficiency of some Geweke functions
+lowers power. % [R] N06 §12 item 4; [V] dossier 04 §6.6 (min RNE 0.008-0.129)
+The power of the suite is measured only against 18 curated mutants. Whether the 10-component mixture
+approximation is visible to G-full with unknown SV parameters is undetermined. The reduced-form
+parity check against bayesianVARs was replaced by an in-house oracle because the package could not
+be built in the test environment, and all third-party parity holds for pinned versions (stochvol
+3.2.1, BVAR 1.0.5, BoE bvar 0.3.5). % [R] dossier 04 §15 Q8 (OCSN-10 at G-full); DESIGN Stage 4 amendment (2); tests/parity/SV_PARAMETRIZATION.md "Versions"; dossier 04 §10, §15 Q4
+
+\paragraph{Numerics, performance and platforms.}
+The formed-Gram draws that were not rewritten, among them the structural coefficient step and the
+CCCM $\Pi$ step, still accept any positive pivot, with no relative floor; whether reachable states expose
+them is unknown. % [R] dossier 05 §7 Q1
+\todo{TODO 23: decide on a relative pivot floor; commit tests of the old-path failures.}
+The excess-pivot recursion removed the crash of the random-walk volatility draw near $\sigma = 0$,
+not the slow mixing there. % [R] NOTES 17 (the fix itself is [V]: tests/mcmc/blocks/test_sv_core.py::test_rw_awol_at_a_tiny_sigma)
+The performance evidence comes from one Apple M5 Max that was not idle; there is no idle x86
+measurement and no multi-device timing of the production engine. % [R] tests/bench/baseline.json (deb3929)
+Bitwise reproducibility holds only within one platform and version set: invariance to chunking is
+tested on runner toys, and the toy chain-prefix test is bitwise on macOS and agrees only to rounding
+on x86 Linux. % [V] tests/mcmc/runner/test_chunking.py::test_chain_prefix_invariance (asserts agreement to rounding); [R] its docstring for bitwise on macOS
+The macOS caveats of \cref{sec:robustness-platform} apply; Linux CI is the reference platform.
+
+\paragraph{Release state.}
+The package is at version 0.0.1, classified as pre-alpha. % [V] pyproject.toml
+\todo{TODO 19: update the README status banner and quick start; release on PyPI with a version tag.}

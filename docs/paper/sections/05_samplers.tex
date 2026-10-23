@@ -1,0 +1,215 @@
+\section{The MCMC samplers}\label{sec:samplers}
+% Sources: OUTLINE.md §5; dossier 03 §2, §5.1–§5.3, §6.1–§6.10; dossier 02 §6.4.
+% Code anchors are in the main repository (branch phase-2-cr-acceptance); re-anchor at the release commit.
+
+We claim no new sampler: each block below follows published work, credited where it is used, and
+what was derived in the design notes rather than taken from a paper (such as the single
+accept/reject of the non-centred step in exact mode) is marked as such.
+The full pseudocode is in \cref{app:algorithms}.
+We write $\lambda^{\mathrm{eff}}_{i,t} = e^{h_{i,t}}o_{i,t}^2\tau_{i,t}$ for the effective variance of
+structural equation $i$ ($\lambda_i o_{i,t}^2\tau_{i,t}$ under constant volatility); sums over $t$ run over
+observed rows, and padded rows carry weight zero.
+
+\subsection{One sweep}\label{sec:samp-sweep}
+
+In structural form each equation, under \code{vmap}, draws $(\delta_i, a_i)$ jointly from one Gaussian
+conditional, recomputes its residual and runs its volatility block atomically
+(\cref{alg:sweep}).
+In the volatility block the transitory steps run first ($o \to p \to \nu \to \tau$), given the current
+persistent variance; in the SV core the mixture indicators are then drawn immediately before the
+log-volatility path, followed by the centred and the non-centred parameter steps. % [V] tests/mcmc/blocks/test_robust.py::test_sample_eq_order_and_data_flow_spy (o → p → ν → τ → λ, Constant core); SV-core order: [V] src/rai_bvar/components/vol/sv.py (module docstring "One update"; SVCore.sample; read in code, no order test)
+In reduced form a pre-phase step draws $\Pi \mid A, \lambda$ (\cref{sec:samp-cccm}), and each
+equation then draws $a_j \mid \Pi, \lambda_j$.
+The coefficient steps condition on the exact Gaussian likelihood given $\lambda^{\mathrm{eff}}$ and are
+marginal of the indicators, as \citet{delnegro2015time} require; the transitory steps with $\tau$
+integrated out are partially collapsed Gibbs blocks \citep{vandyk2008partially} whose trimmed draw is
+never conditioned on before it is redrawn.
+
+\begin{algorithm}[tbp]
+  \caption{One Gibbs sweep of one chain (compact form).}
+  \label{alg:sweep}
+  \begin{algorithmic}[1]
+    \Require chain key, absolute sweep index $it$ (unsigned 32-bit), state
+    \State \textbf{if} reduced form \textbf{then} $\Pi \gets$ CCCM scan over $\pi_j \mid \pi_{-j}, A, \lambda^{\mathrm{eff}}$
+      \Comment{\cref{sec:samp-cccm}}
+    \ForAll{equations $i$ \textbf{in parallel} (\code{vmap}); keys \code{fold\_in}($it$, block, $i$, sub-draw)}
+      \State structural: $(\delta_i, a_i) \sim N(K_i^{-1}b_i, K_i^{-1})$; \ reduced: $a_i \mid \Pi, \lambda^{\mathrm{eff}}_{i,\cdot}$ by QR
+        \Comment{\cref{sec:samp-coef}}
+      \State $e_{i,t} \gets$ structural residual from the new coefficients
+      \State $o_i \to p_i \to \nu_i \to \tau_i$ given $e_i$ and the persistent variance
+        \Comment{\cref{sec:samp-transitory}}
+      \State $\log\tilde e_{i,t}^2 \gets \log e_{i,t}^2 - 2\log o_{i,t} - \log\tau_{i,t}$
+      \State Constant: $\lambda_i \sim \mathrm{IG}$ \eqref{eq:constant-core}; \ SV: $s_i \to h_i \to \theta^{\mathrm{SV}}_i$
+        (\cref{alg:sv})
+    \EndFor
+    \State keep the first failure $(\text{code}, it)$, $\text{code} = 1 + 1000\cdot\text{block} + \text{equation}$
+  \end{algorithmic}
+\end{algorithm}
+
+\subsection{The structural coefficient draw}\label{sec:samp-coef}
+
+In the $\delta$-coordinates of \cref{sec:framework}, every equation regresses on one shared
+design $F = [X \mid XM_{<n} - Y_{<n}]$; the slots $a_{ij}$, $j \ge i$, are inactive (prior mean 0,
+precision 1, zero columns) and are zeroed after the draw, which leaves the active draw exact. % [V] tests/mcmc/unit/test_linalg.py::test_padding_is_exact
+The weighted Gram $F^\top\Lambda_i^{-1}F$, $\Lambda_i = \mathrm{diag}(\lambda^{\mathrm{eff}}_{i,\cdot})$, comes
+by default from a packed product of the columns of $F$ stored once per fit, so under \code{vmap} the
+Grams of all chains and equations are one matrix product. % [V] src/rai_bvar/engines/mcmc/linalg.py (weighted_gram); packed is the default while T_pad·P·8 ≤ 256 MiB (DESIGN §10.5)
+The draw is a Jacobi-scaled Cholesky precision draw,
+\begin{equation}\label{eq:precision-draw}
+  \theta_i = s \odot L^{-\top}\bigl(L^{-1}(s \odot b) + z\bigr), \qquad
+  LL^\top = \mathrm{diag}(s)\,K\,\mathrm{diag}(s), \qquad s = \mathrm{diag}(K)^{-1/2},
+\end{equation}
+with $z \sim N(0, I)$, so $\theta_i \sim N(K^{-1}b, K^{-1})$ exactly. % [V] tests/mcmc/unit/test_linalg.py::test_precision_draw_matches_dense_oracle, ::test_jacobi_scaling_with_large_precision_disparities
+Under constant volatility without a transitory scale the weights do not vary over time, so the data
+part of the precision is $G/\lambda_i$ with $G$ fixed per fit: $K(\lambda_i) = \mathrm{diag}(d) +
+G/\lambda_i$ in Mode~I, and $K = \tilde K/\lambda_i$ with a $\lambda$-free $\tilde K$ in Mode~II, where
+the prior precision also scales with $1/\lambda_i$. A deterministic rule then picks an exact fast
+path: \code{eigen} for Mode~I (one graded eigendecomposition per fit, then $O(q^2)$ per draw),
+\code{fixed\_factor} for Mode~II and \code{cholesky\_const} for \code{iw\_equivalent}. % [V] src/rai_bvar/components/mean/linear.py (module docstring, four static paths); src/rai_bvar/engines/mcmc/resolve.py (resolve_const_path)
+The paths share the target, but two exact samplers of one Gaussian agree only to
+$O(\epsilon_{\mathrm{mach}}\operatorname{cond}(K))$, so the tests use a conditioning-aware envelope
+(\cref{sec:validation}). % [V] tests/mcmc/blocks/test_linear_fastpaths.py::test_paths_agree_well_conditioned, ::test_paths_ks; tests/mcmc/unit/test_linalg.py::test_constant_paths_on_level_data_vs_45_digits
+Where $a_i$ is drawn on its own, as in the reduced form, the engine takes a Householder QR of the
+whitened stacked design $[\mathrm{diag}(\text{prior precision})^{1/2};\ \Lambda_i^{-1/2}Z]$ with
+$\mathrm{diag}(R) > 0$; $R$ is then the upper Cholesky factor of the precision, the draw is the same
+function of $z$ as \eqref{eq:precision-draw}, and the precision is never formed; preferring QR to the
+normal equations is standard least-squares practice \citep{higham2002accuracy,bjorck1996numerical},
+and \cref{sec:robustness} shows why it matters here. % [V] tests/mcmc/blocks/test_contemp_lstsq.py::test_lstsq_draw_equals_the_cholesky_draw, ::test_extreme_scale_state
+
+\subsection{The corrected reduced-form step}\label{sec:samp-cccm}
+
+The columns $\pi_j$ of $\Pi$ are drawn from their exact full conditionals \citep{carriero2022corrigendum}:
+\begin{equation}\label{eq:cccm}
+  K_j = V_j^{-1} + X^\top \mathrm{diag}(W_{\cdot j})\,X, \qquad
+  b_j = V_j^{-1}m_j + X^\top\bigl(g_{\cdot j} + W_{\cdot j} \odot X\pi_j\bigr),
+\end{equation}
+where $W_{tj} = (\Sigma_t^{-1})_{jj} = \sum_{i \ge j} A_{ij}^2/\lambda^{\mathrm{eff}}_{i,t}$ (with
+$A_{jj} = 1$) and $g_{tj} = (\Sigma_t^{-1}u_t)_j$, with $u_t$ the current reduced-form residual, so $A$
+is never inverted.
+$K_j$ does not depend on $\Pi$, so by default all $n$ precisions are factored in parallel before the
+sequential scan (a deterministic shape rule turns this precompute off above a memory bound). The scan
+is block Gauss--Seidel on the joint precision of $\operatorname{vec}\Pi$
+\citep{fox2017accelerated}. % [V] src/rai_bvar/components/mean/linear_reduced.py; tests/mcmc/blocks/test_cccm.py::test_random_problems_vs_sur_oracle; [V] src/rai_bvar/engines/mcmc/resolve.py::resolve_cccm_precompute (n·k²·8·C ≤ 512 MiB)
+The earlier version \citep{carriero2019large}, which used equation $j$ of the triangular system alone,
+targets the wrong posterior \citep{bognanni2022comment}; its conditional is correct only for the last
+equation, and it survives as an injected bug for the mutation tests. % [V] tests/mcmc/blocks/test_cccm.py::test_ccm2019_regression_guard; tests/mutation/mutants.py (M1)
+
+\subsection{The stochastic-volatility core}\label{sec:samp-sv}
+
+\cref{alg:sv} works on $y^*_t = \log(\tilde e_t^2 + c)$ with, by default, the relative offset
+$c = 10^{-12}\psi$ (an absolute offset can be set). % [V] src/rai_bvar/priors/sv_arrays.py (C_REL, D-2); src/rai_bvar/components/specs.py (SV.offset="relative")
+The $\log\chi^2_1$ density is approximated by the ten-component mixture of \citet{omori2007stochastic},
+with component means $m_j$ and variances $v_j$ (the seven-component mixture of \citet{kim1998stochastic}
+is an option), and the indicators are drawn by inverse CDF. % [V] src/rai_bvar/components/vol/mixture.py; tests/mcmc/blocks/test_mixture.py::test_indicator_draw_chi2
+The path $(h_0, \dots, h_T)$ is drawn in one block from its tridiagonal Gaussian conditional
+\citep{rue2001fast,chan2009efficient,mccausland2011simulation}, the ``all without a loop'' (AWOL)
+sampler in the terminology of \citet{kastner2014ancillarity}, in non-centred scaled form
+$\tilde Q = \sigma^2 Q$.
+By default (\code{exact=True}) an exact Metropolis--Hastings correction removes the mixture
+approximation: with $g$ the mixture density and
+\begin{equation}\label{eq:w}
+  w(h) = \sum_t \bigl[\log N(\tilde e_t; 0, e^{h_t}) - \log g(y^*_t - h_t)\bigr],
+\end{equation}
+the path proposal is accepted with probability $\min\{1, e^{w(h') - w(h)}\}$
+\citep[Algorithm~3]{delnegro2015time}, an idea with a precedent in
+\citet{stroud2003nonlinear}.\todo{N01 marks \citet{stroud2003nonlinear} ``not opened'': confirm its eq.~(11), or drop the citation.}\todo{N01 read Del Negro--Primiceri as NY Fed Staff Report 619 (rev.\ Oct.\ 2014) with its online appendix (App.~B.2, eq.~7); confirm that ``Algorithm~3'' is numbered so in the cited RES corrigendum, or cite the staff report.}
+The chain is then exact for any mixture table and offset $c \ge 0$, which the validation exploits with a
+deliberately coarse mixture (\cref{sec:validation}). % [V] tests/mcmc/blocks/test_sv_core.py::test_exact_h_log_accept_identity, ::test_block_geweke_exact_mode_with_coarse_mixture
+The centred steps need no correction: they do not move $h$, and the indicator conditional does not
+involve the parameters. % [V] test_sv_core.py::test_centred_gamma_phi_log_ratio_identity, ::test_sigma2_log_ratio_identity_and_ig_gibbs
+The non-centred step (on by default, \code{asis=True}) interweaves
+\citep{yu2011center,kastner2014ancillarity}; in exact mode it is
+accepted or rejected once, with a ratio combining the auxiliary ratio and the change in $w$, a
+combination derived in the design notes (\cref{app:exact-sv}) and not claimed as new.\todo{TODO 11: prior-art search for this combined ratio (docs/phase2/01\_omori\_mixture.md §10.3; Appendix~B.3).} % [V] test_sv_core.py::test_nc_mu_sigma_log_accept_identity, ::test_nc_accept_uses_w_of_the_post_h_step_state
+A negative $\sigma'$ is folded together with $\tilde h$, which preserves the non-centred posterior by the
+sign symmetry used by \citet{fruhwirth2010stochastic}. % [V] test_sv_core.py::test_fold_is_measure_preserving_map, ::test_block_geweke_catches_abs_sigma_without_flip
+Each chain starts with one unconditional AWOL draw of $h$, because a prototype found $\sigma = 0$
+absorbing from a constant initial path. % [R] docs/phase2/09_pilot.md §3.1 (prototype); [V] test_sv_core.py::test_state_structure_dtypes_and_init (regression check)
+For a random-walk log variance the centred step draws $\sigma^2$ only, and the non-centred regression
+is on $(h_0, \sigma)$. % [V] src/rai_bvar/components/vol/sv.py (c_step "RW: σ² only"; nc_regression and nc_step RW branches)
+
+\begin{algorithm}[tbp]
+  \caption{The SV core of one equation (AR(1) log variance, exact mode).}
+  \label{alg:sv}
+  \begin{algorithmic}[1]
+    \Require $\log\tilde e_t^2$; state $(h_{0:T}, \mu, \phi, \sigma)$; injected noise
+    \State $y^*_t \gets \log(\tilde e_t^2 + c)$; \ $s_t \sim \Pr(s_t = j \mid y^*_t, h_t)$ by inverse CDF
+    \State $h' \gets \mu + \sigma\tilde x'$, \ $\tilde x' \sim N(\tilde Q^{-1}\tilde b, \tilde Q^{-1})$, $\tilde Q$ tridiagonal
+      \Comment{AWOL}
+    \State accept $h'$ with probability $\min\{1, e^{w(h') - w(h)}\}$ \Comment{\eqref{eq:w}}
+    \State centred: $(\gamma, \phi)$, $\gamma = \mu(1 - \phi)$, by independence MH; then $\sigma^2$
+    \State non-centred: $\tilde h \gets (h - \mu)/\sigma$; $\phi$ by MH given $\tilde h$
+    \State $(\mu', \sigma') \gets$ $2 \times 2$ Gaussian regression of $y^*_t - m_{s_t}$ on $(1, \tilde h_t)$
+    \State accept with $\log\alpha = \log\alpha_{\mathrm{aux}} + w(\mu' + \sigma'\tilde h) - w(h)$
+      \Comment{$w(h)$ after line 3}
+    \State on acceptance: \textbf{if} $\sigma' < 0$ \textbf{then} $(\sigma', \tilde h) \gets (-\sigma', -\tilde h)$;
+      \ $(\mu, \sigma, h) \gets (\mu', \sigma', \mu' + \sigma'\tilde h)$
+  \end{algorithmic}
+\end{algorithm}
+
+\subsection{The random-walk path as a path Laplacian}\label{sec:samp-rw}
+
+For $h_t = h_{t-1} + \sigma\eta_t$, $h_0 \sim N(m_0, V_0)$, the scaled precision is
+$\tilde Q = \sigma^2 Q = \mathrm{Lap}_w + \mathrm{diag}(\delta)$: a path-graph Laplacian with unit edge
+weights $w_t$ (zero after the last live state) plus $\delta_0 = \sigma^2/V_0$ and
+$\delta_t = \sigma^2/v_{s_t}$.
+\cref{alg:laplacian} carries each pivot as its excess $q_t$ over the next edge:
+\begin{equation}\label{eq:excess-pivot}
+  q_0 = \delta_0, \quad
+  q_t = \delta_t + \frac{w_{t-1}\,q_{t-1}}{w_{t-1} + q_{t-1}}, \quad
+  p_t = q_t + w_t, \quad
+  \log|\tilde Q| = \sum_t \bigl[\log w_t + \operatorname{log1p}(q_t/w_t)\bigr],
+\end{equation}
+with $\log q_t$ where no next edge exists.
+The $p_t$ are the Cholesky pivots of $\tilde Q$ (\cref{app:pivots}), but every term is
+non-negative, so nothing cancels; assembling $\tilde Q$ first rounds $\sigma^2/v_{s_t}$ away once it is
+below the unit in the last place of the diagonal, and the pivot of the level direction becomes rounding
+noise (\cref{sec:robustness}). % [V] src/rai_bvar/engines/mcmc/linalg.py (laplacian_precision_sample); test_sv_core.py::test_awol_rw_laplacian_is_the_rw_system, ::test_rw_awol_at_a_tiny_sigma (60-digit reference; Apple M5 Max; Linux re-run is TODO 23)
+We read the recursion as an instance of GTH-type subtraction-free elimination
+\citep{grassmann1985regenerative,alfa2002accurate,ye2008computing}; we claim its application here,
+not the algorithm.\todo{TODO 11: confirm this positioning against GTH, Alfa--Xue--Ye, Ye (2008) and GMRF samplers.}
+
+\begin{algorithm}[tbp]
+  \caption{Random-walk SV path draw by excess pivots.}
+  \label{alg:laplacian}
+  \begin{algorithmic}[1]
+    \Require $\delta_{0:T} \ge 0$; edge weights $w_{0:T-1} \in \{0, 1\}$, $w_T = 0$; $\tilde b$; $z \sim N(0, I)$
+    \State $q_0 \gets \delta_0$; \ $q_t \gets \delta_t + w_{t-1}q_{t-1}/(w_{t-1} + q_{t-1})$, $t = 1, \dots, T$
+      \Comment{all terms $\ge 0$}
+    \State $\ell_t \gets \sqrt{q_t + w_t}$; \ $c_t \gets -w_{t-1}/\ell_{t-1}$
+    \State forward $v_t \gets (\tilde b_t - c_t v_{t-1})/\ell_t$; \ backward $\tilde x_t \gets (v_t + z_t - c_{t+1}\tilde x_{t+1})/\ell_t$
+    \State $\log|\tilde Q|$ by \eqref{eq:excess-pivot}; \ $h \gets \sigma\tilde x$
+  \end{algorithmic}
+\end{algorithm}
+
+\subsection{Transitory components}\label{sec:samp-transitory}
+
+With $z_t^2 = e_t^2/\lambda^{\mathrm{pers}}_t$, the outlier scale $o_t \in \{1, \dots, K\}$ ($K = 20$ by
+default) has logits $\ell_{tk} = \log\varpi_k - \log k - z_t^2/(2k^2)$, $\varpi_1 = 1 - p$,
+$\varpi_{k > 1} = p/(K - 1)$ \citep{carriero2024addressing,stock2016core}, and
+$p \mid o \sim \mathrm{Beta}(a_p + N_1, b_p + T - N_1)$ with $N_1 = \#\{t : o_t > 1\}$. % [V] src/rai_bvar/components/vol/transitory.py; tests/mcmc/blocks/test_transitory.py::test_outlier_pmf_gaussian_matches_brute_force, ::test_p_conditional_counts_real_rows_only_and_draws_beta
+For Student-$t$ errors \citep{jacquier2004bayesian}, $\nu$ is drawn on its grid ($\{3, \dots, 40\}$ by
+default) with $\tau$ integrated out, then $\tau_t \sim \mathrm{IG}\bigl((\nu + 1)/2, (\nu - 2 + r_t^2)/2\bigr)$
+in the standardised parametrisation (the default; $\nu$ replaces $\nu - 2$ under
+\code{t\_scale="unit"}), $r_t = z_t/o_t$; with both components the outlier step also integrates
+$\tau$ out. % [V] test_transitory.py::test_outlier_pmf_collapsed_matches_scipy_t, ::test_nu_step_draws_follow_the_exact_pmf, ::test_collapsed_nu_matches_uncollapsed_and_mixes_better
+The log-gamma variates are drawn by a vectorised \citet{marsaglia2000simple} sampler with two pre-drawn
+candidates per element and a loop over further candidates only for the elements that reject both,
+rather than by \code{jax.random.loggamma}, because under \code{vmap} a rejection loop runs until the
+last lane accepts; it stays exact, since the first accepted candidate of an independent sequence is
+the rejection sampler. % [V] src/rai_bvar/engines/mcmc/random.py (loggamma: _MT_CANDIDATES, while_loop fallback); tests/mcmc/unit/test_random.py::test_loggamma_distribution; [R] the batched-loop mechanism and the speed-up are from the prototype (pilot §5); the speed-up is not quoted
+
+\subsection{The constant-volatility core}\label{sec:samp-constant}
+
+Under constant volatility
+\begin{equation}\label{eq:constant-core}
+  \lambda_i \mid \cdot \sim \mathrm{IG}\Bigl(c_i + \tfrac{T}{2} + \tfrac{n_{\mathrm{active}}}{2},\;
+  C_i + \tfrac12\textstyle\sum_t \tilde e_{i,t}^2 + \mathrm{quad}\Bigr), % [V] src/rai_bvar/components/vol/constant.py; tests/mcmc/blocks/test_constant.py::test_conditional_formula_masks_exact_zeros_and_coupling, ::test_draws_are_inverse_gamma
+\end{equation}
+where $(n_{\mathrm{active}}, \mathrm{quad})$, the number of coefficients whose prior scales with
+$\lambda_i$ and half their prior quadratic form, is passed from the coefficient step of the same
+equation: zero in Mode~I, all $k + \iota - 1$ coefficients in Mode~II, and the $\iota - 1$ contemporaneous
+ones under \code{iw\_equivalent} ($\iota$ the one-based equation index).
+This is the only interaction between the prior and the volatility block that the plan allows. % [V] tests/mcmc/runner/test_plan.py::test_coupling_without_coupled_core_is_rejected
+In Mode~II the SOC/SUR rows are weighted by $1/\lambda_i$ like data rows, so the $\lambda$ step counts them
+too (\cref{sec:robustness}). % [V] tests/analytic/test_mcmc_twin.py::test_a1_dummies_mode2_iw_matches_the_phase1_posterior_with_dummies; [R] NOTES 12

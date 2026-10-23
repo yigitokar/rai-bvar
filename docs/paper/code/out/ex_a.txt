@@ -1,0 +1,31 @@
+VARData(variables=['gdp', 'prices', 'rate'], T=239, 1960Q2..2019Q4, freq='Q-DEC', vintage=None)
+prior means of own first lag: {'gdp': 0.0, 'prices': 0.0, 'rate': 1.0}
+analytic | BVAR(Minnesota(conjugate, eb, SOC+SUR), p=2)
+            mode
+lambda  0.268149
+soc     1.119513
+sur     1.176805
+ForecastResult(origin=2019Q4, horizon=4, variables=['gdp', 'prices', 'rate'], samples=2000)
+variable     gdp  prices    rate
+quantile                        
+0.05     -0.0053  0.0027  4.2629
+0.50      0.0053  0.0073  4.6754
+0.95      0.0158  0.0120  5.1097
+paths_level h=1 median: [349.266 182.507   4.675]
+                    origins    dlpd  dlpd_mcse  crps_rel  dm_pvalue  tests_valid  in_mcs_25  converged
+model      horizon                                                                                    
+RW         1             39   0.000      0.000     1.000        NaN         True      False        1.0
+OLS-VAR(2) 1             39  14.447      0.102     0.907      0.029         True       True        1.0
+BVAR(2)    1             39  15.368      0.094     0.893      0.020         True       True        1.0
+RW         4             36   0.000      0.000     1.000        NaN         True      False        1.0
+OLS-VAR(2) 4             36  33.191      0.884     0.860      0.001         True       True        1.0
+BVAR(2)    4             36  35.051      0.946     0.842      0.002         True       True        1.0
+        model reference                                              axis  horizon         verdict
+0  OLS-VAR(2)        RW                                             model        1          better
+1     BVAR(2)        RW  deterministic,lags,mean,model,outliers,prior,vol        1  not comparable
+2  OLS-VAR(2)        RW                                             model        4          better
+3     BVAR(2)        RW  deterministic,lags,mean,model,outliers,prior,vol        4  not comparable
+OLS-VAR(2) vs RW h=1: ΔLPD=+14.45 (MC s.e. 0.10); DM p=0.014 (valid: rolling window); MCS25: model in, reference out
+BVAR(2) vs RW h=1: differs along ['deterministic', 'lags', 'mean', 'model', 'outliers', 'prior', 'vol']; a verdict needs exactly one axis (SPEC R2)
+OLS-VAR(2) vs RW h=4: ΔLPD=+33.19 (MC s.e. 0.88); DM p=0.000 (valid: rolling window); MCS25: model in, reference out
+BVAR(2) vs RW h=4: differs along ['deterministic', 'lags', 'mean', 'model', 'outliers', 'prior', 'vol']; a verdict needs exactly one axis (SPEC R2)

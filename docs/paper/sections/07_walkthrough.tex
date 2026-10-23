@@ -1,0 +1,158 @@
+% Section 7 (OUTLINE.md §7; 2 pages). The listings are pulled from docs/paper/code/ and their
+% outputs from docs/paper/code/out/, written by docs/paper/code/run_examples.py, which ran both
+% scripts with `uv run --frozen python` in the main repository at commit d58c9ef (branch
+% phase-2-cr-acceptance; includes D-34, b9c66c0) on macOS-26.6.2-arm64 (versions in
+% code/out/env.json). The main working tree had uncommitted edits in docs/phase2/DESIGN.md,
+% src/rai_bvar/validation/joint.py and test files only (listed in env.json); no code path of the
+% examples imports rai_bvar.validation (grep at d58c9ef: the only production import is inside the
+% prior mode of structural/ordering.py, which the examples do not call). Both outputs are identical, line for
+% line, to those recorded at 62d15f6 in dossier 02 §13 (ex_b without its two wall-clock lines,
+% which were removed from the script). Re-run on the release commit (TODO 20).
+\section{Using \pkg{rai-bvar}: a walk-through}\label{sec:walkthrough}
+
+This section shows the user interface on two short scripts.
+Both use the same simulated data, a stationary three-variable quarterly VAR(1) for output growth,
+inflation and an interest rate, stored as raw levels with FRED-style transformation codes, so they
+run without network access.
+\cref{lst:Lst1} uses the analytic engine and \cref{lst:Lst2} the MCMC engine; each is
+followed by its standard output, verbatim.
+The scripts and their outputs are in the paper's repository; the analytic output is deterministic
+given the seeds, and the MCMC output is bitwise reproducible only on the same platform and package
+versions (\cref{sec:architecture}).
+% [V] docs/paper/code/{ex_a,ex_b}.py, out/{ex_a,ex_b}.txt, out/env.json (d58c9ef, macOS arm64); identical to dossier 02 §13 outputs at 62d15f6
+\todo{Length: with both listings and their outputs this section runs to about four pages in the
+assembled build against the two budgeted in OUTLINE \S7. Options: move the two output blocks to \cref{app:algorithms},
+or typeset each script and its output side by side.}
+
+\subsection{Data}\label{sec:walk-data}
+
+\code{VARData.from_frame(raw, tcodes={...})} takes a data frame of raw levels indexed by
+dates or periods.
+Its column order is the recursive ordering used by every triangular model.
+Gaps in the index, duplicate columns, infinite values, logs of non-positive values and missing
+values inside the sample raise errors; leading and trailing incomplete periods are trimmed, with a
+warning except for the leading periods that the transformations themselves consume.
+% [V] tests/unit/test_dataset.py::test_interior_missing_value_raises; dossier 02 §9.1; src/rai_bvar/data/dataset.py l.215-237 (_trim warns on leading periods only when first > the transforms' history length) at d58c9ef
+\code{upto(origin)}, \code{tail(n)}, \code{select(variables)} and \code{realized(origin, h)} give
+the data available at an origin, rolling windows, reorderings and future outcomes on the
+transformed scale.
+The transformation codes 1--7 are those of FRED-MD and FRED-QD \citep{mccracken2016fredmd}, each
+with a pathwise inverse, and they set the own-first-lag prior mean (1 for levels and log levels,
+0 for differences; \cref{sec:framework}).
+For real data, \code{rb.datasets.load("fred-qd", vintage="2026-09")} downloads a pinned vintage
+of FRED-QD \citep{mccracken2021fredqd} on demand, checks its SHA-256 checksum and caches it; the
+files are not bundled with the package.
+Its \code{variables} argument takes a named set or a list of series (the order given is the
+ordering), and \code{tcodes} takes \code{"rai"}, \code{"official"} or a mapping.
+The named variable sets (\code{"small"}, \code{"medium"}, \code{"large"}) contain only series
+published by U.S.\ federal agencies, and interior publication gaps are interpolated (linearly, in
+logs for logged series) with a warning that lists every filled period (\code{fill\_gaps=True}).
+% [V] src/rai_bvar/datasets/fred.py module docstring and load() (l.169-179) at d58c9ef; dossier 02 §9.5
+\todo{Q11/TODO 21: confirm the official FRED-QD 2026-09 transformation codes against the
+\code{"rai"} codes before the paper states them.}
+
+\subsection{An analytic BVAR, a forecast and a comparison}\label{sec:walk-analytic}
+
+\lstinputlisting[language=Python, firstline=6, firstnumber=6, numbers=left, numberstyle=\tiny,
+  basicstyle=\scriptsize\ttfamily, columns=fullflexible, keepspaces=true, breaklines=true,
+  showstringspaces=false, upquote=true,
+  caption={\code{ex\_a.py}: data, an analytic BVAR with SOC/SUR dummies and GLP empirical Bayes,
+  a forecast, and a rolling-window comparison with its verdicts.},
+  label=lst:Lst1]{code/ex_a.py}
+\lstinputlisting[basicstyle=\scriptsize\ttfamily, columns=fullflexible, keepspaces=true,
+  breaklines=true, upquote=true, title={Output of \cref{lst:Lst1} (stdout, verbatim; nothing
+  was written to stderr)}]{code/out/ex_a.txt}
+
+\cref{lst:Lst1} runs on the analytic engine.
+The log difference (code 5) consumes the first period (239 of 240 raw rows remain), and the
+own-first-lag prior means follow the codes: 0, 0 and 1.
+% [V] docs/paper/code/out/ex_a.txt lines 1-2
+The model of line 34 adds SOC and SUR dummy observations to the Minnesota prior and leaves the
+volatility at its default, so the composition resolves to the conjugate NIW model on the analytic engine, and
+empirical Bayes in the hierarchy of \citet{giannone2015prior} sets the tightness (printed as
+\code{lambda}, $\kappa$ in \cref{sec:framework}) and the SOC and SUR weights.
+% [V] out/ex_a.txt lines 3-7 (kappa 0.268, soc 1.120, sur 1.177)
+The forecast is summarised on the transformed scale and, through the pathwise inverse, on the
+level scale.
+
+The comparison runs 39 rolling-window origins at $h = 1$ and 36 at $h = 4$.
+% [V] out/ex_a.txt table, column origins
+The OLS VAR(2) is ``better'' than the random walk along the \code{model} axis at $h = 1$: its
+$\Delta$LPD is $+14.45$ with an MCSE of 0.10, the one-sided DM--HLN $p$-value is 0.014
+on a rolling window, and the MCS keeps the VAR and excludes the random walk.
+% [V] out/ex_a.txt, reasons line "OLS-VAR(2) vs RW h=1"
+The table prints the two-sided $p$-value, 0.029, for the same pair.
+% [V] out/ex_a.txt table row "OLS-VAR(2) 1"
+The comment in the listing says ``DM/AG''; the test implemented is the Diebold--Mariano test with
+the Harvey--Leybourne--Newbold correction applied to log-score losses (\cref{sec:eval-tests}).
+% risk 10: the listing is kept verbatim
+The BVAR has the larger $\Delta$LPD ($+15.37$ at $h = 1$), yet its verdict against the random walk
+is ``not comparable'': the two differ along seven axes, and a verdict needs exactly one (R2).
+% [V] out/ex_a.txt table row "BVAR(2) 1" and the verdict lines
+A comparison that credits the prior would pair the BVAR with an arm that differs from it only in
+the prior.
+
+\subsection{The same model family on the MCMC engine}\label{sec:walk-mcmc}
+
+\lstinputlisting[language=Python, firstline=37, lastline=75, firstnumber=37, numbers=left,
+  numberstyle=\tiny, basicstyle=\scriptsize\ttfamily, columns=fullflexible, keepspaces=true,
+  breaklines=true, showstringspaces=false, upquote=true,
+  caption={\code{ex\_b.py} (lines 37--75; lines 8--36 hold the imports, the \pkg{pandas} display
+  options and the data block of \cref{lst:Lst1}): stochastic volatility on the MCMC engine, summary, forecast LPD,
+  impulse responses, and a volatility-axis comparison.},
+  label=lst:Lst2]{code/ex_b.py}
+\lstinputlisting[basicstyle=\scriptsize\ttfamily, columns=fullflexible, keepspaces=true,
+  breaklines=true, upquote=true, title={Output of \cref{lst:Lst2} (stdout, verbatim; MCMC
+  numbers are platform-specific)}]{code/out/ex_b.txt}
+
+With the volatility set to \code{SV()}, the default mean, \code{Linear(prior=Minnesota())} (without
+the dummy observations of \cref{lst:Lst1}), moves to the MCMC engine, in structural form with
+the Mode~I prior; there is no engine argument to set.
+% [V] out/ex_b.txt line 2; tests/unit/test_api_resolution.py::test_resolution_table
+The Minnesota hyperparameters are an empirical-Bayes plug-in from the conjugate twin on the same
+window (\code{eb\_method: conjugate\_twin}), so the mean prior is the one every volatility arm on
+that window receives; for the SV model this is a plug-in value, not a type-II maximum-likelihood
+estimate.
+% [V] out/ex_b.txt line 3; tests/analytic/test_eb_mcmc.py::test_eb_plug_in_equals_the_phase1_eb_mode_at_cross_1
+The summary reports $\hat R$ and bulk ESS for every primary quantity.
+On this homoskedastic DGP the SV parameters mix slowly: $\phi_i$ and $\sigma_i$ have bulk ESS
+between 110 and 362 from 4000 kept draws and $\hat R$ up to 1.042, so the fit is flagged as not
+converged; the library's warning (on stderr, not shown) reports that 7 of the 16 primary
+quantities fail, which by the table are the six SV parameters $\phi_i$, $\sigma_i$ and the
+log-likelihood ($\hat R$ 1.031, bulk ESS 179).
+% [V] out/ex_b.txt summary table and "converged: False" (MCMCSettings(chains=4, draws=1000): 4 x 1000 kept draws); out/ex_b.stderr.txt ("7 of 16 primary quantities fail", naming the five worst; warning text not reproduced; a second warning names other packages, TODO 16)
+The forecast container and its log-density interface are those of the analytic case (R3); the
+\code{engine} attribute records which engine produced it, and the MCMC forecast also carries the
+ordering, sampler metadata and accelerator variables (\cref{sec:eval-contract}).
+% [V] out/ex_b.txt lines "ForecastResult(...) | engine attr: mcmc" and the two LPD lines
+With the interest rate ordered last, a one-s.d.\ rate shock has no impact effect on output growth
+or inflation in the recursive identification.
+% [V] out/ex_b.txt IRF table, horizon 0 (0.0000, 0.0)
+
+The final comparison is along the volatility axis only: both arms are structural Mode~I models with
+the same mean prior, and their axis labels differ only in \code{vol}.
+% [V] out/ex_b.txt axes lines
+Over 11 rolling-window origins, SV has a $\Delta$LPD of $-0.11$ with an MCSE of 0.10,
+too imprecise for any verdict, and the one-sided DM $p$-value is 0.421.
+% [V] out/ex_b.txt table row "Linear x SV 1" and reasons line
+The SV arm converged at none of the 11 origins, so the convergence gate forces
+``inconclusive'' whatever the other evidence says.
+% [V] out/ex_b.txt reasons line "converged at only 0% of origins"
+This is the intended behaviour: the gate refuses to certify a comparison with an unconverged fit.
+A longer chain is the first remedy to try; \cref{sec:cr} shows how the gate decided a criterion
+of the replication and the fit-level diagnostic that set the MCMC budget before the acceptance run.
+
+\subsection{Inspecting fits and failures}\label{sec:walk-inspect}
+
+An MCMC fit exposes its Gibbs plan: \code{fit.plan.describe()} prints the order of one sweep with
+each step's block and write set (\cref{fig:FigC1} in \cref{app:algorithms}).
+% [V] src/rai_bvar/engines/mcmc/plan.py l.91-103 at d58c9ef
+It also exposes the diagnostics table, \code{summary()}, the \code{converged} flag, the list of
+\code{warnings} and the timing of each stage.
+A numerical failure inside a kernel reaches the user as \code{MCMCNumericalError}, which names the
+block, the equation, the chain and the sweep and carries the diagnostics of the deterministic replay
+(\cref{sec:arch-mcmc}; \cref{sec:robustness} describes the failures found this way).
+% [V] src/rai_bvar/engines/mcmc/protocols.py l.165-189 at d58c9ef
+\todo{OUTLINE \S7.4: a volatility-axis grid, \code{rb.grid(rb.BVAR, vol=[rb.Constant(), rb.SV(),
+rb.SV(outliers=True)])} with \code{verdict(axis="vol")}, is [TC]. Add it as a third script under
+\code{docs/paper/code/} and to \code{run\_examples.py} only if it is run on the release commit.}

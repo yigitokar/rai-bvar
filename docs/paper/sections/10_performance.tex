@@ -1,0 +1,29 @@
+\section{Performance}\label{sec:performance}
+
+% Evidence status follows OUTLINE.md §0.5. Every number below is [R]: tests/bench/baseline.json
+% (main repository), measured at deb3929 on a non-idle Apple M5 Max, committed in d490730.
+% Re-measure on an idle machine on the release commit (OUTLINE TODO 9).
+
+The performance target, BENCH-P2, is one realistic SV workload: structural Linear $\times$ SV with $n = 20$, $p = 4$ and $T = 300$ on a simulated stationary VAR(4) with SV, sampled with four chains of 1000 burn-in and 10,000 kept sweeps, fixed hyperparameters and one CPU device, with a target of 120~s. % [V] benchmarks/phase2_perf.py docstring; DESIGN §10.1
+The measured quantity is the end-to-end wall time of \code{BVAR.fit()}, including compilation of the JAX program \citep{bradbury2018jax}, storage and diagnostics; each fit runs in a fresh process, with an empty (cold) or a populated (warm) persistent compilation cache, three times each. % [V] benchmarks/phase2_perf.py docstring
+
+The only reference measurement of the production engine is the committed baseline, taken at commit deb3929 on an Apple M5 Max with desktop applications open, at a one-minute load average of 2.4--6.1 before the six runs. % [R] tests/bench/baseline.json (machine.commit, summary.loadavg_1min); commit d490730
+This deviates from the protocol, which asks for an idle machine with at least eight performance cores; the record lists six. % [R] DESIGN §10.1; baseline.json machine.perf_cores = "6"
+The median wall time is 52.3~s cold and 49.6~s warm, of which compilation takes 3.46~s cold and 1.00~s when the executables are loaded from the cache (medians over the three cold and the three warm runs). % [R] baseline.json summary.wall_cold_s, wall_warm_s, compile_cold_s, compile_warm_s
+One sweep of all four chains takes 3.90~ms, the minimum over three blocks of 1000 sweeps of the compiled burn-in executable, and peak resident memory is 3,043~MiB (medians over all six runs). % [R] baseline.json summary.sweep_ms_min3x1000 (runner rate over the sampling sweeps: 4.07 ms), summary.peak_rss_mb (MiB)
+The target is met, but the numbers belong to this machine, load and commit and are not portable.
+\todo{TODO 9: re-measure BENCH-P2 on an idle machine on the release commit, and add an idle x86 run.}
+
+Mixing is the binding constraint, not speed.
+The slowest quantities are the SV scales $\sigma_i$ and persistences $\phi_i$, with minimum bulk ESS per second of 10.2 and 11.2 over the warm-run wall time, against 403 for the own first-lag coefficients. % [R] baseline.json summary.ess (sigma, phi, B_own1: ess_per_s_min)
+Every run reports \code{converged = False}.
+The runs share a seed and give identical draws, so this is one outcome seen six times; according to the commit message, 4 of the 101 primary quantities miss the R-hat threshold of 1.01 (worst 1.016, a $\sigma_i$), while every group's minimum bulk ESS exceeds 400. % [R] commit d490730 ("same seed, identical draws"; the R-hat values are not stored in the JSON); baseline.json summary.converged, summary.ess.*.ess_min (sigma 504)
+Even at five times the default number of draws, this workload thus fails the convergence rule of \cref{sec:eval-verdict}; \cref{sec:limitations} discusses the budget. % [V] src/rai_bvar/settings.py l.76 (MCMCSettings.draws = 2000; BENCH-P2 keeps 10,000)
+
+Several configurations have no production measurement: the stretch target of 60~s on four CPU devices, the reduced-form CCCM sampler, SV with Student-$t$ errors and with outliers plus $t$, and an idle x86 machine (the only x86 record is provisional and was taken under heavy load). % [R] dossier 03 §13.7-§13.8 (x86: git show d37e059:tests/bench/baseline.json)
+Timings of design stand-ins and pilot prototypes, which ran different code on another machine, are not quoted. % [R] dossier 03 §13.6
+\cref{tab:TabE2} gives the full benchmark record and \cref{tab:TabE3} the kernel microbenchmarks.
+\todo{Dossier 03 \S13.10: the baseline measured deb3929, and later commits change engine and component sources. A reading of the diffs suggests that none is on the BENCH-P2 path, but that is an argument, not a measurement; re-measuring on the release commit (TODO 9) settles it.}
+% [TC] dossier 03 §13.10 (deb3929..62d15f6: 14 engine/component files). After 62d15f6, src/ changes in six files:
+% engines/mcmc/forecast.py (D-34), evaluation/{backtest,compare,scores}.py, forecast/result.py and
+% structural/ordering.py; under engines/ and components/ only engines/mcmc/forecast.py. Whether fit() reaches any of them is not checked.

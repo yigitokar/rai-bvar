@@ -1,0 +1,275 @@
+\section{The model framework}\label{sec:framework}
+
+This section states the models that \pkg{rai-bvar} currently estimates. None of the model classes
+is new, and each is credited where it is defined; where the package makes its own choice within a
+class (the Mode~I scaling and the default SOC scope below), the text says so.
+
+\subsection{Notation}\label{sec:framework:notation}
+
+The data are $n$ variables $y_t$, observed at $t = 1,\dots,T$ after $p$ initial observations, with
+regressors $x_t = (d_t', y_{t-1}', \dots, y_{t-p}')' \in \mathbb{R}^k$, $k = n_d + np$, where $d_t$
+holds $n_d \in \{0, 1, 2\}$ deterministic terms (none, a constant, or a constant and a linear
+trend). % [V] src/rai_bvar/data/design.py (module docstring, DETERMINISTIC_KINDS)
+$Y$ (columns $y_i$) and $X$ stack the observations, $Y_{<i}$ holds the first $i-1$ columns of $Y$,
+and the column order of the data is the recursive ordering. % [V] src/rai_bvar/data/dataset.py (module docstring)
+We write $\kappa$ for the Minnesota overall tightness (code field \code{lambda_}), keeping $\lambda$
+for structural variances. Equations are numbered $i = 1,\dots,n$ in the recursive order; when this
+position enters a prior formula as a number we write it $\iota$, as in
+$\mathrm{IG}(1 + \iota/2, \psi_i/2)$ (the code numbers equations from 0, so there $\iota$ is the
+index plus one).
+$\mathrm{IG}(c, C)$ has shape $c$ and scale $C$, $\mathrm{IW}(\Psi, d)$ has mean $\Psi/(d-n-1)$, and
+$\mathrm{N}(m, V)$ has variance $V$. \cref{tab:TabA1} in \cref{app:notation} lists
+the notation with the code names of the main hyperparameters. % [R] dossier 02 §2; DESIGN "Conventions". (TabA1 has no rows for soc/sur or the SV hyperpriors, hence "main".)
+
+\subsection{The recursive structural form}\label{sec:framework:structural}
+
+Every model estimated by MCMC is written as
+\begin{equation}\label{eq:structural}
+  A y_t = \Gamma x_t + \Lambda_t^{1/2}\varepsilon_t, \qquad
+  \varepsilon_t \overset{\mathrm{iid}}{\sim} \mathrm{N}(0, I_n),
+\end{equation}
+with $A$ unit lower triangular (entries $a_{ij}$, $j < i$), $\Gamma$ with rows $\gamma_i'$, and
+$\Lambda_t = \operatorname{diag}(\lambda_{1,t},\dots,\lambda_{n,t})$. The reduced form is
+$y_t = B'x_t + u_t$, $u_t \sim \mathrm{N}(0, \Sigma_t)$, with $B' = A^{-1}\Gamma$ and
+$\Sigma_t = A^{-1}\Lambda_t A^{-1\prime}$. All current models have this linear mean. As $|A| = 1$,
+the log likelihood given the first $p$ observations is
+\begin{equation}\label{eq:loglik}
+  \log p(Y \mid A, \Gamma, \lambda)
+    = \sum_{i=1}^{n}\sum_{t=1}^{T}\Big[-\tfrac12\log(2\pi\lambda_{i,t})
+       - \frac{e_{i,t}^2}{2\lambda_{i,t}}\Big], \qquad
+  e_{i,t} = y_{i,t} + {\textstyle\sum_{j<i}} a_{ij} y_{j,t} - x_t'\gamma_i ,
+\end{equation}
+the reduced-form Gaussian log density with no Jacobian term. It is one of the quantities that decide
+the engine's convergence flag (\cref{sec:samplers}) and a test quantity of the validation
+suite (\cref{sec:validation}). % [V] src/rai_bvar/engines/mcmc/monitor.py (module docstring: primary set)
+
+If the priors are independent across equations given the hyperparameters, the equation posteriors
+are independent conditional on the volatilities: equation $i$ is a heteroskedastic regression with
+$k + i - 1$ regressors, and a sweep costs $O(nk^3) = O(n^4p^3)$ rather than the $O(n^6p^3)$ of a
+joint draw of all coefficients. % [R] SPEC §4.1; dossier 02 §3.4
+This factorisation is exact in the structural form. A prior on the reduced-form $B$ instead couples
+the equations; for that case the equation-by-equation
+algorithm of \citet{carriero2019large} does not target its intended posterior
+\citep{bognanni2022comment}, and the package uses the corrected algorithm of
+\citet{carriero2022corrigendum} (\cref{sec:samplers}). % [R] SPEC §0 table, §4.1; docs/phase2/04_cccm_corrected.md l.182 (Bognanni 2022 read from its abstract only; the corrigendum restates the argument)
+
+\subsection{Priors}\label{sec:framework:priors}
+
+All coefficient priors in the current release are of the Minnesota type \citep{litterman1986forecasting}, in a
+conjugate form (analytic engine) or a structural or reduced form (MCMC engine); \code{form="auto"}
+is resolved from the volatility arm (\cref{sec:architecture}).
+
+\paragraph{Conjugate form.} The analytic engine uses the normal--inverse-Wishart (NIW) prior
+\citep{kadiyala1997numerical,banbura2010large}
+\begin{equation}\label{eq:omega}
+  \Sigma \sim \mathrm{IW}(\operatorname{diag}\psi, d), \qquad
+  \operatorname{vec} B \mid \Sigma \sim \mathrm{N}(\operatorname{vec} b, \Sigma \otimes \Omega), \qquad
+  \Omega_{(l,j)} = \frac{\kappa^2 (d-n-1)}{l^{\alpha}\psi_j}, \qquad d = n + 2,
+\end{equation}
+with $\Omega$ diagonal, $(l,j)$ the coefficient on lag $l$ of variable $j$, $\alpha$ the lag decay
+and $\Omega = \kappa_d$ (\code{var_const}) for deterministic terms. The scales $\psi_j$ default to the
+residual variances of univariate AR($p$) regressions with a constant on the estimation window
+(with the COVID-19 scaling below, on its periods before $t^*$ when enough of them exist); the
+other defaults are $\kappa = 0.2$, $\alpha = 2$ and $\kappa_d = 10^7$. The mean $b$ is zero except on
+the own first lag, where by default it is 1 for series in levels or log levels (transformation codes 1 and 4) and
+0 for differenced series. % [V] src/rai_bvar/engines/analytic.py::_ar_residual_variances; src/rai_bvar/priors/minnesota.py (fields); src/rai_bvar/data/transforms.py (PERSISTENT_TCODES, prior_mean_own_lag)
+The Kronecker structure ties own- and cross-lag tightness \citep{kadiyala1997numerical}, and the
+inverse-Wishart prior fixes the implied prior on the contemporaneous coefficients
+(\cref{app:niw-structural}), so the cross-lag and contemporaneous scales $\kappa_c$ and
+$\kappa_a$ introduced below must be 1 in this form. % [V] src/rai_bvar/priors/minnesota.py (__post_init__); tests/unit/test_api_resolution.py::test_contemp_shrinkage_needs_a_non_conjugate_form
+Sum-of-coefficients (SOC) and single-unit-root (SUR) dummy rows
+\citep{doan1984forecasting,sims1998bayesian} are built as in \citet{giannone2015prior}, except that
+by default (\code{soc_scope="persistent"}, a convention of this package) SOC rows exist only for variables with a non-zero own-lag
+prior mean, so that differenced variables are not pulled towards a unit root;
+\code{soc_scope="all"} restores the rows of \citet{giannone2015prior}. % [V] src/rai_bvar/priors/dummies.py (Rows); src/rai_bvar/engines/analytic.py (Conventions)
+For the hyperparameters $\vartheta$, \code{hierarchy="fixed"} keeps given values; \code{"eb"} (the default)
+and \code{"mh"} use the hierarchy of \citet{giannone2015prior} with their default hyperpriors (plus a
+prior on $\alpha$, which \citet{giannone2015prior} fix at 2, used only when $\alpha$ is estimated), the
+first by maximising $\log p(Y \mid \vartheta) + \log p(\vartheta)$, the second by random-walk Metropolis with
+$(B, \Sigma)$ drawn exactly given each $\vartheta$. With dummy rows, $p(Y \mid \vartheta)$ is the
+marginal likelihood of dummies and data divided by that of the dummies alone. % NOTATION: the hyperparameter vector is written \vartheta, not h (h_{i,t} is the log-volatility and h the horizon, App. A); assembler: add \vartheta to TabA1. [R] alpha fixed at 2 in GLP: GLPHyperpriors docstring, SPEC §4.4 Priors table. [V] src/rai_bvar/priors/hyperpriors.py (GLPHyperpriors); src/rai_bvar/engines/analytic.py (module docstring); tests/analytic/test_conjugate.py::test_log_ml_with_dummies_is_the_difference_of_two_marginal_likelihoods
+The COVID-19 treatment of \citet{lenza2022estimate} divides the rows of $Y$ and $X$ by a scale $s_t$
+common to all variables, which is 1 before a start period $t^*$ (by default the period containing
+March 2020), free in $t^*$ and the next two periods, and decays geometrically towards 1 afterwards; the model stays conjugate, and the log marginal likelihood gains the Jacobian
+$-n\sum_t \log s_t$. % [V] src/rai_bvar/data/outliers.py; tests/analytic/test_conjugate.py::test_lenza_primiceri_jacobian_by_the_heteroskedastic_chib_identity
+
+\paragraph{Structural form.} This is the default on the MCMC engine. The coefficients are centred
+conditionally on the contemporaneous row,
+\begin{equation}\label{eq:centring}
+  \mathrm{E}[\gamma_i \mid a_i] = M\tilde a_i, \qquad
+  \tilde a_i = (a_{i1}, \dots, a_{i,i-1}, 1, 0, \dots, 0)',
+\end{equation}
+with $M$ the reduced-form prior mean $b$. Since $\gamma_i = B\tilde a_i$, this centring (D3 in the
+design documents) gives $\mathrm{E}[B' \mid A] = A^{-1}\mathrm{E}[\Gamma \mid A] = M'$ for every $A$.
+The same linear conditional centring, under a normalisation with unit-variance structural shocks,
+appears in \citet{sims2006were}, who attribute it to earlier work of theirs.
+\todo{Confirm that their ``Sims and Zha (1998a)'' is \citet{sims1998bayesian} and that the conditional centring is in its text, then cite it here: N05 did not obtain the 1998 paper (form confirmed only via the MSBVAR documentation and the 2006 NBER draft).} % [R] docs/phase2/05_structural_equation_sampler.md §4.2 and §13 item 3 (2006: NBER SI 2004 draft, eq. 7, A_+ = D + S A_0; the AER numbering was not seen, so no equation number is cited)
+In the coordinates $\delta_i = \gamma_i - M_{<i}a_i$ (unit Jacobian; $M_{<i}$ is the first $i-1$
+columns of $M$), $a_i$ and $\delta_i$ are independent a priori with diagonal precisions, and
+equation $i$ is the regression
+\begin{equation}\label{eq:delta}
+  y_i = (XM_{<i} - Y_{<i})\,a_i + X\delta_i + e_i ,
+\end{equation}
+whose contemporaneous regressors are minus the prior-mean residuals of the earlier variables. % [V] src/rai_bvar/priors/structural.py (module docstring)
+
+Three prior modes share this form. \emph{Mode~I}, independent and moment-matched, is the
+package's own default (design decision D-10) and is used by \code{Constant("ig")} and by every SV
+arm. % [R] docs/phase2/DESIGN.md D-10; docs/phase2/05_structural_equation_sampler.md §0 item 5
+With the fixed scale $\bar\sigma_i^2 = \psi_i/\iota$,
+\begin{equation}\label{eq:modeI}
+  a_{ij} \sim \mathrm{N}(0, \kappa_a\bar\sigma_i^2/\psi_j), \qquad
+  \delta_i \sim \mathrm{N}(m_i, \bar\sigma_i^2\,\Omega^{(i)}),
+\end{equation}
+where $\kappa_a$ (\code{contemp}) scales the contemporaneous prior variance, $m_i$ is column $i$ of
+$M$, and $\Omega^{(i)}$ is the $\Omega$ of \eqref{eq:omega} with the entries of lags of the other
+variables multiplied by $\kappa_c^2$; $\kappa_c$ (\code{cross}) thus scales a prior standard
+deviation. % [V] src/rai_bvar/priors/structural.py (module docstring); DESIGN §6.1
+At $\kappa_c = \kappa_a = 1$ Mode~I reproduces three moments of the NIW prior exactly (the
+reduced-form mean for every $A$, the marginal variances of $B$ and $\mathrm{E}\,\Sigma =
+\operatorname{diag}\psi$) but not its distribution. % [V] tests/priors/test_structural_prior.py::test_mode_i_matches_the_niw_moments_exactly_and_by_monte_carlo
+It thereby avoids the growth $\mathrm{E}\,\Sigma_{ii} = 2^{i-1}\psi_i$ along the ordering
+\citep{chan2024large} that the unscaled choice $a_{ij} \sim \mathrm{N}(0, \psi_i/\psi_j)$, with
+$\mathrm{E}\,\lambda_i = \psi_i$, would imply. % [V] tests/integration/test_ordering.py::test_prior_mode_reproduces_the_cky_two_to_the_i_growth (psi = 1); [R] general psi: docs/phase2/05_structural_equation_sampler.md §0 item 5
+\emph{Mode~II} (\code{Constant("iw")} with a structural mean) replaces $\bar\sigma_i^2$ by $\lambda_i$
+in both blocks, with $\lambda_i \sim \mathrm{IG}(1 + \iota/2, \psi_i/2)$. At $\kappa_c = \kappa_a = 1$
+it is exactly the structural form of the NIW prior \eqref{eq:omega}, so its posterior is the NIW
+posterior. \cref{app:niw-structural} gives a proof sketch, which uses the partition theorem
+for the inverse Wishart \citep{gupta2000matrix}; this direction (inverse Wishart to structural
+normal--inverse-gamma) is Corollary~1 of \citet{chan2022asymmetric}, and his Proposition~1 is the
+converse. % [R] docs/phase2/05_structural_equation_sampler.md §4.2 (proposition, proof sketch; l.199 "Cor. 1 ... Prop. 1 is the converse"), §1 table (Chan's Prop. 1 and Cor. 1-3 cross-checked against the QE PDF), §13 item 1 / l.1036 (citation corrected to Cor. 1); [V] tests/priors/test_structural_prior.py::test_mode_ii_prior_is_the_niw_prior; tests/analytic/test_structural_nig.py::test_a1_log_ml_equals_phase1
+With $\kappa_c \neq 1$ it is the asymmetric conjugate prior of \citet{chan2022asymmetric} with the
+centring \eqref{eq:centring}. % [R] src/rai_bvar/engines/structural_nig.py (module docstring); twin A4, tests/analytic/test_mcmc_twin.py::test_a4_chan_asymmetric_prior (nightly)
+Finally, \code{Constant("iw_equivalent")} scales only $a_i$ by $\lambda_i$ and keeps the Mode~I
+prior on $\delta_i$ (or, in reduced form, the coefficient prior below). At $\kappa_a = 1$ the implied
+$\Sigma$ is exactly $\mathrm{IW}(\operatorname{diag}\psi, n+2)$ \citep[Proposition~1]{chan2022asymmetric}, and in
+reduced form the model is invariant to the ordering of the variables. % [V] tests/priors/test_structural_prior.py::test_iw_equivalent_sigma_is_inverse_wishart; tests/integration/test_ordering.py::test_reduced_iw_equivalent_is_order_invariant_within_mcse (slow tier; not re-run for the dossier)
+
+\paragraph{Reduced form.} The columns $\pi_j$ of $B$ get independent priors
+$\mathrm{N}(m_j, \psi_j\Omega^{(j)})$, which match the NIW marginal variances at $\kappa_c = 1$. The
+prior on $(A, \lambda)$ is the structural one, so the two forms differ only in the coefficient
+prior. % [V] src/rai_bvar/priors/reduced.py (module docstring)
+
+\paragraph{Hyperparameters on the MCMC engine.} Hyperparameters are fixed during MCMC: at given
+values (\code{hierarchy="fixed"}) or, by default (\code{"eb"}), at the empirical-Bayes mode of the
+analytic conjugate twin, fitted at $\kappa_c = \kappa_a = 1$ on the same window. % [V] tests/analytic/test_eb_mcmc.py::test_eb_plug_in_equals_the_phase1_eb_mode_at_cross_1; src/rai_bvar/engines/mcmc/eb.py
+Two cases differ when $\kappa_c \neq 1$: in structural form the mode of the per-equation closed-form
+marginal likelihood of \citet{chan2022asymmetric}, plus the same log hyperprior, is used instead, with $\kappa_c$ and $\kappa_a$
+held fixed and the twin's mode as the starting point; in reduced form, where no closed form exists,
+the twin's mode is used and a note is recorded with the fit. % [V] tests/analytic/test_eb_mcmc.py::test_structural_cross_not_1_uses_eb_structural, ::test_reduced_cross_not_1_records_the_note_and_does_not_raise; src/rai_bvar/engines/mcmc/eb.py (module docstring, items 2-3); DESIGN D-12
+This value depends only on the window, so every volatility arm in a comparison gets the same mean
+prior. It is the empirical-Bayes mode of the model being estimated only when that model is Mode~II;
+for every other composition (Mode~I, \code{iw_equivalent}, the reduced form and the SV arms) it is a
+documented plug-in. % [R] DESIGN §6.5; [V] src/rai_bvar/engines/mcmc/eb.py (module docstring, item 1: "a documented plug-in for Mode I, the reduced form and SV")
+\code{hierarchy="mh"} and the COVID-19 scaling raise an error on MCMC compositions, for which SV with
+outliers is the available treatment of the 2020 observations. % [V] tests/unit/test_api_resolution.py::test_metropolis_hastings_hierarchy_is_rejected_on_mcmc, ::test_lenza_primiceri_scaling_is_rejected_on_mcmc
+
+\subsection{Volatility arms}\label{sec:framework:vol}
+
+\paragraph{Constant.} Under \code{Constant}, $\lambda_{i,t} = \lambda_i \sim \mathrm{IG}(1 + \iota/2,
+\psi_i/2)$, with mean $\psi_i/\iota$, in all three modes. In Mode~II and \code{iw_equivalent} the
+$\lambda$-scaled coefficient blocks enter the inverse-gamma full conditional of $\lambda_i$ through
+one coupling channel, which adds half their number to the shape and half their $\lambda$-free prior
+quadratic form to the scale. % [V] src/rai_bvar/components/vol/constant.py (module docstring); src/rai_bvar/components/mean/linear.py (coupling)
+
+\paragraph{Stochastic volatility.} Under \code{SV} the log-variance $h_{i,t} = \log\lambda_{i,t}$
+of each structural equation follows
+\begin{equation}\label{eq:sv}
+  h_{i,t} = \mu_i + \phi_i(h_{i,t-1} - \mu_i) + \sigma_i\eta_{i,t}, \qquad
+  \eta_{i,t} \overset{\mathrm{iid}}{\sim} \mathrm{N}(0, 1),
+\end{equation}
+or, with \code{rw=True}, the random walk $h_{i,t} = h_{i,t-1} + \sigma_i\eta_{i,t}$. The priors use the
+parametrisation of \pkg{stochvol} \citep{kastner2016dealing,hosszejni2021modeling} with the package's
+own defaults: $\mu_i \sim \mathrm{N}(\log(\psi_i/\iota), 10)$, centred in each window on the log of the
+Mode~I scale; $(\phi_i + 1)/2 \sim \mathrm{Beta}(20, 1.5)$; $\sigma_i^2 \sim B_\sigma\chi^2_1$ with
+$B_\sigma = 1$ ($0.1$ for the random walk), or an inverse gamma; $h_{i,0}$ from the stationary law, or
+$\mathrm{N}(\log(\psi_i/\iota), 4)$ for the random walk. % [V] src/rai_bvar/components/specs.py (SV fields, _PHI_PRIOR, _default_sigma2); src/rai_bvar/priors/sv_arrays.py::sv_prior_arrays
+\todo{Credit the triangular VAR-SV form itself here (\cref{sec:intro} cites \citet{cogley2005drifts,primiceri2005time,clark2011realtime} for SV in VARs); check each paper's exact specification before naming it as the source of \eqref{eq:structural} with \eqref{eq:sv}.}
+
+\paragraph{Robust SV.} Outliers and Student-$t$ errors are transitory scales of the structural
+residual,
+\begin{equation}\label{eq:robust}
+  e_{i,t} = o_{i,t}\,\tau_{i,t}^{1/2}\,e^{h_{i,t}/2}\,\varepsilon_{i,t}, \qquad
+  \lambda_{i,t} = e^{h_{i,t}}\,o_{i,t}^2\,\tau_{i,t},
+\end{equation}
+and $\lambda_{i,t}$ in \eqref{eq:loglik} is then this effective variance. With \code{outliers=True},
+as in \citet{carriero2024addressing}, $o_{i,t} \in \{1, \dots, 20\}$ (their discretisation of a
+uniform outlier scale on $[2, 20]$) is 1 with probability $1 - p_i$ and otherwise uniform; the Beta
+prior on $p_i$ encodes, by default, one outlier every 4 years over 10 prior years (every 10 years
+with $t$ errors). % [V] src/rai_bvar/priors/sv_arrays.py::outlier_beta; src/rai_bvar/components/specs.py (outlier_max=20, _default_outlier); src/rai_bvar/components/vol/transitory.py (w_k = p/(K-1)); [R] docs/phase2/03_sv_outliers_t.md §0 table (CCMM REStat §III.A "U(2,20)", online appendix II.iv fn. 8, code grid 1:20)
+\todo{The outline credits the outlier grid to \citet{stock2016core} (``in the spirit of''); N03 has the 2016 specification second-hand only (published text not accessed). Confirm against the REStat text before citing it here.}
+With \code{tails="t"}, $\tau_{i,t} \sim \mathrm{IG}(\nu_i/2, (\nu_i - 2)/2)$, a standardised $t$ with
+$\mathrm{E}\,\tau_{i,t} = 1$, or, with \code{t_scale="unit"}, the $\mathrm{IG}(\nu_i/2, \nu_i/2)$
+scale mixture of \citet{jacquier2004bayesian}; $\nu_i$ is uniform on $\{3, \dots, 40\}$ and drawn by
+an exact collapsed discrete step. The two components can be combined. % [V] src/rai_bvar/components/specs.py (_NU_PRIOR, t_scale)
+
+\subsection{What the current release delivers}\label{sec:framework:delivered}
+
+\cref{tab:components} lists the components by axis, the validation rows in which each appears,
+and the roadmap. ``Ablation-ready'' describes the architecture: the current release populates the
+volatility axis with five volatility families (\code{Constant}, with three covariance priors;
+\code{SV} with AR(1) or random-walk log-variance; and SV with outliers, $t$ errors or both), while
+the mean axis is linear and the prior axis is Minnesota. % [V] src/rai_bvar/validation/joint.py (_COMPOSITIONS); src/rai_bvar/components/specs.py; wording "five volatility families" as in dossier 01 C2 (not "arms": the replication's five arms are a different set)
+The random-walk arms in reduced form, \code{SV(rw=True)} (the primary arm of the replication in
+\cref{sec:replication}) and its Student-$t$ variant, have no validation row of their own
+(\cref{sec:validation}). % [V] at c823d20 (committed): src/rai_bvar/validation/joint.py rows 1-17, 201-205 (rw only in row 14, structural_sv_rw); benchmarks/clark_ravazzolo.py::models (reduced SV(rw), SV(rw,t10)), PRIMARY_SV = "SV(rw)"
+\todo{TODO 3: row~18, \code{reduced_sv_rw} (reduced form $\times$ SV(rw)), and a \code{reduced-SV(rw)} contract fit were committed in 7f410dc, after the acceptance commit c823d20; the SV(rw, $t$) variant is still not covered. If the release commit includes it, re-check this sentence, the caption of \cref{tab:components} (``1--17'') and its \code{SV(rw=True)} row; \cref{sec:validation-coverage,sec:replication-caveats,sec:limitations} make the same coverage statement.}
+The equivalences above are tested: the analytic log marginal likelihood satisfies the Chib identity;
+Mode~I has the NIW moments; the prior draws of Mode~II pass Kolmogorov--Smirnov tests against NIW
+prior draws, and its closed-form log marginal likelihood equals the analytic engine's to an absolute
+$10^{-10}$ in five configurations; and the $\Sigma$ implied by \code{iw_equivalent} passes
+Kolmogorov--Smirnov tests against $\mathrm{IW}(\operatorname{diag}\psi, n+2)$. The Mode~II identity
+makes the analytic engine an exact posterior oracle for the Mode~II \code{Constant} compositions of
+the MCMC engine; the Mode~I and \code{iw_equivalent} tests check priors only
+(\cref{sec:validation}). % [V] tests/analytic/test_conjugate.py::test_log_ml_satisfies_the_chib_identity; tests/priors/test_structural_prior.py::test_mode_i_matches_the_niw_moments_exactly_and_by_monte_carlo, ::test_mode_ii_prior_is_the_niw_prior (20,000 draws, min p > 1e-3), ::test_iw_equivalent_sigma_is_inverse_wishart; tests/analytic/test_structural_nig.py::test_a1_log_ml_equals_phase1 (abs 1e-10, five A1_CASES)
+
+% Tab1 (OUTLINE §14.1). OUTLINE §14 plans a generator, docs/paper/figures/tab_components.py, that
+% introspects src/rai_bvar/validation/joint.py and src/rai_bvar/components/specs.py and writes
+% figures/out/tab_components.tex. No such script exists yet, so the table is written inline. If
+% one is added, its output should be the tabular body only (no table environment, no caption), with
+% the four columns below, and replace the inline tabular. Its
+% rows were read from joint.py (_COMPOSITIONS: rows 1-17 and 201-205) at c823d20 and from SPEC.md
+% §4.4 and §13 (roadmap).
+\begin{table}[tbp]
+  \centering
+  \caption{Components of the current release by axis, with the engine and form that estimate them
+    and the registered validation rows (\cref{sec:validation}) in which they appear. Rows are
+    numbered as in \code{src/rai_bvar/validation/joint.py}: 1--17, and 201--205 with SOC/SUR rows;
+    rows 15 and 16 change the $\sigma_i^2$ and $h_{i,0}$ priors, and row 17 is a zero-mean univariate
+    SV model. Rows as committed at c823d20. ``Later'' follows the repository's \code{SPEC.md},
+    \S4.4 and \S13; the COVID-19 entry follows the engine's error message (Phase~3).}
+  \label{tab:components}\label{Tab1}\label{tab:Tab1}
+  \footnotesize
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}p{0.12\linewidth}p{0.36\linewidth}p{0.24\linewidth}p{0.22\linewidth}@{}}
+    \toprule
+    Axis & Component & Engine (form) & Validation rows \\
+    \midrule
+    Mean & \code{Linear}, $x_t'\gamma_i$ & both engines & all except 17 \\
+     & \multicolumn{3}{p{0.84\linewidth}}{\emph{Later:} BART (Phase 4); TVP, threshold and Markov-switching means (Phase 5).} \\
+    \midrule
+    Prior & \code{Minnesota}, conjugate NIW; hierarchy fixed, EB or MH & analytic & none (analytic tests, parity) \\
+     & structural, Mode~I & MCMC & 1--4, 12, 14--16, 201, 204 \\
+     & structural, Mode~II & MCMC & 5, 202 \\
+     & structural, \code{iw_equivalent} & MCMC & 6, 205 \\
+     & reduced form & MCMC & 7--11, 13, 203 \\
+     & SOC/SUR dummy rows & both engines & 201--205 \\
+     & \multicolumn{3}{p{0.84\linewidth}}{\emph{Later:} horseshoe, normal-gamma, Dirichlet--Laplace, R2D2 and SSVS priors; the asymmetric conjugate prior as a prior class (Phase 3).} \\
+    \midrule
+    Volatility & \code{Constant("iw")} & analytic; MCMC (Mode~II) & 5, 202 \\
+     & \code{Constant("ig")} & MCMC (both forms) & 1, 7, 201, 203 \\
+     & \code{Constant("iw_equivalent")} & MCMC (both forms) & 6, 11, 205 \\
+     & \code{SV()}, AR(1) log-variance & MCMC (both forms) & 2, 8, 15--17, 204 \\
+     & \code{SV(rw=True)} & MCMC (both forms) & 14 (structural only) \\
+     & \code{SV(outliers=True)} & MCMC (both forms) & 3, 9 \\
+     & \code{SV(tails="t")} & MCMC (both forms) & 4, 10 \\
+     & \code{SV(outliers=True, tails="t")} & MCMC (both forms) & 12, 13 \\
+     & \multicolumn{3}{p{0.84\linewidth}}{\emph{Later:} common SV \citep{carriero2016common} (Phase 3); factor SV \citep{kastner2019sparse} and order-invariant SV \citep{chan2024large} (Phase 5).} \\
+    \midrule
+    COVID-19 & scaling of \citet{lenza2022estimate} & analytic only & none (analytic tests) \\
+     & \code{SV(outliers=True)} & MCMC & 3, 9, 12, 13 \\
+     & \multicolumn{3}{p{0.84\linewidth}}{\emph{Later:} the scaling on the MCMC engine (Phase 3).} \\
+    \midrule
+    Benchmarks & \code{RandomWalk}, \code{OLSVAR} & own simulator & none \\
+    \bottomrule
+  \end{tabular}
+\end{table}

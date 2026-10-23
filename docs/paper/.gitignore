@@ -1,0 +1,13 @@
+# LaTeX intermediates of `make` / `tectonic main.tex --keep-intermediates`
+main.aux
+main.bbl
+main.blg
+main.log
+main.out
+main.toc
+main.xdv
+main.lof
+main.lot
+# Python byte code (the scripts run with PYTHONDONTWRITEBYTECODE=1, this is a guard)
+__pycache__/
+*.pyc

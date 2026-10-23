@@ -1,0 +1,341 @@
+% rai-bvar paper: master file (arXiv preprint, article class).
+%
+% Build:   make            (from docs/paper; runs tectonic, then checks the log)
+%    or:   tectonic main.tex --keep-intermediates --keep-logs
+% Figures: make figures    (docs/paper/figures/make_*.py; see docs/paper/Makefile)
+%
+% The section files live in sections/ and are read by \rbinput below (one name per slot; a
+% comma-separated list of candidate names also works). A missing file prints a red placeholder
+% section, so the paper always compiles; `make check` lists any file in sections/ that is not read.
+%
+% Draft marks: \acc{json.key.path} (acceptance-run placeholder), \fullrun{...} (first full run,
+% history), \todo{...} (author action). Set \draftmarksfalse for a submission build: every
+% remaining \acc and \todo then becomes a LaTeX error, so none can slip into a final PDF.
+\documentclass[11pt,letterpaper]{article}
+
+% ------------------------------------------------------------------------- engine and fonts
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}% < and > in DOIs (kadiyala1997numerical) need T1, not OT1
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+  \usepackage{textcomp}
+\else
+  % XeTeX (tectonic) or LuaTeX: Unicode-encoded Latin Modern (TU encoding), which also prints
+  % < and > correctly; T1 is an 8-bit encoding for pdfTeX only.
+  \usepackage{fontspec}
+\fi
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+
+% ------------------------------------------------------------------------- mathematics
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{bm}
+
+% ------------------------------------------------------------------------- floats, tables, lists
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage[dvipsnames]{xcolor}
+
+% ------------------------------------------------------------------------- bibliography and links
+\usepackage[authoryear,round]{natbib}
+\usepackage[obeyspaces,spaces]{url}% \code keeps the spaces it is given
+\usepackage[hidelinks]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}% after hyperref
+% unique hyperref anchors for the lines of several algorithmic blocks
+\makeatletter
+\providecommand*{\theHALG@line}{}
+\renewcommand*{\theHALG@line}{\thealgorithm.\arabic{ALG@line}}
+\makeatother
+
+\graphicspath{{figures/}}
+% main-text float placement: allow taller top floats and float pages, so that the large tables
+% (Tab7, Tab12, Tab13) stay near their sections instead of collecting at the \FloatBarrier
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.5}
+\renewcommand{\textfraction}{0.12}
+\renewcommand{\floatpagefraction}{0.75}
+\setcounter{topnumber}{3}
+\setcounter{totalnumber}{4}
+\setlength{\emergencystretch}{2em}% long code identifiers and file paths in running text
+
+% ------------------------------------------------------------------------- draft marks
+\newif\ifdraftmarks
+\draftmarkstrue % \draftmarksfalse for the submission build
+
+\definecolor{accmark}{RGB}{200,30,30}
+\definecolor{todomark}{RGB}{190,90,0}
+\definecolor{fullrunmark}{RGB}{30,90,160}
+\definecolor{accfilled}{RGB}{0,120,60}% \acc values filled from the acceptance JSON (draft only)
+
+% \pkg{name}: a software package (rai-bvar, stochvol, ...).
+\DeclareRobustCommand{\pkg}[1]{\textsf{#1}}
+
+% \code{identifier}: code identifiers, file paths and pytest node IDs, printed as typed.
+% Underscores may be written plain (cond_mean) or escaped (cond\_mean); \#, \%, \&, \$, \{ and \}
+% are unescaped as well. Brackets, quotes, '::' and '=' print as typed. Works in text and in math
+% mode, in captions and footnotes. Line breaks are allowed after '_', '.', '/', ':', ',', '=', ']',
+% ')' and '-' so long names do not run into the margin.
+\makeatletter
+\DeclareUrlCommand\rb@codeurl{\urlstyle{tt}%
+  \def\UrlBreaks{\do\_\do\.\do\/\do\:\do\,\do\=\do\]\do\)\do\-}}
+\DeclareUrlCommand\rb@accurl{\urlstyle{tt}%
+  \def\UrlBreaks{\do\.\do\[\do\]\do\,\do\=\do\(\do\)\do\_\do\-}}
+\ExplSyntaxOn
+\str_new:N \l__rb_code_str
+% detokenize, then undo LaTeX escapes of the special characters
+\cs_new_protected:Npn \__rb_clean:n #1
+  {
+    \str_set:Nn \l__rb_code_str {#1}
+    \str_replace_all:Nnn \l__rb_code_str { \_ } { _ }
+    \exp_args:NNnV \str_replace_all:Nnn \l__rb_code_str { \# } \c_hash_str
+    \exp_args:NNnV \str_replace_all:Nnn \l__rb_code_str { \% } \c_percent_str
+    \exp_args:NNnV \str_replace_all:Nnn \l__rb_code_str { \& } \c_ampersand_str
+    \exp_args:NNnV \str_replace_all:Nnn \l__rb_code_str { \$ } \c_dollar_str
+    \exp_args:NNnV \str_replace_all:Nnn \l__rb_code_str { \{ } \c_left_brace_str
+    \exp_args:NNnV \str_replace_all:Nnn \l__rb_code_str { \} } \c_right_brace_str
+  }
+\cs_new_protected:Npn \rb@code #1
+  { \__rb_clean:n {#1} \exp_args:NV \rb@codeurl \l__rb_code_str }
+\cs_new_protected:Npn \rb@acckey #1
+  { \__rb_clean:n {#1} \exp_args:NV \rb@accurl \l__rb_code_str }
+% filled acceptance values: \accdefine{key}{value} (written by fill_acceptance.py) stores the value
+% under the same cleaned key that \acc looks up
+\cs_new_protected:Npn \rb@accdefine #1#2
+  {
+    \__rb_clean:n {#1}
+    \cs_gset:cpn { rb@accval@ \l__rb_code_str } {#2}
+  }
+\cs_new_protected:Npn \rb@accifdef #1#2#3
+  {
+    \__rb_clean:n {#1}
+    \cs_if_exist:cTF { rb@accval@ \l__rb_code_str }
+      { \exp_args:Nc #2 { rb@accval@ \l__rb_code_str } }
+      { #3 }
+  }
+\ExplSyntaxOff
+\DeclareRobustCommand{\code}[1]{\ifmmode\text{\rb@code{#1}}\else\rb@code{#1}\fi}
+
+% \acc{json.key.path}: a number that will be read from
+% benchmarks/reports/clark_ravazzolo_acceptance.json (the acceptance run). The key path follows
+% the grammar in the header of sections/11_replication.tex. Never write the number itself.
+% If acceptance_values.tex (written by fill_acceptance.py from that JSON) defines the key, \acc
+% prints the value (green in a draft); otherwise it prints the red placeholder.
+\DeclareRobustCommand{\acc}[1]{%
+  \rb@accifdef{#1}{\rb@accfilled}{%
+    \ifdraftmarks
+      \ifmmode\text{\rb@acc{#1}}\else\rb@acc{#1}\fi
+    \else
+      \PackageError{rai-bvar}{\string\acc{} placeholder left in a submission build}{Run
+        fill_acceptance.py on the acceptance JSON.}%
+    \fi}}
+\newcommand{\rb@acc}[1]{{\color{accmark}\footnotesize[ACC:\hskip 0.2em plus 0.1em\relax\rb@acckey{#1}]}}% glue: a line may break after ACC:
+\newcommand{\rb@accfilled}[1]{\ifmmode\text{\rb@accshow{#1}}\else\rb@accshow{#1}\fi}
+\newcommand{\rb@accshow}[1]{\ifdraftmarks{\color{accfilled}#1}\else#1\fi}
+\newcommand{\accdefine}[2]{\rb@accdefine{#1}{#2}}
+\newcommand{\rb@accsrc}{}
+\newcommand{\accsource}[1]{\gdef\rb@accsrc{#1}}
+
+% \fullrun{number}: a number of the first full run (report at commit 551f181, path-conditioned
+% estimator). History only; set in a muted colour in drafts and in plain text otherwise.
+\DeclareRobustCommand{\fullrun}[1]{%
+  \ifdraftmarks{\color{fullrunmark}#1}\else#1\fi}
+
+% \todo{text}: something only the author can decide or verify.
+\DeclareRobustCommand{\todo}[1]{%
+  \ifdraftmarks
+    \ifmmode\text{\rb@todo{#1}}\else\rb@todo{#1}\fi
+  \else
+    \PackageError{rai-bvar}{\string\todo{} left in a submission build}{Resolve it.}%
+  \fi}
+\newcommand{\rb@todo}[1]{{\color{todomark}\footnotesize[\textbf{TODO:} #1]}}
+
+% ------------------------------------------------------------------------- acceptance values
+% Written by fill_acceptance.py; absent until the acceptance JSON exists. The sources keep their
+% \acc{} placeholders either way.
+\InputIfFileExists{acceptance_values.tex}%
+  {\typeout{rai-bvar: acceptance values read from acceptance_values.tex}}%
+  {\typeout{rai-bvar: no acceptance_values.tex; \string\acc{} prints placeholders}}
+
+% ------------------------------------------------------------------------- section inputs
+% \rbinput{candidates}{fallback title}{fallback label}: \input the first file
+% sections/<candidate>.tex that exists (candidates are a comma-separated list without spaces);
+% otherwise print a placeholder section with the fallback title and label, so cross-references
+% to it still resolve. Each choice is written to the log ("rai-bvar: input ..." or
+% "rai-bvar: MISSING ..."), which `make check` reads.
+\newcommand{\rb@found}{}
+\newcommand{\rbinput}[3]{%
+  \def\rb@found{}%
+  \@for\rb@cand:=#1\do{%
+    \ifx\rb@found\@empty
+      \IfFileExists{sections/\rb@cand.tex}{\xdef\rb@found{\rb@cand}}{}%
+    \fi}%
+  \ifx\rb@found\@empty
+    \expandafter\@firstoftwo
+  \else
+    \expandafter\@secondoftwo
+  \fi
+  {\typeout{rai-bvar: MISSING sections/{#1}.tex}%
+   \section{#2}\label{#3}%
+   \rb@missing{#1}}%
+  {\typeout{rai-bvar: input sections/\rb@found.tex}%
+   \input{sections/\rb@found}}}
+\newcommand{\rb@missing}[1]{%
+  \ifdraftmarks
+    \begin{center}\fbox{\parbox{0.85\linewidth}{\centering\color{accmark}
+      This section has not been written yet (expected one of
+      \texttt{\detokenize{#1}} in \texttt{sections/}).}}\end{center}%
+  \else
+    \PackageError{rai-bvar}{a section file is missing: \detokenize{#1}}{}%
+  \fi}
+\makeatother
+
+% ------------------------------------------------------------------------- environments and names
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}[proposition]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+% Listings font. Under XeTeX/LuaTeX: DejaVu Sans Mono (from the TeX distribution, loaded by file
+% name), which has the Greek letters and symbols of the package's printed output (e.g.
+% "ΔLPD=+14.45"); listings cannot apply `literate` to characters above U+00FF there. Under pdfTeX:
+% \ttfamily, with the `literate` replacements below.
+\ifPDFTeX
+  \newcommand{\lstfontfamily}{\ttfamily}
+\else
+  \newfontfamily\lstfontfamily{DejaVuSansMono.ttf}[Scale=MatchLowercase,
+    BoldFont=DejaVuSansMono-Bold.ttf, ItalicFont=DejaVuSansMono-Oblique.ttf,
+    BoldItalicFont=DejaVuSansMono-BoldOblique.ttf]
+\fi
+
+\renewcommand{\lstlistingname}{Listing}
+\crefname{lstlisting}{Listing}{Listings}
+\Crefname{lstlisting}{Listing}{Listings}
+\crefname{algorithm}{Algorithm}{Algorithms}
+\crefname{proposition}{Proposition}{Propositions}
+\crefname{appendix}{Appendix}{Appendices}
+\algrenewcommand\algorithmicrequire{\textbf{Input:}}
+\algrenewcommand\algorithmicensure{\textbf{Output:}}
+
+\lstset{
+  basicstyle=\lstfontfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  breakatwhitespace=false,
+  postbreak=\mbox{\textcolor{gray}{$\hookrightarrow$}\space},
+  showstringspaces=false,
+  frame=lines,
+  framesep=4pt,
+  xleftmargin=0pt,
+  numbers=none,
+  tabsize=4,
+  upquote=true,
+  extendedchars=true,
+  keywordstyle=\color{MidnightBlue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{OliveGreen},
+  % pdfTeX only (see \lstfontfamily): map the non-ASCII characters of the package's printed
+  % output to LaTeX.
+  literate=
+    {Δ}{{$\Delta$}}1 {δ}{{$\delta$}}1 {σ}{{$\sigma$}}1 {Σ}{{$\Sigma$}}1 {λ}{{$\lambda$}}1
+    {Λ}{{$\Lambda$}}1 {μ}{{$\mu$}}1 {φ}{{$\phi$}}1 {ν}{{$\nu$}}1 {τ}{{$\tau$}}1
+    {θ}{{$\theta$}}1 {κ}{{$\kappa$}}1 {ι}{{$\iota$}}1 {γ}{{$\gamma$}}1 {ε}{{$\varepsilon$}}1
+    {η}{{$\eta$}}1 {ψ}{{$\psi$}}1 {π}{{$\pi$}}1 {α}{{$\alpha$}}1 {β}{{$\beta$}}1
+    {χ}{{$\chi$}}1 {ρ}{{$\rho$}}1 {ω}{{$\omega$}}1 {Φ}{{$\Phi$}}1 {Ψ}{{$\Psi$}}1
+    {×}{{$\times$}}1 {±}{{$\pm$}}1 {−}{{$-$}}1 {≥}{{$\geq$}}1 {≤}{{$\leq$}}1
+    {≈}{{$\approx$}}1 {≠}{{$\neq$}}1 {→}{{$\to$}}1 {←}{{$\leftarrow$}}1 {⇔}{{$\Leftrightarrow$}}1
+    {∞}{{$\infty$}}1 {√}{{$\surd$}}1 {·}{{$\cdot$}}1 {∈}{{$\in$}}1 {≪}{{$\ll$}}1
+    {—}{{---}}1 {–}{{--}}1 {…}{{\ldots}}1 {’}{{'}}1 {‘}{{`}}1 {“}{{``}}1 {”}{{''}}1
+    {§}{{\S}}1 {é}{{\'e}}1 {ö}{{\"o}}1 {ü}{{\"u}}1 {ź}{{\'z}}1 {ł}{{\l}}1,
+}
+
+% ------------------------------------------------------------------------- title
+\title{\texorpdfstring{\pkg{rai-bvar}}{rai-bvar}: Composable Bayesian VARs with Stochastic
+  Volatility, Validated Samplers and a Fair Out-of-Sample Verdict Engine in Python}
+\author{Yigit Okar\\[2pt]
+  {\small\todo{affiliation and contact address}}}
+\date{\ifdraftmarks Draft of \today\else\today\fi}
+
+% bookmarks (PDF strings): plain text for the markup macros
+\pdfstringdefDisableCommands{%
+  \def\pkg#1{#1}%
+  \def\code#1{\detokenize{#1}}%
+  \def\acc#1{[ACC]}%
+  \def\todo#1{}%
+  \def\fullrun#1{#1}%
+}
+
+\hypersetup{
+  pdftitle={rai-bvar: Composable Bayesian VARs with Stochastic Volatility, Validated Samplers and
+    a Fair Out-of-Sample Verdict Engine in Python},
+  pdfauthor={Yigit Okar},
+  pdfkeywords={Bayesian vector autoregression, stochastic volatility, Gibbs sampling, JAX,
+    density forecasting, sampler validation, Python},
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  \begingroup
+  % the abstract file holds the body only; a nested abstract environment, if it has one, is a
+  % no-op (the redefinition is undone at \endgroup, before the outer \end{abstract})
+  \renewenvironment{abstract}{}{}%
+  \IfFileExists{sections/00_abstract.tex}%
+    {\typeout{rai-bvar: input sections/00_abstract.tex}\input{sections/00_abstract}}%
+    {\typeout{rai-bvar: MISSING sections/{00_abstract}.tex}%
+     \todo{abstract not written yet (sections/00\_abstract.tex)}}%
+  \endgroup
+\end{abstract}
+
+\medskip
+\noindent\textbf{Keywords:} Bayesian vector autoregression; stochastic volatility; Gibbs
+sampling; density forecasts; sampler validation; reproducibility; Python; JAX.
+
+% Main text (29.5 pages planned; OUTLINE.md §1--§13). One file per section; a missing file prints a
+% red placeholder section with the fallback title and label below.
+\rbinput{01_introduction}{Introduction}{sec:intro}
+\rbinput{02_related}{Related software, numerical oracles and licensing}{sec:related}
+\rbinput{03_framework}{The model framework}{sec:framework}
+\rbinput{04_architecture}{Software architecture}{sec:architecture}
+\rbinput{05_samplers}{The MCMC samplers}{sec:samplers}
+\rbinput{06_evaluation}{Forecasts, the predictive contract and the verdict engine}{sec:forecasts}
+\rbinput{07_walkthrough}{Using \texorpdfstring{\pkg{rai-bvar}}{rai-bvar}: a walk-through}%
+  {sec:walkthrough}
+\rbinput{08_validation}{Validating the samplers}{sec:validation}
+\rbinput{09_robustness}{Numerical robustness: what the validation and replication runs found}%
+  {sec:robustness}
+\rbinput{10_performance}{Performance}{sec:performance}
+\rbinput{11_replication}{Illustration: a pre-registered replication of Clark and Ravazzolo (2015)}%
+  {sec:replication}
+\rbinput{12_limitations}{Limitations}{sec:limitations}
+\rbinput{13_conclusion}{Conclusion}{sec:conclusion}
+
+% Appendices A--J (OUTLINE.md §15; Appendix K, the author's TODO list, is not compiled).
+\FloatBarrier
+\clearpage
+\appendix
+\rbinput{appendix}{Appendices}{app:main}
+
+\FloatBarrier
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

@@ -1,0 +1,66 @@
+\section{Numerical robustness: what the validation and replication runs found}\label{sec:robustness}
+
+% Evidence status follows OUTLINE.md §0.5. Source and test paths are in the main repository
+% (branch phase-2-cr-acceptance); commits are cited by hash. Detail goes to TabE1 and FigE1 (App. E).
+
+\subsection{The pattern}\label{sec:robustness-pattern}
+
+Three failures surfaced in the Phase~2 validation and replication runs, none from a user report: two float64 failures, F1 and F2, at states that are legitimate under the model, found by a Geweke test with a heavy-tailed test prior and by a replication of 24 orderings at 106 origins, and F3, a bug in the failure-reporting path. % [R] dossier 05 §2.1, §2.6; issue #3 (item 7); benchmarks/clark_ravazzolo.py at 8a622c5 (config "full": ordering_step 1, 2 x 25 x 106 ordering-stage fits)
+In F1 and F2 the information was lost when the matrix was assembled, not when it was factored, so both fixes factor the data rather than the assembled matrix.
+Because failures are values and are never jittered (\cref{sec:arch-mcmc}), both were reported rather than masked; \cref{tab:TabE1} summarises F1--F3. % [V] tests/mcmc/runner/test_failures.py; DESIGN §5.7 (D-18)
+
+\subsection{F1: a Geweke chain in the tail of the test prior}\label{sec:robustness-f1}
+
+The weekly G-full Geweke test \citep{geweke2004getting} of \code{reduced_sv} failed on chain 3214 of 4000 at sweep 194 with status 1003 (block \code{EQ_CONTEMP}, equation~2), with equation~0 at log-variances $h \approx 31$--$37$ and $|y| \approx 2\times10^{8}$. % [R] commit 3d3f51b; tests/mcmc/blocks/test_contemp_lstsq.py l.4 (2e8, not the 1e8 of NOTES 10)
+The contemporaneous precision of equation~2, $K_a = V_a^{-1} + Z^\top W Z$ (prior covariance $V_a$, regressors $Z$, inverse variances $W$), had exact eigenvalues 14.8 and $1.9\times10^{17}$; forming $Z^\top W Z$ lost the small one and the Cholesky pivot was zero, although the conditional is benign, with standard deviations 0.20 and 0.16. % [R] commit 3d3f51b; NOTES 10 (60-digit arithmetic; cond 1.3e16)
+The fix draws $a = R^{-1}(Q^\top\tilde r + z)$ from a Householder QR factorisation $[V_a^{-1/2};\, W^{1/2}Z] = QR$ with $\operatorname{diag}(R) > 0$, for the whitened right-hand side $\tilde r$ and injected noise $z$: $R$ is the upper Cholesky factor of $K_a$, so the noise map is unchanged, but $K_a$ is never formed; the factorisation works with the stacked matrix, whose condition number $\operatorname{cond}(K_a)^{1/2}$ is never squared. % [V] src/rai_bvar/engines/mcmc/linalg.py::lstsq_draw (docstring: "the condition number of A (√cond(K)) is never squared")
+Tests cover agreement with the Cholesky draw to rounding, a synthetic extreme-scale state with $\operatorname{cond}(K_a) > 10^{15}$ checked against a 60-digit exact conditional, and a replay of chain 3214 in which the production step now succeeds. % [V] tests/mcmc/blocks/test_contemp_lstsq.py::test_lstsq_draw_equals_the_cholesky_draw (20 states x 5 compositions), ::test_extreme_scale_state (QR side only; the Cholesky path is not run there), ::test_g_full_reduced_sv_failing_chain_is_fixed (slow: old draw status 1003, production sweep finite)
+% Omitted per OUTLINE risk 18 (recorded only, commit 3d3f51b): at the real state the QR draw is within 1.6e-8 sd of the exact mean. Goes to TabE1.
+Narrowing the test prior was rejected, because it would have hidden a real float64 weakness. % [R] commit 3d3f51b
+\todo{TODO 23: re-run the chain-3214 replay on Linux.}
+QR in place of the normal equations is textbook \citep{higham2002accuracy,bjorck1996numerical}; only the application is ours.
+
+\subsection[F2: the random-walk SV draw at a tiny sigma]{F2: the random-walk SV draw at $\sigma \approx 5\times10^{-9}$}\label{sec:robustness-f2}
+
+The first full Clark--Ravazzolo attempt (code at 8a622c5) aborted with status 2001 (block \code{EQ_VOL}, equation~0) in an SV(rw) reduced-form fit at origin 1987Q2, burn-in sweep 318, with GDP's volatility scale at $\sigma = 4.98\times10^{-9}$. % [R] commit f60d736; NOTES 17 (ordering GDP, TBILL, INFL, UR; chain 0)
+The state is valid: the non-centred prior $\sigma \sim N(0, B_\sigma)$, equivalently $\sigma^2 \sim B_\sigma\chi^2_1$, has positive density at $\sigma = 0$, and the same sweep's non-centred move would have returned $\sigma$ to 0.031. % [R] commit f60d736
+In the scaled AWOL system $\tilde Q = \sigma^2 Q = \mathrm{Lap}_w + \operatorname{diag}(\delta)$, the terms $\delta_t = \sigma^2/v_{s_t} \approx 10^{-17}$ (mixture-component variances $v_{s_t}$, notation of \cref{sec:samp-rw}) fell below the floating-point spacing at the Laplacian's diagonal entries (2), so the assembled matrix was the singular path Laplacian and the level pivot, $\approx \sigma^2(1/V_0 + \sum_t 1/v_{s_t}) \approx 10^{-15}$, came out zero. % [R] commit f60d736 ("sigma^2 D ~ 1e-17", D = 1/v at observed t, test_sv_core.py l.305); DESIGN §3.7 (RW path)
+The excess-pivot recursion of \cref{sec:samp-rw} factors the same matrix without assembling it, with non-negative terms only, so nothing cancels. % [V] src/rai_bvar/engines/mcmc/linalg.py::laplacian_precision_sample; tests/mcmc/blocks/test_sv_core.py::test_awol_rw_laplacian_is_the_rw_system
+At a synthetic test state with $\sigma = 5\times10^{-9}$ and 88 periods, it reproduces the smallest pivot, $\log|\tilde Q|$ and $h$ of a 60-digit reference to relative errors of $10^{-12}$ or less on an Apple M5 Max. % [V] test_sv_core.py::test_rw_awol_at_a_tiny_sigma (problem(4, T_eff=88, T_pad=96, rw=True, sigma=5e-9): 88 periods, 2 of them masked by n_mask=2; pivot rel 1e-12, logdet rel 1e-13, h = sigma x rtol 1e-12), ::test_rw_step_at_a_tiny_sigma_is_ok
+At the same test state, not the production fit, the assembled path gives a pivot of $2.22\times10^{-16}$ (exact $5.308\times10^{-15}$) and $h_0 = -73.90$ (exact $-3.024$); \cref{tab:TabE1} and \cref{fig:FigE1} recompute both paths. % [R] dossier 05 §2.3 (scratch computation R3 at the test_rw_awol_at_a_tiny_sigma state, reproduced by its fact-check; logdet -36.04 vs -32.8695 goes to TabE1); commit f60d736 ("At sigma = 5e-9 (T = 88) ... pivot 2.2e-16 vs exact 5.3e-15 and the level of h off by 70")
+\todo{TODO 23: re-run the tiny-sigma tests on Linux and commit a test asserting the old-path values; until then nothing is said about whether pre-fix runs were affected.}
+The random-walk integrated likelihood had the same flaw at $\sigma = 5\times10^{-9}$, 17534.8 instead of $-1650.8$, and now shares the factorisation. % [R] commit 4fc0162 (values); [V] test_sv_core.py::test_rw_integrated_likelihood_at_a_tiny_sigma
+% Omitted per OUTLINE risk 18 (recorded only, commit f60d736, one machine): 639 of 656 arrays bitwise identical (every non-RW composition). Goes to TabE1.
+We read the recursion as an instance of subtraction-free elimination for diagonally dominant M-matrices \citep{grassmann1985regenerative,alfa2002accurate,ye2008computing} inside a Gaussian Markov random field sampler \citep{rue2001fast}; we claim the application, not the algorithm.
+\todo{TODO 11: prior-art check of the recursion against GTH, Alfa--Xue--Ye, Ye (2008) and GMRF samplers.}
+The fix removes the crash, not the slow mixing near $\sigma = 0$ (\cref{sec:replication-first-run,sec:limitations}). % [R] NOTES 17
+
+\subsection{F3: the replay of F2 crashed}\label{sec:robustness-f3}
+
+The deterministic replay of F2 itself raised \code{TracerArrayConversionError}, because it ran the production CCCM step on host arrays, so F2's diagnostics were lost. % [R] commit 93f2bcd
+Commit 93f2bcd fixes this and tests the replay with the production program instead of toy kernels. % [V] tests/mcmc/runner/test_failures.py::test_replay_of_an_equation_failure_after_the_production_cccm_step; [R] "fails before the fix" (commit 93f2bcd)
+
+\subsection{SOC/SUR dummy rows on the MCMC engine}\label{sec:robustness-dummies}
+
+In Mode~II the dummy rows are weighted by $1/\lambda_i$, so the $\lambda_i$ step must count them; a hand-injected omission was caught by the analytic twin (\cref{sec:validation-twins}) but not by the dense oracles of the coefficient step. % [R] NOTES 12 (the injection is not committed)
+\todo{TODO 24: make the injection reproducible before quoting how many quantiles it moves.}
+For exact Geweke and SBC references, $\lambda_i \mid d$ is inverse gamma under Mode~II, and the coefficients are then conditioned on the rows by Matheron's rule \citep{journel1978mining,chiles2012geostatistics,wilson2020efficiently}. % [V] NOTES 13; src/rai_bvar/validation/dummies.py docstring; tests/validation/test_reference_dummies.py::test_mode2_log_density_and_sampler
+Under \code{iw_equivalent}, $p(d \mid \lambda) = N(r; 0, S(\lambda))$ with $S(\lambda) = S_0 + \lambda UU^\top$ is not of that form, but the base prior $\mathrm{IG}(c, C)$ is an exact rejection envelope: the acceptance probability $g(\lambda) = (|S_0|/|S(\lambda)|)^{1/2} \exp\{-\frac12(q(\lambda) - q_\infty)\}$, with $q(\lambda) = r^\top S(\lambda)^{-1} r$ and $q_\infty$ its limit as $\lambda \to \infty$, is at most one because $S(\lambda) \succeq S_0$ grows with $\lambda$ (\cref{app:derivations}). % [V] NOTES 13; dummies.py docstring (q_inf = GLS residual)
+The $\lambda$ draws pass a Kolmogorov--Smirnov test against quadrature, and row 205 passes Geweke (maximum $|z|$ 2.24 in G-small, 2.76 in G-full) and SBC (minimum $p$ 0.018). % KS: [V] tests/validation/test_reference_dummies.py::test_iw_equivalent_rejection_sampler. Row 205 statistics (2.24, 2.76, 0.018): [R] NOTES 13 (no committed run record) + [REL] re-record on the release commit; row 205 = structural_iw_equivalent_dummies (src/rai_bvar/validation/joint.py)
+The $O(q^2)$ eigen fast path survives the dense prior precision that the rows induce. % [V] tests/mcmc/blocks/test_dummies.py::test_dense_eigen_path_with_dummies_equals_cholesky_const_test_prior, ::test_dense_eigen_path_with_dummies_equals_cholesky_const_minnesota (timing App. E only)
+
+\subsection{Notes for other implementations}\label{sec:robustness-notes}
+
+The following generic checks describe no particular package.
+(i)~Implementations that form a weighted Gram for a Gaussian conditional draw should check regressors whose scales differ by many orders of magnitude (F1).
+(ii)~Implementations that solve the random-walk SV system in scaled form should check $\sigma \to 0$ (F2).
+(iii)~Implementations of a non-centred sign fold should check that it flips $(\sigma, \tilde h)$ jointly, the map under which the posterior is invariant \citep{fruhwirth2010stochastic}, not $\sigma \mapsto |\sigma|$ alone (mutant M6, \cref{sec:validation-mutation}).
+(iv)~Implementations that score multi-step forecasts conditionally on simulated paths should inspect the weight ESS for tail outcomes (\cref{sec:eval-tail}).
+% No version-specific observation about any package appears before OUTLINE TODO 13.
+
+\subsection{Platform caveats}\label{sec:robustness-platform}
+
+On the macOS development machine (NumPy and SciPy on Accelerate), \code{slogdet} and \code{det} warned of division by zero on well-conditioned positive-definite tridiagonals, so the test oracle now uses the Cholesky factor. % [R] commit dd8244e (no minimal reproducer committed)
+A Phase~1 empirical-Bayes test of the analytic engine has also repeatedly crashed the interpreter there, for unknown reasons. % [R] GitHub issue #3; dossier 05 §5.7 (re-runs 5/5 and 3/3 ended abnormally; analytic engine only)
+We attribute neither to a particular library; Linux CI is the reference platform.
+\todo{Dossier 05 Q9: run the n = 50 EB test on Linux and record the result.}
