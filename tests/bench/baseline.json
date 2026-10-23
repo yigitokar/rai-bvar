@@ -1,8 +1,8 @@
 {
  "benchmark": "BENCH-P2",
- "reference": false,
- "label": "x86 cloud, loaded (load avg ~10 on 4 cores), provisional, not the reference",
- "note": "PROVISIONAL, not the DESIGN \u00a710.1 reference machine (an idle Apple M-series or x86 laptop): a regression reference for the same machine class only; the 120 s target is not asserted against it. Replace it with the reference command in benchmarks/phase2_perf.py's docstring.",
+ "reference": true,
+ "label": "Apple M5 Max (18 cores, 64 GB), macOS, plugged in, desktop apps open (load ~2), reference",
+ "note": "Reference-machine baseline (DESIGN \u00a710.1): the 120 s target is asserted here.",
  "tolerance": {
   "time": 0.2,
   "ess_per_s": 0.3
@@ -21,49 +21,44 @@
   "sweep_reps": 3
  },
  "machine": {
-  "date": "2026-10-23T01:07:58",
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "simd": [
-   "avx",
-   "avx2",
-   "avx512f",
-   "fma"
-  ],
-  "physical_cores": 4,
-  "logical_cpus": 4,
-  "mem_bytes": 16872808448,
-  "platform": "Linux-6.18.44-fc-v140-x86_64-with-glibc2.39",
-  "machine": "x86_64",
-  "python": "3.13.16",
+  "date": "2026-10-22T21:33:01",
+  "cpu": "Apple M5 Max",
+  "physical_cores": "18",
+  "perf_cores": "6",
+  "logical_cpus": 18,
+  "mem_bytes": null,
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.13",
   "numpy": "2.5.4",
   "xla_flags": "",
   "loadavg": [
-   11.7353515625,
-   11.09033203125,
-   10.0478515625
+   6.259765625,
+   4.66162109375,
+   3.55615234375
   ],
-  "commit": "1093932",
+  "commit": "deb3929",
   "jax": "0.12.0.1",
   "jaxlib": "0.12.0.1"
  },
  "summary": {
   "repeats": 3,
-  "compile_cold_s": 29.803504705429077,
-  "compile_warm_s": 3.9371049404144287,
-  "wall_cold_s": 310.96789127400007,
-  "wall_warm_s": 284.81355025799985,
-  "run_s": 281.15116516869466,
-  "post_runner_s": 14.597025117999692,
-  "runner_ms_per_sweep": 24.407991269322977,
-  "sweep_ms_min3x1000": 21.294099709999955,
-  "peak_rss_mb": 1972.45703125,
+  "compile_cold_s": 3.4626247882843018,
+  "compile_warm_s": 0.9978816509246826,
+  "wall_cold_s": 52.276139084016904,
+  "wall_warm_s": 49.57344016712159,
+  "run_s": 48.74471024854574,
+  "post_runner_s": 4.01774304243736,
+  "runner_ms_per_sweep": 4.072379494190682,
+  "sweep_ms_min3x1000": 3.8953950834693387,
+  "peak_rss_mb": 3043.4140625,
   "loadavg_1min": [
-   5.8037109375,
-   7.42626953125,
-   8.91064453125,
-   10.4990234375,
-   6.541015625,
-   11.15966796875
+   2.36181640625,
+   5.3837890625,
+   6.1181640625,
+   4.6513671875,
+   5.07958984375,
+   4.66455078125
   ],
   "converged": [
    false,
@@ -75,56 +70,56 @@
   ],
   "ess": {
    "loglik": {
-    "ess_min": 1693.0097141346212,
-    "ess_per_s_min": 5.9442737629617675,
-    "ess_per_s_median": 5.9442737629617675
+    "ess_min": 1561.9927032911717,
+    "ess_per_s_min": 31.508660646212856,
+    "ess_per_s_median": 31.508660646212856
    },
    "h_T": {
-    "ess_min": 2168.839514693715,
-    "ess_per_s_min": 7.614944979721156,
-    "ess_per_s_median": 25.166572613133354
+    "ess_min": 1870.0660813321615,
+    "ess_per_s_min": 37.72314519685964,
+    "ess_per_s_median": 134.60623130504277
    },
    "mu": {
-    "ess_min": 4400.156375145207,
-    "ess_per_s_min": 15.449252225392023,
-    "ess_per_s_median": 29.10755584228489
+    "ess_min": 3834.777273010354,
+    "ess_per_s_min": 77.35548027497352,
+    "ess_per_s_median": 165.866611997871
    },
    "sigma": {
-    "ess_min": 446.41460904415806,
-    "ess_per_s_min": 1.5673924525001393,
-    "ess_per_s_median": 2.2888118055712376
+    "ess_min": 504.31544567665367,
+    "ess_per_s_min": 10.173097609859422,
+    "ess_per_s_median": 13.70558931634547
    },
    "phi": {
-    "ess_min": 566.8146274901752,
-    "ess_per_s_min": 1.9901252134132073,
-    "ess_per_s_median": 3.0116941566740683
+    "ess_min": 554.0734536320554,
+    "ess_per_s_min": 11.176820728280452,
+    "ess_per_s_median": 17.273915417726275
    },
    "B_own1": {
-    "ess_min": 20983.26020602728,
-    "ess_per_s_min": 73.67367243243689,
-    "ess_per_s_median": 89.71431217216062
+    "ess_min": 19997.18426677724,
+    "ess_per_s_min": 403.3850424615054,
+    "ess_per_s_median": 494.4719064313379
    },
    "primary": {
-    "ess_min": 446.41460904415806,
-    "ess_per_s_min": 1.5673924525001393,
-    "ess_per_s_median": 19.559530209267677
+    "ess_min": 504.31544567665367,
+    "ess_per_s_min": 10.173097609859422,
+    "ess_per_s_median": 115.24021159170337
    },
    "cross_lag": {
     "quantity": "B[y1.L1, y0]",
-    "ess": 8754.989579267605,
-    "ess_per_s": 30.7393716743352
+    "ess": 8968.065191080399,
+    "ess_per_s": 180.90463685488294
    }
   },
-  "pass_120s_cold": false,
-  "pass_120s_warm": false
+  "pass_120s_cold": true,
+  "pass_120s_warm": true
  },
  "kernels": {
   "gram_packed": {
-   "ms_min": 2.821078000124544,
-   "ms_median": 4.523559000517707,
+   "ms_min": 0.46683289110660553,
+   "ms_median": 0.4882081411778927,
    "reps": 50,
    "per_call_units": 1,
-   "compile_s": 0.1219746810002107,
+   "compile_s": 0.018581208074465394,
    "cost": {
     "flops": 258560000.0,
     "bytes accessed": 26036800.0
@@ -136,11 +131,11 @@
    }
   },
   "gram_batched": {
-   "ms_min": 6.8914559997210745,
-   "ms_median": 12.760231999891403,
+   "ms_min": 1.0496671311557293,
+   "ms_median": 1.1682501062750816,
    "reps": 50,
    "per_call_units": 1,
-   "compile_s": 0.10360643500007427,
+   "compile_s": 0.016921332804486156,
    "cost": {
     "flops": 516980096.0,
     "bytes accessed": 60876800.0
@@ -152,11 +147,11 @@
    }
   },
   "precision_draw": {
-   "ms_min": 5.0381359997118125,
-   "ms_median": 6.494702999589208,
+   "ms_min": 1.167207956314087,
+   "ms_median": 1.1933750938624144,
    "reps": 50,
    "per_call_units": 1,
-   "compile_s": 0.30442917900018074,
+   "compile_s": 0.05281283403746784,
    "cost": {
     "flops": 4928577.0,
     "transcendentals": 8000.0,
@@ -169,11 +164,11 @@
    }
   },
   "sv_indicators": {
-   "ms_min": 1.1865340002259472,
-   "ms_median": 2.172358000279928,
+   "ms_min": 0.2697499003261328,
+   "ms_median": 0.2952499780803919,
    "reps": 50,
    "per_call_units": 1,
-   "compile_s": 0.1454453910000666,
+   "compile_s": 0.0321512499358505,
    "cost": {
     "flops": 6016000.0,
     "transcendentals": 281600.0,
@@ -186,11 +181,11 @@
    }
   },
   "sv_awol": {
-   "ms_min": 0.41582699941500323,
-   "ms_median": 0.544380000064848,
+   "ms_min": 0.14091702178120613,
+   "ms_median": 0.14862511307001114,
    "reps": 50,
    "per_call_units": 1,
-   "compile_s": 0.25730215099974885,
+   "compile_s": 0.07915587490424514,
    "cost": {
     "flops": 515446.0,
     "transcendentals": 80.0,
@@ -203,11 +198,11 @@
    }
   },
   "sv_exact": {
-   "ms_min": 1.0054499998659594,
-   "ms_median": 1.3841209993188386,
+   "ms_min": 0.3630418796092272,
+   "ms_median": 0.38370792753994465,
    "reps": 50,
    "per_call_units": 1,
-   "compile_s": 0.157125695999639,
+   "compile_s": 0.027844083961099386,
    "cost": {
     "flops": 2303920.0,
     "transcendentals": 332800.0,
@@ -220,11 +215,11 @@
    }
   },
   "sv_core": {
-   "ms_min": 5.2165619999868795,
-   "ms_median": 6.504318999759562,
+   "ms_min": 1.8018749542534351,
+   "ms_median": 1.8877079710364342,
    "reps": 50,
    "per_call_units": 1,
-   "compile_s": 3.8121654789993045,
+   "compile_s": 0.5202152908314019,
    "cost": {
     "flops": 26167360.0,
     "transcendentals": 1028640.0,
@@ -237,11 +232,11 @@
    }
   },
   "sweep": {
-   "ms_min": 23.02660668000499,
-   "ms_median": 24.037236849999317,
+   "ms_min": 3.8666195853147656,
+   "ms_median": 3.8772050000261515,
    "reps": 5,
    "per_call_units": 200,
-   "compile_s": 8.04376038800001,
+   "compile_s": 0.8441961670760065,
    "cost": {
     "flops": 307481568.0,
     "transcendentals": 1103840.0,
@@ -255,28 +250,23 @@
   }
  },
  "kernel_machine": {
-  "date": "2026-10-23T01:08:52",
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
-  "simd": [
-   "avx",
-   "avx2",
-   "avx512f",
-   "fma"
-  ],
-  "physical_cores": 4,
-  "logical_cpus": 4,
-  "mem_bytes": 16872808448,
-  "platform": "Linux-6.18.44-fc-v140-x86_64-with-glibc2.39",
-  "machine": "x86_64",
-  "python": "3.13.16",
+  "date": "2026-10-22T21:33:12",
+  "cpu": "Apple M5 Max",
+  "physical_cores": "18",
+  "perf_cores": "6",
+  "logical_cpus": 18,
+  "mem_bytes": null,
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.13",
   "numpy": "2.5.4",
   "xla_flags": "",
   "loadavg": [
-   9.5458984375,
-   10.658203125,
-   9.9638671875
+   5.77099609375,
+   4.60693359375,
+   3.54931640625
   ],
-  "commit": "1093932",
+  "commit": "deb3929",
   "jax": "0.12.0.1",
   "jaxlib": "0.12.0.1",
   "backend": "cpu",
