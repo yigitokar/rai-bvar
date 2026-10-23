@@ -398,9 +398,14 @@ def relative_table(
             sm = m["sq_err"].sel(variable=v, horizon=h).values[ok]
             sb = b["sq_err"].sel(variable=v, horizon=h).values[ok]
             dm = diebold_mariano(-lm[ok], -lb[ok], h, alternative="less")
+            d = lm[ok] - lb[ok]
+            labels = np.asarray(list(origins))[ok]
+            top = np.argsort(-np.abs(d))[:3]
             row = {
                 "n": int(ok.sum()),
-                "dlps": float(np.mean(lm[ok] - lb[ok])),
+                "dlps": float(np.mean(d)),
+                "dlps_median": float(np.median(d)),
+                "dlps_top": [[str(labels[i]), float(d[i])] for i in top],
                 "crps_ratio": float(cm.mean() / cb.mean()),
                 "rmse_ratio": float(math.sqrt(sm.mean()) / math.sqrt(sb.mean())),
                 "dm_p_better": float(dm.pvalue),
@@ -484,6 +489,28 @@ def converged_share(result: BacktestResult, origins: Sequence[str]) -> float:
 
 
 # --------------------------------------------------------------------------- criteria
+
+
+def _c4_secondary(full: dict[str, Any], pre: dict[str, Any]) -> str:
+    """Criterion 4 seen through the median per-origin ΔLPS, the dominant origins and CR's
+    Gaussian-approximation score (information only: the verdict uses the primary RB LPD)."""
+    parts = []
+    for v in ("UR", "TBILL"):
+        r1, r8 = full["variables"][v][1], full["variables"][v][8]
+        top = ", ".join(f"{o} {d:+.1f}" for o, d in r8["dlps_top"])
+        parts.append(
+            f"full {v} h8: median {r8['dlps_median']:+.3f} (largest origins: {top})"
+            + (
+                f", Gaussian-approx h1 {r1['dlps_gauss']:+.3f} → h8 {r8['dlps_gauss']:+.3f}"
+                if "dlps_gauss" in r8
+                else ""
+            )
+        )
+    for v in ("GDP", "INFL"):
+        r8 = pre["variables"][v][8]
+        if "dlps_gauss" in r8:
+            parts.append(f"pre-crisis {v} h8 Gaussian-approx {r8['dlps_gauss']:+.3f}")
+    return ". Secondary (not part of the rule): " + "; ".join(parts)
 
 
 def criteria(rep: dict[str, Any]) -> list[dict[str, Any]]:
@@ -573,7 +600,8 @@ def criteria(rep: dict[str, Any]) -> list[dict[str, Any]]:
                 f"full {v}: h1 {a:+.3f} → h8 {b:+.3f}" for v, (a, b) in shrink.items()
             )
             + "; "
-            + "; ".join(f"pre-crisis {v} h8 {d:+.3f}" for v, d in keep.items()),
+            + "; ".join(f"pre-crisis {v} h8 {d:+.3f}" for v, d in keep.items())
+            + _c4_secondary(full, pre),
         }
     )
 
