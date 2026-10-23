@@ -37,6 +37,10 @@ no correction (N01 §10.3). The indicators are local to one call (never state; D
 * RW, centred and scaled (``Q̃ = σ²Q``, ``b̃ = σc``, ``h = σx̃``; exact change of variables that
   avoids ``1/σ²``): ``Q̃_00 = σ²/V₀ + 1``, ``Q̃_jj = σ²D + 2`` (``1 ≤ j < T_eff``),
   ``Q̃_{T_eff,T_eff} = σ²D + 1``, ``Q̃_{j,j−1} = −1``, ``b̃_0 = σm₀/V₀``, ``b̃_j = σD(y* − m_s)``.
+  This is a path-graph Laplacian plus ``diag(σ²/V₀, σ²D)``: step (a) factors it in that form
+  (:func:`awol_rw_laplacian`), because assembling ``Q̃`` rounds ``σ²D`` away once it is below the
+  ulp of 2 (``σ ≲ 1e-8``) and the level direction's pivot ``≈ σ²(1/V₀ + ΣD)`` is then lost
+  (WP25 follow-up, the Clark–Ravazzolo ordering-stage crash).
 * States ``j > T_eff`` are decoupled dummies (``Q̃ = 1``, off-diagonal 0, ``b̃ = 0``; D-15). They are
   never read by any step (every sum is masked) and are rewritten to ``μ + σz`` (RW: ``σz``) with
   the step's own AWOL normals at the end of each update, so they stay finite and never drift.
@@ -67,9 +71,9 @@ RW ``h_0`` level ``log(mean_t ẽ²)``; then indicators at ``h ≡`` level and *
 draw of ``h``**, so ``C_T > 0`` almost surely (``h ≡ μ`` makes σ = 0 absorbing).
 
 Exposed for tests (DESIGN §3.7.4): :func:`indicator_logits`, :func:`awol_system`,
-:func:`w_weight`, :func:`h_log_accept`, :func:`c_step`, :func:`c_step_log_ratios`,
-:func:`nc_phi_log_ratio`, :func:`nc_regression`, :func:`nc_step`, :func:`nc_log_accept`,
-:func:`nc_fold`, :func:`aux_log_likelihood`; the stages :meth:`SVCore.h_move` and
+:func:`awol_rw_laplacian`, :func:`w_weight`, :func:`h_log_accept`, :func:`c_step`,
+:func:`c_step_log_ratios`, :func:`nc_phi_log_ratio`, :func:`nc_regression`, :func:`nc_step`,
+:func:`nc_log_accept`, :func:`nc_fold`, :func:`aux_log_likelihood`; the stages :meth:`SVCore.h_move` and
 :meth:`SVCore.nc_move` (one-block tests). Overridable internals (DESIGN §4.9): ``mixture_table``,
 ``indicator_logits``, ``h_accept``, ``c_step``, ``nc_step``, ``nc_accept``, ``nc_fold``.
 
@@ -102,7 +106,11 @@ from rai_bvar.components.vol.mixture import (
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before any computation)
 from rai_bvar.engines.mcmc.config import StaticConfig, VolStatic
 from rai_bvar.engines.mcmc.keys import Key, Sub, sub_key
-from rai_bvar.engines.mcmc.linalg import stable_ar1_regression, tridiag_precision_sample
+from rai_bvar.engines.mcmc.linalg import (
+    laplacian_precision_sample,
+    stable_ar1_regression,
+    tridiag_precision_sample,
+)
 from rai_bvar.engines.mcmc.protocols import KernelBase
 from rai_bvar.engines.mcmc.random import categorical_inverse_cdf_lse, loggamma, uniform_tiny
 from rai_bvar.engines.mcmc.state import (
@@ -130,6 +138,7 @@ __all__ = [
     "SVCore",
     "SVNoise",
     "aux_log_likelihood",
+    "awol_rw_laplacian",
     "awol_system",
     "c_gp_log_target",
     "c_step",
@@ -315,6 +324,34 @@ def awol_system(
     diag = jnp.concatenate([jnp.reshape(d0, (1,)), rows])
     b = jnp.concatenate([jnp.reshape(b0, (1,)), b_rows])
     return diag, off, b
+
+
+def awol_rw_laplacian(
+    y_star: Array,
+    s: Array,
+    obs: Array,
+    T_eff: Array,
+    sigma: Array,
+    prior_i: EqPrior | SVPrior,
+    table: MixtureTable,
+) -> tuple[Array, Array, Array]:
+    """The RW system of :func:`awol_system` as ``(δ, w, b̃)``, ``Q̃ = Lap_w + diag(δ)`` (the form
+    :func:`~rai_bvar.engines.mcmc.linalg.laplacian_precision_sample` factors without
+    cancellation): unit edges on the live transitions (``w[j−1] = 1``, ``j ≤ T_eff``),
+    ``δ_0 = σ²/V₀``, ``δ_j = σ²D_j`` (live) and ``δ_j = 1`` (padded); ``b̃`` is
+    :func:`awol_system`'s. The step (a) system for ``rw=True`` (module docstring)."""
+    sp = _prior(prior_i)
+    T = y_star.shape[0]
+    j = jnp.arange(1, T + 1)
+    D = obs / _take(table.v, s)
+    resid = y_star - _take(table.m, s)
+    s2 = sigma * sigma
+    live = j <= T_eff
+    delta = jnp.concatenate([jnp.reshape(s2 / sp.V0, (1,)), jnp.where(live, s2 * D, 1.0)])
+    w = jnp.where(live, 1.0, 0.0)
+    b0 = sigma * sp.m0 / sp.V0
+    b = jnp.concatenate([jnp.reshape(b0, (1,)), jnp.where(live, sigma * D * resid, 0.0)])
+    return delta, w, b
 
 
 def aux_log_likelihood(
@@ -722,10 +759,14 @@ class SVCore(KernelBase):
         proposal and (exact mode) the MH accept; ``w`` is 0 when ``exact=False``."""
         vol, table = self.static, self.table()
         s, lg_cur = draw_indicators(noise.u_s, ys - h[1:], table, self.impl("indicator_logits"))
-        diag, off, b = awol_system(
-            ys, s, obs, T_eff, mu, phi, sigma, prior_i, table, h0=vol.h0, rw=vol.rw
-        )
-        x, _, piv = tridiag_precision_sample(diag, off, b, noise.z_h)
+        if vol.rw:
+            delta, w, b = awol_rw_laplacian(ys, s, obs, T_eff, sigma, prior_i, table)
+            x, _, piv = laplacian_precision_sample(delta, w, b, noise.z_h)
+        else:
+            diag, off, b = awol_system(
+                ys, s, obs, T_eff, mu, phi, sigma, prior_i, table, h0=vol.h0, rw=vol.rw
+            )
+            x, _, piv = tridiag_precision_sample(diag, off, b, noise.z_h)
         h_prop = sigma * x if vol.rw else mu + sigma * x
         if vol.exact:
             w_cur = w_weight(h, log_e2c, ys, obs, table, lg_cur)

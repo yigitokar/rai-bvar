@@ -116,6 +116,23 @@ re-derived before it goes into the paper).
     one machine. Evidence: WP25 report; `test_dummy_path_is_closed_without_dummies`. Status:
     recorded (Apple M5 Max, one run).
 
+## E. Numerical robustness found by the Clark–Ravazzolo replication (WP25 queue item 7)
+
+17. **A legitimate state the scaled RW AWOL draw could not represent.** In the Clark–Ravazzolo
+    ordering stage (SV(rw), reduced form, origin 1987Q2, ordering GDP, TBILL, INFL, UR) GDP's
+    volatility reached `σ = 4.98e-9` at burn-in sweep 318. The non-centred prior `σ ~ ±N(0, B_σ)`
+    has positive density at 0, so the state is valid, and the NC move of the same sweep took σ
+    back to 0.031. But in the scaled system `Q̃ = σ²Q` the observation terms `σ²D ≈ 1e-17` are
+    below the ulp of the Laplacian's diagonal (2): the assembled matrix is the singular path
+    Laplacian, and the level direction's pivot (exactly `≈ σ²(1/V₀ + ΣD)`, of order 1e-15) came
+    out 0 (status 2001; the run aborted). Carrying the pivots as their excess over the next edge
+    (`q_t = δ_t + q_{t−1}/(1 + q_{t−1})`, all terms ≥ 0) is the same factorisation without the
+    cancellation: at ordinary σ it agrees with the old draw to ~1e-13 and every non-RW composition
+    stays bitwise unchanged. The trigger is the σ → 0 region where the centred σ² step mixes
+    slowly and only the NC move escapes; the fix removes the crash, not the slow mixing.
+    Evidence: `tests/mcmc/blocks/test_sv_core.py::test_rw_awol_at_a_tiny_sigma` (60-digit
+    reference) and `::test_rw_step_at_a_tiny_sigma_is_ok`. Status: verified (Apple M5 Max).
+
 ## Before submission
 
 - Re-run every "recorded" / "to check" item on the release commit and cite the commit hash.

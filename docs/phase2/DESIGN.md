@@ -933,10 +933,19 @@ y*_t   = where(m_t, logaddexp(log_e2c_t, log_c), 0)                             
 - **RW path** (`rw=True`, N02 §8.1): centred AWOL entries of N02 §8.1 (`Q_00 = 1/V₀ + 1/σ²`, …); C-step `σ²`
   independence MH with `IG((T_eff−1)/2, S/2)` proposal (requires `T_eff ≥ 2`, asserted on the host) or exact IG;
   NC regression on `(h_0, σ)` with prior `N((m₀, 0), diag(V₀, B_σ))`, same exact-mode rule and fold.
+  Step (a) draws in the scaled form `Q̃ = σ²Q`, `h = σx̃`, and factors `Q̃` as a path-graph Laplacian (unit
+  edges on the live transitions) plus `diag(σ²/V₀, σ²D)` (`awol_rw_laplacian` →
+  `linalg.laplacian_precision_sample`): the pivots are carried as their excess over the next edge,
+  `q_0 = δ_0`, `q_t = δ_t + q_{t−1}/(1 + q_{t−1})`, which never cancels; `p_t = q_t + w_t`. Assembling `Q̃`
+  first rounds `σ²D` away once it is below the ulp of 2 (`σ ≲ 1e-8`, positive prior density under `B_σχ²₁`),
+  and the level direction's pivot `≈ σ²(1/V₀ + ΣD)` is then rounding noise (status 2001, pivot 0; the
+  Clark–Ravazzolo ordering-stage crash, WP25 queue item 7). Same function of `z` as
+  `tridiag_precision_sample` on the assembled system to rounding; the AR path is unchanged.
 - Cost of the exact mode: two extra `(T_pad, J)` `logsumexp`s per equation and sweep (at `h′` and at the NC
   proposal), because `log g(y* − h_cur)` comes from the indicator step (performance §3.7.4).
 - `ahead`: `h_{T+j} = μ + φ(h_{T+j−1} − μ) + ση_j` (RW: no μ), from `h[T_eff]`; `transition` is one such step.
-- Exposed for tests: `indicator_logits`, `awol_system` (`diag, off, b̃`), `w_weight`, `h_log_accept`,
+- Exposed for tests: `indicator_logits`, `awol_system` (`diag, off, b̃`), `awol_rw_laplacian` (`δ, w, b̃`),
+  `w_weight`, `h_log_accept`,
   `c_step_log_ratios`, `nc_regression`, `nc_log_accept`, `nc_fold`.
 
 #### 3.7.5 `ConstantCore` (`components/vol/constant.py`; N05 §5.2; N03 §4.5)
