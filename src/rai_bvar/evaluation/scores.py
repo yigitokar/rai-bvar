@@ -2,18 +2,22 @@
 
 Lower is better for every score except the log predictive density (LPD), where higher is
 better. CRPS, threshold-weighted CRPS, energy and variogram scores come from ``scoringrules``;
-the quantile-weighted CRPS (Gneiting & Ranjan 2011) is implemented here.
+the quantile-weighted CRPS (Gneiting & Ranjan 2011) is implemented here. The LPD is
+``ForecastResult.log_pred_density``: by default the SPEC §7 estimator, with
+``lpd_method="integrated"`` the opt-in path-integrated one (DESIGN §7.3, D-34), reported next to
+the default estimator on the same forecast (:func:`score_forecast`).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from typing import Literal
 
 import numpy as np
 import scoringrules as sr
 import xarray as xr
 
-from rai_bvar.forecast.result import ForecastResult
+from rai_bvar.forecast.result import LPD_METHODS, ForecastResult
 
 _FAIR_CRPS = "pwm"  # equals the fair (unbiased) estimator exactly; sorting-based
 
@@ -55,6 +59,7 @@ def score_forecast(
     multivariate_max_samples: int = 1000,
     qw_levels: int = 99,
     tw_bounds: Mapping[str, tuple[float, float]] | None = None,
+    lpd_method: Literal["conditioned", "integrated"] = "conditioned",
 ) -> xr.Dataset:
     """All scores of one forecast. ``realized`` has shape ``(H, n)``; NaN marks unobserved values.
 
@@ -62,11 +67,22 @@ def score_forecast(
     most ``multivariate_max_samples`` draws. ``tw_bounds`` maps variables to the interval
     ``(a, b)`` that the threshold-weighted CRPS focuses on (e.g. a recession threshold for
     output growth); without it no ``twcrps`` is computed.
+
+    ``lpd_method`` goes to every ``log_pred_density`` call (joint with its MCSE, and per
+    variable). With the default the output is the Phase 1 layout. With ``"integrated"`` (DESIGN
+    §7.3, D-34) ``lpd``, ``lpd_mcse`` and ``lpd_marginal`` hold the path-integrated estimator,
+    and the dataset also has ``lpd_marginal_mcse`` (its per-variable MCSE) and the default
+    estimator on the same forecast, ``lpd_conditioned``, ``lpd_mcse_conditioned`` and
+    ``lpd_marginal_conditioned``, with ``attrs["lpd_method"] = "integrated"``. At ``h = 1`` the
+    two coincide bitwise; at ``h > 1`` a forecast without ``lag_coefs`` raises ``ValueError``.
     """
+    if lpd_method not in LPD_METHODS:
+        raise ValueError(f"lpd_method must be one of {LPD_METHODS}, got {lpd_method!r}")
     realized = np.asarray(realized, dtype=np.float64)
     H, n = fr.horizon, len(fr.variables)
     if realized.shape != (H, n):
         raise ValueError(f"realized must have shape {(H, n)}, got {realized.shape}")
+    integrated = lpd_method == "integrated"
     rng = np.random.default_rng(rng)
     draws = fr.stacked()  # (S, H, n)
     ens = np.moveaxis(draws, 0, -1)  # (H, n, S)
@@ -76,12 +92,27 @@ def score_forecast(
     lpd = np.full(H, np.nan)
     lpd_mcse = np.full(H, np.nan)
     lpd_marginal = np.full((H, n), np.nan)
+    # integrated only: its per-variable MCSE and the default estimator on the same forecast
+    marginal_mcse = np.full((H, n), np.nan)
+    cond, cond_mcse, cond_marginal = np.full(H, np.nan), np.full(H, np.nan), np.full((H, n), np.nan)
     for h in range(H):
         if complete[h]:
-            lpd[h], lpd_mcse[h] = fr.log_pred_density(realized[h], h + 1, return_mcse=True)
+            lpd[h], lpd_mcse[h] = fr.log_pred_density(
+                realized[h], h + 1, return_mcse=True, lpd_method=lpd_method
+            )
+            if integrated:
+                cond[h], cond_mcse[h] = fr.log_pred_density(realized[h], h + 1, return_mcse=True)
         for j, var in enumerate(fr.variables):
-            if observed[h, j]:
-                lpd_marginal[h, j] = fr.log_pred_density(realized[h, j : j + 1], h + 1, [var])
+            if not observed[h, j]:
+                continue
+            y = realized[h, j : j + 1]
+            if integrated:
+                lpd_marginal[h, j], marginal_mcse[h, j] = fr.log_pred_density(
+                    y, h + 1, [var], return_mcse=True, lpd_method=lpd_method
+                )
+                cond_marginal[h, j] = fr.log_pred_density(y, h + 1, [var])
+            else:
+                lpd_marginal[h, j] = fr.log_pred_density(y, h + 1, [var])
 
     obs = np.where(observed, realized, 0.0)  # placeholders; masked again below
     sub = (
@@ -111,6 +142,11 @@ def score_forecast(
         "cover50": ((q[1] <= obs) & (obs <= q[3])).astype(np.float64),
         "cover90": ((q[0] <= obs) & (obs <= q[4])).astype(np.float64),
     }
+    if integrated:
+        per_variable |= {
+            "lpd_marginal_mcse": marginal_mcse,
+            "lpd_marginal_conditioned": cond_marginal,
+        }
     if tw_bounds is not None:
         lower = np.array([tw_bounds.get(v, (-np.inf, np.inf))[0] for v in fr.variables])
         upper = np.array([tw_bounds.get(v, (-np.inf, np.inf))[1] for v in fr.variables])
@@ -132,5 +168,10 @@ def score_forecast(
         "energy": ("horizon", energy),
         "variogram": ("horizon", variogram),
     }
+    if integrated:
+        data |= {
+            "lpd_conditioned": ("horizon", cond),
+            "lpd_mcse_conditioned": ("horizon", cond_mcse),
+        }
     coords = {"horizon": np.arange(1, H + 1), "variable": fr.variables}
-    return xr.Dataset(data, coords=coords)
+    return xr.Dataset(data, coords=coords, attrs={"lpd_method": lpd_method} if integrated else None)

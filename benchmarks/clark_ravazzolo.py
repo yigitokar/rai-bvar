@@ -1,33 +1,48 @@
 """Clark & Ravazzolo (2015) replication on FRED-QD (DESIGN §13 WP23; N08 §C1–C6, §B4).
 
-**The acceptance run** (WP23: all models, both samples, all 24 orderings), from the repository
-root, as one command::
+**The acceptance run** (WP23: all models, both samples, all 24 orderings; pre-registered in
+``benchmarks/reports/clark_ravazzolo_preregistration.md``), from the repository root, as one
+command::
 
-    uv run python benchmarks/clark_ravazzolo.py benchmarks/reports/clark_ravazzolo \\
-        --config full --n-jobs 4
+    uv run python benchmarks/clark_ravazzolo.py benchmarks/reports/clark_ravazzolo_acceptance \\
+        --config acceptance --n-jobs 4 --cache ~/.cache/rai-bvar-cr-$(git rev-parse --short HEAD)
 
-It writes ``benchmarks/reports/clark_ravazzolo.md`` and ``.json``. **Estimated runtime:** about
-12 hours with ``--n-jobs 1``, extrapolated from fits measured on a 4-core x86-64 VM (5000-draw
-SV fits took 6–12 s each, Constant fits about 3.5 s, for 742 main-stage fits and 2 × 25 × 106 =
-5300 ordering-stage fits). On a 10-core machine ``--n-jobs 4`` should bring that to roughly 4–6
-hours, an *estimate*, not a measurement. Every origin is cached as it finishes
-(``--cache``, default ``~/.cache/rai-bvar-cr``), so rerunning the same command after an
-interruption resumes where it stopped. The report of the main stage is written before the
-24-ordering stage starts.
+on a clean working tree at the commit that adds the pre-registration (the report records the
+commit and whether tracked files differ from it, and is labelled the acceptance run only when
+they do not, every stage ran and the config, estimator and seed are the registered ones). It
+writes ``benchmarks/reports/clark_ravazzolo_acceptance.md`` and ``.json``, next to the full run's
+``clark_ravazzolo.md``. The score-cache keys do not change with the code (only with the package
+version, which is static), so the commit-suffixed cache keeps scores of other code apart; reuse
+a cache only for the same commit. ``--config acceptance`` is 4 chains × 20,000 kept draws (burn
+1000) in every stage, with the path-integrated LPD as the primary score
+(``lpd_method="integrated"``, DESIGN §7.3, D-34). ``--config full`` (4 × 5000, the
+path-conditioned SPEC §7 estimator) was the first acceptance configuration; its report
+(``benchmarks/reports/clark_ravazzolo.md``) is the reference the pre-registration departs from.
+**Estimated runtime** of ``full``: about 12 hours with ``--n-jobs 1``, extrapolated from fits
+measured on a 4-core x86-64 VM (5000-draw SV fits took 6–12 s each, Constant fits about 3.5 s,
+for 742 main-stage fits and 2 × 25 × 106 = 5300 ordering-stage fits); on a 10-core machine
+``--n-jobs 4`` should bring that to roughly 4–6 hours. ``acceptance`` runs 21,000 sweeps per
+chain against ``full``'s 6000, so expect about 3.5 times that (scoring is a small part). Both are
+*estimates*, not measurements. Every origin is cached as it finishes (``--cache``, default
+``~/.cache/rai-bvar-cr``), so rerunning the same command after an interruption resumes where it
+stopped (the report counts the origins read from the cache). The report of the main stage is
+written before the 24-ordering stage starts, labelled as pending.
 
 Usage::
 
-    python benchmarks/clark_ravazzolo.py OUT [--config full|quick|smoke] [--cache DIR]
-        [--n-jobs N] [--qd-url URL] [--md-url URL] [--skip-orderings] [--skip-structural]
-        [--only-ordering MODEL] [--seed 0]
+    python benchmarks/clark_ravazzolo.py OUT [--config acceptance|full|quick|smoke]
+        [--lpd conditioned|integrated] [--cache DIR] [--n-jobs N] [--qd-url URL] [--md-url URL]
+        [--skip-orderings] [--skip-structural] [--only-ordering MODEL] [--seed 0]
 
 writes ``OUT.md`` (the report) and ``OUT.json`` (every number in it). ``--n-jobs N`` fits N
 origins at a time in ``spawn``-started worker processes (DESIGN §11.6; each worker's XLA is
 multi-threaded too, so use about a third of the cores). Results do not depend on it: the per-origin
-seeds and cache keys are the same. ``--qd-url`` / ``--md-url`` point the loader at a mirror or a
-``file://`` copy of the pinned vintage files (the SHA-256 checksum of the registry is still
-verified; the St. Louis Fed server has rejected the library's User-Agent through some proxies,
-in which case ``curl`` the two CSVs and pass ``file://`` URLs).
+seeds and cache keys are the same. ``--lpd`` overrides the config's LPD estimator (every stage
+uses the same one; it is in the cache keys, so the two estimators never share cached scores).
+``--qd-url`` / ``--md-url`` point the loader at a mirror or a ``file://`` copy of the pinned
+vintage files (the SHA-256 checksum of the registry is still verified; the St. Louis Fed server
+has rejected the library's User-Agent through some proxies, in which case ``curl`` the two CSVs
+and pass ``file://`` URLs).
 
 What it does (N08 §C):
 
@@ -50,19 +65,22 @@ What it does (N08 §C):
   ``(φ+1)/2 ~ Beta(71.25, 3.75)`` (same mean and sd). The structural-form pair
   (``Constant("ig")`` vs ``SV(rw=True)``) is reported as a robustness check (§C3 R2). Every other
   setting is the library default: no prior was tuned.
-* **Scores** (§C4): the Rao–Blackwellised LPD (primary), the Gaussian-approximation LPS of
-  Adolfson, Lindé & Villani (2007) from the predictive draws' mean and covariance (CR's score;
-  a parity metric), CRPS and RMSE of the predictive mean. Relative measures are against the
-  baseline over common origins. ``compare()`` verdicts (SPEC §9.5) and one-sided DM/HLN tests per
-  variable (descriptive: expanding window).
+* **Scores** (§C4): the Rao–Blackwellised LPD (primary; the config's ``lpd_method``: the
+  path-integrated estimator for ``acceptance``, the path-conditioned SPEC §7 one otherwise; with
+  ``"integrated"`` the conditioned one is reported as a secondary number for the criterion-4
+  cells, never in a rule), the Gaussian-approximation LPS of Adolfson, Lindé & Villani (2007) from
+  the predictive draws' mean and covariance (CR's score; a parity metric), CRPS and RMSE of the
+  predictive mean. Relative measures are against the baseline over common origins. ``compare()``
+  verdicts (SPEC §9.5) and one-sided DM/HLN tests per variable (descriptive: expanding window).
 * **Orderings** (§B4, §C5 criterion 6): ``rb.ordering_sensitivity(mode="backtest", design="all")``
   over all 24 orderings for the primary SV model and for the baseline, then a ``compare()``
   verdict per ordering.
 
 The six acceptance criteria of N08 §C5 are evaluated with the operational definitions printed in
-the report. ``--config full`` uses 4 chains × 5000 kept draws (burn 1000); ``--config quick``
-the library's default ``MCMCSettings()`` (4 × 2000, burn 1000); both use every origin and 1000
-forecast draws. ``benchmarks/reports/clark_ravazzolo_quick.md`` is a ``quick`` main-stage report
+the report. ``--config acceptance`` uses 4 chains × 20,000 kept draws (burn 1000) and the
+path-integrated LPD; ``--config full`` 4 × 5000 (burn 1000); ``--config quick`` the library's
+default ``MCMCSettings()`` (4 × 2000, burn 1000); all three use every origin, ``acceptance``
+8000 forecast draws per origin and the other two 1000. ``benchmarks/reports/clark_ravazzolo_quick.md`` is a ``quick`` main-stage report
 (no ordering stage), labelled as not the acceptance run. ``--config smoke`` only checks that the
 script runs (tiny chains, every 8th origin; its numbers mean nothing). Everything is cached (``--cache``), so an interrupted run
 resumes, and ``--only-ordering MODEL`` fills the cache for one model's 24-ordering stage from a
@@ -88,6 +106,7 @@ import math
 import os
 import platform
 import re
+import subprocess
 import sys
 import time
 import warnings
@@ -161,9 +180,23 @@ class Config:
     ordering_step: int  # every k-th origin in the ordering stage
     noise_reps: int = 1
     origin_step: int = 1  # every k-th origin in the main stage (smoke tests only)
+    lpd_method: str = "conditioned"  # LPD estimator of every stage (DESIGN §7.3, D-34)
 
 
+ACCEPTANCE = "acceptance"
 CONFIGS = {
+    # the pre-registered acceptance run: 20,000 kept draws (every SV(rw) origin converges in the
+    # diagnostic fits), 8000 forecast draws (the tail-origin thinning error of the LPD) and the
+    # path-integrated LPD (benchmarks/reports/clark_ravazzolo_preregistration.md)
+    ACCEPTANCE: Config(
+        ACCEPTANCE,
+        MCMCSettings(chains=4, draws=20000, burn=1000),
+        8000,
+        1,
+        noise_reps=1,
+        origin_step=1,
+        lpd_method="integrated",
+    ),
     # 5000 kept draws: the SV hyperparameters come close to the R-hat < 1.01 / ESS > 400 targets
     "full": Config("full", MCMCSettings(chains=4, draws=5000, burn=1000), 1000, 1),
     # the library's default MCMCSettings (4 × 2000, burn 1000)
@@ -171,6 +204,30 @@ CONFIGS = {
     # end-to-end check of the script only (meaningless numbers)
     "smoke": Config("smoke", MCMCSettings(chains=2, draws=100, burn=100), 100, 8, 1, 8),
 }
+PREREGISTRATION = "benchmarks/reports/clark_ravazzolo_preregistration.md"
+PREREGISTERED_SEED = 0  # the backtest seed fixed by the pre-registration
+REFERENCE_RUN = "551f181"  # the commit of the full run's report, the pre-registration's reference
+REPO = Path(__file__).resolve().parents[1]
+
+
+def git_state() -> dict[str, Any]:
+    """The commit the script runs from (``git rev-parse HEAD``), whether tracked files differ from
+    it (``git status --porcelain --untracked-files=no``: the run's own report and cache are
+    untracked) and then the SHA-256 of ``git diff HEAD``; ``"unknown"`` / ``None`` without git.
+    Recorded in the report, which the pre-registration ties to a commit (DESIGN §13 WP23)."""
+
+    def git(*args: str) -> bytes:
+        return subprocess.run(
+            ["git", "-C", str(REPO), *args], capture_output=True, check=True
+        ).stdout
+
+    try:
+        commit = git("rev-parse", "HEAD").decode().strip()
+        dirty = bool(git("status", "--porcelain", "--untracked-files=no").strip())
+        diff = hashlib.sha256(git("diff", "HEAD")).hexdigest() if dirty else None
+    except (OSError, subprocess.CalledProcessError):
+        return {"git_commit": "unknown", "git_dirty": None, "git_diff_sha256": None}
+    return {"git_commit": commit, "git_dirty": dirty, "git_diff_sha256": diff}
 
 
 # --------------------------------------------------------------------------- data
@@ -367,9 +424,11 @@ class _ProbeFit:
         cov = np.stack([np.cov(x[:, h, :], rowvar=False) for h in range(x.shape[1])])
         directory = self._probe.directory()
         directory.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            directory / f"{self._origin}.npz", mean=mean, cov=cov, variables=np.array(fr.variables)
-        )
+        # written aside and renamed (as Cache.put): a concurrent run sharing the store never
+        # reads a partial file
+        tmp = directory / f"{self._origin}.{os.getpid()}.tmp.npz"
+        np.savez(tmp, mean=mean, cov=cov, variables=np.array(fr.variables))
+        os.replace(tmp, directory / f"{self._origin}.npz")
         return fr
 
 
@@ -405,8 +464,13 @@ def sliced(result: BacktestResult, origins: Sequence[str]) -> BacktestResult:
     return dataclasses.replace(result, scores=result.scores.sel(origin=list(origins)))
 
 
+CONDITIONED_MARGINAL = "lpd_marginal_conditioned"  # score_forecast(lpd_method="integrated")
+CONDITIONED_JOINT = "lpd_conditioned"
+
+
 def _degenerate(m: Any, b: Any, h: int) -> np.ndarray:
-    """Origins whose joint RB score at ``h`` is degenerate for the model or the baseline."""
+    """Origins whose joint RB score at ``h`` is degenerate for the model or the baseline (the
+    primary estimator's ``lpd_mcse``, whichever ``lpd_method`` that is)."""
     mm = m["lpd_mcse"].sel(horizon=h).values
     bm = b["lpd_mcse"].sel(horizon=h).values
     return (np.nan_to_num(mm) >= RB_CEILING) | (np.nan_to_num(bm) >= RB_CEILING)
@@ -421,7 +485,9 @@ def relative_table(
     all_origins: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Per variable × horizon: ΔLPS (mean), CRPS and RMSE ratios, one-sided DM/HLN p-values
-    (log score), Gaussian-approx ΔLPS; joint ΔLPD; over ``origins``."""
+    (log score), Gaussian-approx ΔLPS; joint ΔLPD; over ``origins``. Scores of
+    ``lpd_method="integrated"`` also give the path-conditioned estimator's ΔLPS / ΔLPD
+    (``dlps_conditioned``, ``dlpd_conditioned``; secondary, never in a rule)."""
     m = results[model].scores.sel(origin=list(origins))
     b = results[base].scores.sel(origin=list(origins))
     idx = None
@@ -465,6 +531,11 @@ def relative_table(
                 okg = np.isfinite(gm) & np.isfinite(gb)
                 row["dlps_gauss"] = float(np.mean(gm[okg] - gb[okg]))
                 row["rb_gauss_disagree"] = bool(np.sign(row["dlps"]) != np.sign(row["dlps_gauss"]))
+            if CONDITIONED_MARGINAL in m and CONDITIONED_MARGINAL in b:  # integrated scores
+                qm = m[CONDITIONED_MARGINAL].sel(variable=v, horizon=h).values
+                qb = b[CONDITIONED_MARGINAL].sel(variable=v, horizon=h).values
+                okq = np.isfinite(qm) & np.isfinite(qb)
+                row["dlps_conditioned"] = float(np.mean(qm[okq] - qb[okq]))
             rows[h] = row
         out["variables"][v] = rows
     for h in HORIZONS:
@@ -486,6 +557,11 @@ def relative_table(
             okg = np.isfinite(gm) & np.isfinite(gb)
             row["dlpd_gauss"] = float(np.mean(gm[okg] - gb[okg]))
             row["rb_gauss_disagree"] = bool(np.sign(row["dlpd"]) != np.sign(row["dlpd_gauss"]))
+        if CONDITIONED_JOINT in m and CONDITIONED_JOINT in b:
+            qm = m[CONDITIONED_JOINT].sel(horizon=h).values
+            qb = b[CONDITIONED_JOINT].sel(horizon=h).values
+            okq = np.isfinite(qm) & np.isfinite(qb)
+            row["dlpd_conditioned"] = float(np.mean(qm[okq] - qb[okq]))
         out["joint"][h] = row
     return out
 
@@ -543,8 +619,9 @@ def converged_share(result: BacktestResult, origins: Sequence[str]) -> float:
 
 
 def _c4_secondary(full: dict[str, Any], pre: dict[str, Any]) -> str:
-    """Criterion 4 seen through the median per-origin ΔLPS, the dominant origins and CR's
-    Gaussian-approximation score (information only: the verdict uses the primary RB LPD)."""
+    """Criterion 4 seen through the median per-origin ΔLPS, the dominant origins, CR's
+    Gaussian-approximation score and, when the primary estimator is the path-integrated one, the
+    path-conditioned estimator's ΔLPS (information only: the verdict uses the primary RB LPD)."""
     parts = []
     for v in ("UR", "TBILL"):
         r1, r8 = full["variables"][v][1], full["variables"][v][8]
@@ -561,6 +638,14 @@ def _c4_secondary(full: dict[str, Any], pre: dict[str, Any]) -> str:
         r8 = pre["variables"][v][8]
         if "dlps_gauss" in r8:
             parts.append(f"pre-crisis {v} h8 Gaussian-approx {r8['dlps_gauss']:+.3f}")
+    if "dlps_conditioned" in full["variables"]["UR"][8]:  # primary = path-integrated (D-34)
+        cond = [
+            f"full {v}: h1 {full['variables'][v][1]['dlps_conditioned']:+.3f} → h8 "
+            f"{full['variables'][v][8]['dlps_conditioned']:+.3f}"
+            for v in ("UR", "TBILL")
+        ] + [f"pre-crisis {v} h8 {pre['variables'][v][8]['dlps_conditioned']:+.3f}"
+             for v in ("GDP", "INFL")]  # fmt: skip
+        parts.append("path-conditioned (SPEC §7) estimator ΔLPS: " + "; ".join(cond))
     flagged = [
         f"{s} {v} h{h}: {t['variables'][v][h]['rb_degenerate']} origin(s)"
         + (" (RB and Gaussian-approx ΔLPS differ in sign)"
@@ -782,6 +867,7 @@ def ordering_stage(
                 seed=seed,
                 cache=cache,
                 n_jobs=n_jobs,
+                lpd_method=cfg.lpd_method,
             )
         sens[name] = res
         log(f"ordering stage {name}: {time.time() - t0:.0f}s, material={res.material}")
@@ -795,7 +881,8 @@ def ordering_stage(
             },
             "converged_orderings": int(res.dataset["converged"].sum()),
         }
-    # per ordering: rebuild both backtests from the cache (identical calls) and compare
+    # per ordering: rebuild both backtests from the cache (identical calls, the same estimator:
+    # another lpd_method is another cache key, which would silently refit every origin)
     seeds = json.loads(sens[PRIMARY_SV].dataset.attrs["backtest_seeds"])
     rows = []
     for j, order in enumerate(sens[PRIMARY_SV].orderings):
@@ -815,6 +902,7 @@ def ordering_stage(
                     cache=cache,
                     n_jobs=1,  # every origin is cached by now: no worker pool
                     name=name,
+                    lpd_method=cfg.lpd_method,
                 )
             if bt.cached != len(origins):
                 log(f"warning: ordering {j} {name}: {len(origins) - bt.cached} origins not cached")
@@ -870,16 +958,57 @@ RELIABILITY_NOTE = (
     "the forecast draws carries almost all the weight, the estimate is biased low by up to tens "
     "of nats, and its delta-method MCSE saturates near 1 however far off it is. In the review of "
     "the quick run, Constant's UR h = 8 score at 2008Q2 was −93.6 with 1000 draws, −46 to −63 "
-    "with 8000 and −36 with 64,000, against −19.1 for the exact path-integrated mixture; "
-    "SV(rw)'s was −23.9 against about −12.7. The column **RB degen.** counts origins whose joint "
+    "with 8000 and −36 with 64,000, against −19.1 for the path-integrated mixture with 1000 "
+    "draws (exact given its draws, but itself a Monte Carlo estimate); SV(rw)'s was −23.9 against "
+    "about −12.7. The column **RB degen.** counts origins whose joint "
     f"`lpd_mcse` is ≥ {RB_CEILING} for the arm or the baseline: cells with a non-zero count have "
     "RB means that are not reliable (they are kept, never dropped, because dropping exactly the "
     "tail origins biases the comparison). The criteria are evaluated as specified, on the primary "
     "estimator; the review found criterion 4's verdict unchanged when the degenerate origins are "
     "replaced by converged values (UR h = 8 about +0.23 against +0.157 at h = 1), but the "
-    "magnitudes of h ≥ 4 cells with degenerate origins are inflated. A path-integrated RB "
-    "estimator for h > 1 is a library change (SPEC §7) outside WP23.\n"
+    "magnitudes of h ≥ 4 cells with degenerate origins are inflated. The opt-in path-integrated "
+    "estimator (`lpd_method='integrated'`, DESIGN §7.3, D-34; `--lpd integrated`, the "
+    "`acceptance` config) does not condition on the simulated paths, which removes the "
+    "path-conditioning part of this error (it remains a Monte Carlo average over the draws).\n"
 )
+"""The reliability note of a report whose primary LPD is the path-conditioned SPEC §7 estimator."""
+
+RELIABILITY_NOTE_INTEGRATED = (
+    "### Reliability of the RB log score\n\n"
+    "The primary LPD is the library's **path-integrated** Rao–Blackwellised estimator "
+    "(`lpd_method='integrated'`, DESIGN §7.3, D-34): for h > 1 it averages, over the forecast "
+    "draws, the exact Gaussian density of y_{T+h} given each draw's parameters and its drawn "
+    "latent scale path (SV log-volatilities; the t arm's mixing scales), with y_{T+1..T+h−1} "
+    "integrated out analytically. It uses no additional random numbers, but it is still a Monte "
+    "Carlo average over the forecast's parameter and volatility-path draws. At h = 1 it is the "
+    "SPEC §7 estimator, bitwise. It replaces the "
+    "path-conditioned SPEC §7 estimator, which for h > 1 also conditions on each draw's simulated "
+    "path up to T+h−1: when the outcome lies far in a predictive's tail (unemployment in "
+    "2008–10) one forecast draw carries almost all of its weight, the estimate is biased low by "
+    "up to tens of nats and its delta-method MCSE saturates near 1 (in the review of the quick "
+    "run, Constant's UR h = 8 score at 2008Q2 was −93.6 with 1000 draws against −19.1 "
+    "path-integrated). The integrated estimator's weights still concentrate in the tails, less "
+    "so: in the review at the acceptance config's budget (4 × 20,000; 2008Q2, UR h = 8, 1000 "
+    "forecast draws) Constant's weight ESS was 2–6 draws and its estimate on average about 0.3–0.6 nats "
+    "below the 80,000-draw value (−19.0 against −17.8 with 8000 draws at fit seed 1), and "
+    "SV(rw)'s spread with sd ≈ 1.4 nats across forecast seeds against MCSEs of 0.45–0.94. Cells "
+    "at h ≥ 4 with crisis origins therefore carry about a nat of Monte Carlo noise per arm and "
+    "origin at 1000 draws, which the MCSE understates. The acceptance config therefore uses 8000 "
+    "forecast draws: in the same review they removed the thinning error (sd 0.09–0.19 nats "
+    "across thinning offsets, bias ≈ 0) but not the MCMC error (the 80,000-draw values still "
+    "differ by about 1.3 nats across fit seeds at that origin). "
+    "The path-conditioned ΔLPS is shown for the criterion-4 cells as a secondary number "
+    "(information only, never part of a rule). The column **RB degen.** counts origins whose "
+    f"joint `lpd_mcse` of the primary estimator is ≥ {RB_CEILING} for the arm or the baseline "
+    "(the weights then sit on about one parameter draw); such origins are kept, never dropped. "
+    "The criteria are evaluated as specified, on the primary estimator.\n"
+)
+"""The reliability note of a report whose primary LPD is the path-integrated estimator (D-34)."""
+
+
+def reliability_note(lpd_method: str) -> str:
+    """The reliability note for the report's primary LPD estimator."""
+    return RELIABILITY_NOTE_INTEGRATED if lpd_method == "integrated" else RELIABILITY_NOTE
 
 
 def _degen(row: dict[str, Any]) -> str:
@@ -887,32 +1016,141 @@ def _degen(row: dict[str, Any]) -> str:
     return "" if k is None else (f"**{k}**" if k else "0")
 
 
+PENDING = "the 24-ordering stage is pending (this is the main-stage report, written before it)"
+
+
+def acceptance_gaps(rep: dict[str, Any]) -> list[str]:
+    """How the report differs from the pre-registered acceptance run (``PREREGISTRATION``); empty
+    when it is that run: the ``acceptance`` config as registered (its estimator, budget and
+    steps) with the pre-registered backtest seed, every stage run (the structural pair and all 24
+    orderings over the stage's origins) and a clean working tree at a known commit (tracked
+    files; ``git_state``)."""
+    cfg = rep["config"]
+    if cfg["name"] != ACCEPTANCE:
+        return [f"config `{cfg['name']}`"]
+    acc = CONFIGS[ACCEPTANCE]
+    registered = {
+        "lpd_method": acc.lpd_method,
+        "mcmc": dataclasses.asdict(acc.mcmc),
+        "draws": acc.draws,
+        "origin_step": acc.origin_step,
+        "ordering_step": acc.ordering_step,
+        "noise_reps": acc.noise_reps,
+        "seed": PREREGISTERED_SEED,
+    }
+    gaps = [f"{k} = {cfg.get(k)!r}, not {v!r}" for k, v in registered.items() if cfg.get(k) != v]
+    ords = rep.get("orderings")
+    n_ord = len(range(0, rep["n_origins"]["full"], acc.ordering_step))
+    if rep.get("pending"):
+        gaps.append(PENDING)
+    elif not ords or len(ords["per_ordering"]) != 24 or len(ords["origins"]) != n_ord:
+        gaps.append("the 24-ordering stage was not run")
+    if not rep.get("structural"):
+        gaps.append("the structural-form pair was not run")
+    versions = rep["versions"]
+    if versions.get("git_commit", "unknown") == "unknown":
+        gaps.append("the commit is unknown")
+    elif versions.get("git_dirty") is not False:
+        gaps.append("tracked files had uncommitted changes")
+    return gaps
+
+
+def is_acceptance(rep: dict[str, Any]) -> bool:
+    """The report is the pre-registered acceptance run (:func:`acceptance_gaps`)."""
+    return not acceptance_gaps(rep)
+
+
+def _provenance(rep: dict[str, Any]) -> str:
+    """``at commit … (clean | tracked files modified, diff SHA-256 …)`` from ``git_state``."""
+    v = rep["versions"]
+    commit = v.get("git_commit", "unknown")
+    if commit == "unknown":
+        return "at an unknown commit"
+    if v.get("git_dirty"):
+        return (
+            f"at commit `{commit}` with **uncommitted changes to tracked files** (`git diff HEAD` "
+            f"SHA-256 `{v.get('git_diff_sha256')}`)"
+        )
+    return f"at commit `{commit}` (clean working tree)"
+
+
+def _cached_sentence(rep: dict[str, Any]) -> str:
+    cached = rep.get("cached")
+    if not cached:
+        return "cached origins are read, not refitted"
+    hits = sum(c["cached"] for c in cached.values())
+    total = sum(c["origins"] for c in cached.values())
+    return (
+        f"{hits} of {total} origin backtests of the main and structural stages were read from the "
+        f"score cache `{rep['config'].get('cache')}` instead of fitted; cache keys do not change "
+        "with the code, so a run after a code change needs a fresh cache"
+    )
+
+
 def markdown(rep: dict[str, Any]) -> str:
     cfg = rep["config"]
     L: list[str] = []
     add = L.append
+    gaps = acceptance_gaps(rep)
     title = "# Clark–Ravazzolo (2015) replication on FRED-QD (WP23)"
-    if cfg["name"] != "full":
+    if gaps == [PENDING]:
+        title += " — acceptance config, main stage only (ordering stage pending)"
+    elif gaps:
         title += f" — {cfg['name']}, NOT the acceptance run"
     add(title + "\n")
-    if cfg["name"] != "full":
+    acc = CONFIGS[ACCEPTANCE]
+    if gaps == [PENDING]:
         add(
-            f"> **Config `{cfg['name']}`: this is not the acceptance run.** The acceptance run is "
-            "`--config full` (4 chains × 5000 draws, all 24 orderings); see the module docstring "
-            "of `benchmarks/clark_ravazzolo.py` for the command. "
+            "> **Main-stage report of the acceptance run, written before its 24-ordering stage.** "
+            "Criterion 6 is pending; the final report of this run replaces this file.\n"
+        )
+    elif gaps:
+        add(
+            f"> **Config `{cfg['name']}` (LPD `{cfg['lpd_method']}`): this is not the acceptance "
+            f"run.** The acceptance run is `--config {ACCEPTANCE}` ({acc.mcmc.chains} chains × "
+            f"{acc.mcmc.draws} draws, the `{acc.lpd_method}` LPD, all 24 orderings; "
+            f"pre-registered in `{PREREGISTRATION}`); see the module docstring of "
+            "`benchmarks/clark_ravazzolo.py` for the command. "
             + (
-                "This report has no 24-ordering stage, so criterion 6 is not evaluated. "
+                f"This report differs from the pre-registered run: "
+                f"{'; '.join(g for g in gaps if g != PENDING)}. "
+                if cfg["name"] == ACCEPTANCE
+                else ""
+            )
+            + (
+                "This is the main-stage report, written before the 24-ordering stage, so "
+                "criterion 6 is pending. "
+                if rep.get("pending")
+                else "This report has no 24-ordering stage, so criterion 6 is not evaluated. "
                 if not rep.get("orderings")
                 else ""
             )
-            + "".join(f"{note} " for note in rep.get("notes", []))
             + "\n"
         )
+    if rep.get("notes"):
+        add("> " + " ".join(rep["notes"]) + "\n")
+    if cfg["name"] == ACCEPTANCE:
+        ref = CONFIGS["full"].mcmc
+        add(
+            f"The `{ACCEPTANCE}` config is pre-registered in `{PREREGISTRATION}`; it departs from "
+            "the reference full run "
+            f"(report at `{REFERENCE_RUN}`, {ref.chains} × {ref.draws} kept draws, burn {ref.burn}, "
+            f"the `{CONFIGS['full'].lpd_method}` LPD) only in the MCMC budget ({acc.mcmc.chains} × "
+            f"{acc.mcmc.draws} kept draws, burn {acc.mcmc.burn}, every MCMC stage) and the primary "
+            f"LPD estimator (`{acc.lpd_method}`).\n"
+        )
+    m = cfg["mcmc"]
+    stride = -(-m["draws"] // m["store_max"])
+    stored = "every kept draw" if stride == 1 else f"one in {stride} kept draws"
     add(
         f"Generated {rep['generated']} by `benchmarks/clark_ravazzolo.py` (config "
         f"`{cfg['name']}`, rai-bvar {rep['versions']['rai_bvar']}, jax {rep['versions']['jax']}, "
-        f"{rep['versions']['platform']}). Run time of this invocation {rep['seconds'] / 3600:.2f} h "
-        "(cached origins are read, not refitted).\n"
+        f"{rep['versions']['platform']}) {_provenance(rep)}. Run time of this invocation "
+        f"{rep['seconds'] / 3600:.2f} h ({_cached_sentence(rep)}). Primary LPD estimator: "
+        f"`lpd_method='{cfg['lpd_method']}'`; MCMC budget: {m['chains']} chains × {m['draws']} "
+        f"kept draws, burn {m['burn']}, thin {m['thin']}, in every stage; parameters of "
+        f"{stored} stored (`store_max` {m['store_max']}; R-hat and ESS use every kept draw); "
+        f"{cfg['draws']} forecast draws per origin, from the stored draws.\n"
     )
     add("## Acceptance criteria (N08 §C5)\n")
     add("| # | Met | Operational rule | Result |")
@@ -949,7 +1187,6 @@ def markdown(rep: dict[str, Any]) -> str:
         f"{FULL[0]}–{PRE_CRISIS_END} ({rep['n_origins']['pre_crisis']}, pre-crisis subset); "
         "expanding window; h = 1, 2, 4, 8."
     )
-    m = cfg["mcmc"]
     add(
         f"* MCMC: {m['chains']} chains × {m['draws']} kept draws, burn {m['burn']}, thin "
         f"{m['thin']}; {cfg['draws']} forecast draws per origin; backtest seed {cfg['seed']}; "
@@ -962,10 +1199,11 @@ def markdown(rep: dict[str, Any]) -> str:
         + "."
     )
     add(
-        "* LPD is the library's Rao–Blackwellised predictive density (primary); `ΔLPS gauss` is "
-        "CR's Gaussian approximation (Adolfson et al. 2007) from the same draws.\n"
+        "* LPD is the library's Rao–Blackwellised predictive density (primary; estimator "
+        f"`lpd_method='{cfg['lpd_method']}'`, see below); `ΔLPS gauss` is CR's Gaussian "
+        "approximation (Adolfson et al. 2007) from the same draws.\n"
     )
-    add(RELIABILITY_NOTE)
+    add(reliability_note(cfg["lpd_method"]))
     disagree = [
         f"{sample.replace('_', '-')} {model} {v} h{h}"
         for sample, by_model in rep["relative"].items()
@@ -1131,6 +1369,14 @@ def group_warnings(by_message: dict[str, list[str]]) -> dict[str, dict[str, Any]
     return groups
 
 
+LPD_INTEGRATED_DEVIATION = (
+    "LPD estimator: the primary score is the library's path-integrated Rao–Blackwellised "
+    "estimator (`lpd_method='integrated'`, DESIGN §7.3, D-34), not the path-conditioned SPEC §7 "
+    "default; at h = 1 the two are identical, so every h = 1 cell and criterion 6 (h = 1 only) "
+    "are estimator-independent. The path-conditioned ΔLPS is reported for the criterion-4 cells "
+    "only, as a secondary number (never in a rule)."
+)
+
 DEVIATIONS = [
     "Not a deviation from CR, but from the library default: every own-lag prior mean is 0, as in "
     "CR (WP App. 6.1), including the UR and TBILL levels; the library warns that this contradicts "
@@ -1163,6 +1409,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("out", type=Path, help="report path without suffix (writes .md and .json)")
     p.add_argument("--config", choices=sorted(CONFIGS), default="full")
+    p.add_argument(
+        "--lpd",
+        choices=("conditioned", "integrated"),
+        default=None,
+        help="override the config's LPD estimator (DESIGN §7.3, D-34); every stage uses it",
+    )
     p.add_argument("--cache", type=Path, default=Path.home() / ".cache" / "rai-bvar-cr")
     p.add_argument("--qd-url", default=None)
     p.add_argument("--md-url", default=None)
@@ -1185,10 +1437,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
     cfg = CONFIGS[args.config]
+    if args.lpd is not None:
+        cfg = dataclasses.replace(cfg, lpd_method=args.lpd)
     t_start = time.time()
+    git = git_state()  # at the start: the code this invocation runs
 
     def log(msg: str) -> None:
         print(f"[{time.time() - t_start:8.0f}s] {msg}", flush=True)
+
+    # the settings that change the cache keys (estimator, budget, seed) and the cache, so two
+    # invocations that would not share cached scores are visible as such in their logs
+    setup = (
+        f"config {cfg.name}: lpd_method={cfg.lpd_method}, MCMC {cfg.mcmc.chains} × "
+        f"{cfg.mcmc.draws} (burn {cfg.mcmc.burn}), {cfg.draws} forecast draws, seed {args.seed}, "
+        f"cache {args.cache}"
+    )
+    dirty = " (tracked files modified)" if git["git_dirty"] else ""
+    log(f"{setup}; commit {git['git_commit']}{dirty}")
 
     if args.n_jobs == 0 or args.n_jobs < -1:
         p.error("--n-jobs must be a positive int or -1 (all cores)")
@@ -1224,8 +1489,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 seed=args.seed,
                 cache=cache,
                 n_jobs=n_jobs,
+                lpd_method=cfg.lpd_method,
             )
-        log(f"ordering backtests of {args.only_ordering} cached")
+        log(f"ordering backtests of {args.only_ordering} cached ({setup})")
         return 0
     in_window = assert_in_window(mods[PRIMARY_SV], data, ["1985Q1", "2007Q4", "2011Q2"])
     log("data checks passed")
@@ -1234,6 +1500,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     results: dict[str, BacktestResult] = {}
     probes: dict[str, MomentsProbe] = {}
     warn_counts: dict[str, dict[str, dict[str, Any]]] = {}
+    cached: dict[str, dict[str, int]] = {}  # per backtest: origins read from the score cache
     for name, model in mods.items():
         probe = MomentsProbe(model, store, args.seed, cfg.draws, data.fingerprint())
         probes[name] = probe
@@ -1250,9 +1517,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cache=cache,
                 n_jobs=n_jobs,
                 name=name,
+                lpd_method=cfg.lpd_method,
             )
         results[name] = res
         warn_counts[name] = group_warnings(res.warnings)
+        cached[name] = {"cached": int(res.cached), "origins": len(all_origins)}
         log(
             f"{name}: {time.time() - t0:.0f}s ({res.cached} cached), "
             f"converged {converged_share(res, all_origins):.0%}"
@@ -1267,15 +1536,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             "draws": cfg.draws,
             "ordering_step": cfg.ordering_step,
             "noise_reps": cfg.noise_reps,
+            "origin_step": cfg.origin_step,
+            "lpd_method": cfg.lpd_method,
             "seed": args.seed,
             "n_jobs": n_jobs,
+            "skip_orderings": bool(args.skip_orderings),
+            "skip_structural": bool(args.skip_structural),
+            "cache": str(args.cache),
         },
         "versions": {
             "rai_bvar": rb.__version__,
             "jax": jax.__version__,
             "platform": f"{platform.system()} {platform.machine()}, "
             f"python {sys.version.split()[0]}",
+            **git,
         },
+        "cached": cached,
         "models": {
             k: v.vol.label if hasattr(v.vol, "label") else str(v.vol) for k, v in mods.items()
         },
@@ -1286,7 +1562,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "converged": {},
         "variants": {},
         "fit_seed_example": {o: fit_seed(args.seed, o) for o in all_origins[:2]},
-        "deviations": list(DEVIATIONS),
+        "deviations": list(DEVIATIONS)
+        + ([LPD_INTEGRATED_DEVIATION] if cfg.lpd_method == "integrated" else []),
         "notes": list(args.note),
         "warnings": warn_counts,
     }
@@ -1318,14 +1595,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                     cache=cache,
                     n_jobs=n_jobs,
                     name=name,
+                    lpd_method=cfg.lpd_method,
                 )
-            log(f"{name}: {time.time() - t0:.0f}s")
+            cached[name] = {"cached": int(sres[name].cached), "origins": len(all_origins)}
+            log(f"{name}: {time.time() - t0:.0f}s ({sres[name].cached} cached)")
         rep["structural"] = relative_table(
             sres, "SV(rw) [structural]", "Constant [structural]", all_origins
         )
     write_report_partial = dict(rep)
     write_report_partial["criteria"] = criteria(rep)
     write_report_partial["seconds"] = time.time() - t_start
+    if not args.skip_orderings:  # pending, not skipped: say so (the rule itself is unchanged)
+        write_report_partial["pending"] = ["orderings"]
+        for c in write_report_partial["criteria"]:
+            if c["id"] == 6:
+                c["detail"] = "ordering stage pending (this is the main-stage report)"
     write_report(write_report_partial, args.out)  # a usable report before the long stage
     log(f"main stage written to {args.out}.md")
     if not args.skip_orderings:

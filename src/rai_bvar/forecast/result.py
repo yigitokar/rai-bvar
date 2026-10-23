@@ -15,7 +15,12 @@ attach them:
   ``{0..j−1}`` (``(A⁻¹)₁₁ = (A₁₁)⁻¹``), O(n²) per draw without a triangular solve;
 * ``cond_scale_persistent (chain, draw, horizon, variable)`` (``exp(½ log λ^pers)``) and the
   transitory parameters ``log_p``, ``log1m_p``, ``nu (chain, draw, variable)`` for the opt-in
-  transitory Rao-Blackwellisation (``rb_transitory=True``; N03 §2.2, §5.3).
+  transitory Rao-Blackwellisation (``rb_transitory=True``; N03 §2.2, §5.3);
+* ``lag_coefs (chain, draw, lag, variable, variable_)``, ``lag_coefs[c, d, l−1] = A_l`` of the draw
+  behind slice ``(c, d)`` (``y_t = c_t + Σ_l A_l y_{t−l} + u_t``), for the opt-in path-integrated
+  estimator (``lpd_method="integrated"``; DESIGN §7.3, D-34). It costs ``S·p·n²·8`` bytes,
+  ``(p/H)·nbytes(cond_chol)`` (repeated for replicate slots), which the default estimator and
+  ``h = 1`` never read.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ import json
 import math
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -35,8 +40,10 @@ from rai_bvar.linalg import marginal_chol, mvn_logpdf_chol
 
 DIMS = ("chain", "draw", "horizon", "variable")
 CHOL_DIMS = (*DIMS, "variable_")
+LAG_DIMS = ("chain", "draw", "lag", "variable", "variable_")
 _LOG_2PI = math.log(2.0 * math.pi)
 _TRANSITORY = ("none", "outlier", "t", "outlier_t")
+LPD_METHODS = ("conditioned", "integrated")  # log_pred_density(lpd_method=…); DESIGN §7.3, D-34
 
 
 def transitory_log_density(
@@ -214,11 +221,15 @@ class ForecastResult:
         *,
         return_mcse: bool = False,
         rb_transitory: bool = False,
+        lpd_method: Literal["conditioned", "integrated"] = "conditioned",
     ):
         """Rao-Blackwellised log predictive density of ``y_{T+h}`` (all or a subset of variables).
 
-        ``log p̂ = logsumexp_s log N(y; m_s, Σ_s) − log S``. With ``return_mcse`` the delta-method
-        Monte Carlo standard error of ``log p̂`` is returned as well: ``sd(w)/(√S·mean(w))`` for
+        ``log p̂ = logsumexp_s log N(y; m_s, Σ_s) − log S``, by default (``lpd_method=
+        "conditioned"``, SPEC §7) with the contract moments ``m_s = cond_mean_{s,h}`` and ``Σ_s =
+        LLᵀ``, ``L = cond_chol_{s,h}``, of ``y_{T+h}`` given draw ``s`` and its simulated path up
+        to ``T+h−1``. With ``return_mcse`` the delta-method Monte Carlo standard error of
+        ``log p̂`` is returned as well: ``sd(w)/(√S·mean(w))`` for
         the weights ``w_s = exp(log p_s − max)`` of independent draws, multiplied by ``√(S/ESS)``
         with ``ESS = diagnostics.ess_mean(w)`` on the ``(chain, draw)`` array when
         ``attrs["engine"] == "mcmc"`` (autocorrelated draws; DESIGN §7.3).
@@ -234,9 +245,48 @@ class ForecastResult:
         :func:`transitory_log_density`. It needs the extras ``cond_A``,
         ``cond_scale_persistent`` and the transitory parameters (MCMC forecasts) and a full or
         leading-block subset; otherwise it warns and falls back to the drawn-scale estimator.
+
+        ``lpd_method="integrated"`` (opt-in; DESIGN §7.3, D-34) conditions draw ``s`` only on its
+        parameters and its drawn latent scale path (SV log-volatilities and transitory scales of
+        ``T+1..T+h``, inside ``L_k = cond_chol_{s,k}``) and integrates the simulated
+        ``y_{T+1..T+h−1}`` out analytically. With the moving-average coefficients ``Φ_0 = I``,
+        ``Φ_j = Σ_{l=1}^{min(j,p)} A_l Φ_{j−l}`` of the draw's lag matrices (the ``lag_coefs``
+        extra; ``structural.irf.ma_coefficients``) and its simulated shocks ``u_k = paths_k −
+        cond_mean_k``, ``y_{T+h} | θ_s, λ_{s,T+1..T+h} ~ N(m_h, M_h M_hᵀ)`` exactly, with
+
+        * ``m_h = cond_mean_h − Σ_{k<h} Φ_{h−k} u_k``, the zero-shock mean (deterministic terms
+          cancel), and
+        * ``M_h = [Φ_{h−1} L_1 | Φ_{h−2} L_2 | … | Φ_0 L_h]`` (``n × hn``);
+
+        every subset (leading or not) gets the lower factor of ``(M_h M_hᵀ)[idx, idx]`` from the QR
+        of ``M_h[idx]ᵀ`` (``linalg.marginal_chol``; ``M_h M_hᵀ`` is never formed). The weights no
+        longer depend on where the simulated path went, so a tail outcome at ``h > 1`` is not
+        carried by the one draw whose path happened to wander towards it (docs/paper/NOTES.md 8b).
+        It uses no additional random numbers but is still a Monte Carlo average over the
+        forecast's parameter and volatility-path draws: exact given those draws (with one draw
+        and a constant volatility, the exact predictive density), and for a tail outcome its
+        weights can still concentrate on a few draws, where the delta-method MCSE (the same
+        formula) understates the spread across forecast seeds. At ``h = 1`` the two
+        estimators coincide and the conditioned code runs (bitwise equal; ``lag_coefs`` is not
+        needed there). For ``h > 1`` it needs ``lag_coefs`` (MCMC forecasts of a linear or zero
+        mean; analytic, benchmark and ordering-pooled forecasts do not carry it) and raises
+        ``ValueError`` without it, and ``rb_transitory=True`` raises (the transitory scales of
+        ``T+1..T+h−1`` would have to be integrated jointly: no closed form), whatever the
+        ``transitory`` attribute.
+
+        ``variables`` must be non-empty and distinct (a repeated variable makes the subset
+        covariance singular): ``ValueError`` otherwise, for either estimator.
         """
         if not 1 <= horizon <= self.horizon:
             raise ValueError(f"horizon must be in 1..{self.horizon}")
+        if lpd_method not in LPD_METHODS:
+            raise ValueError(f"lpd_method must be one of {LPD_METHODS}, got {lpd_method!r}")
+        integrated = lpd_method == "integrated" and horizon > 1
+        if integrated and rb_transitory:
+            raise ValueError(
+                "rb_transitory=True has no closed form with lpd_method='integrated' at horizon > 1 "
+                "(the transitory scales of T+1..T+h−1 would have to be integrated jointly)"
+            )
         idx = self._indices(variables)
         y = np.asarray(y, dtype=np.float64).reshape(-1)
         if y.size == self._ds.sizes["variable"] and idx.size != y.size:
@@ -249,7 +299,7 @@ class ForecastResult:
             order = np.argsort(idx)
             idx, y = idx[order], y[order]
         h = horizon - 1
-        logp = None
+        logp = self._integrated_logp(y, horizon, idx) if integrated else None
         if rb_transitory and self._ds.attrs.get("transitory") == "none":
             rb_transitory = False  # no transitory scale: the estimator below is already exact
         if rb_transitory:
@@ -327,6 +377,44 @@ class ForecastResult:
         )  # fmt: skip
         return (logf - np.log(ell)).sum(axis=-1)
 
+    def _lag_matrices(self) -> np.ndarray:
+        """``A_l`` of every stacked draw, ``(S, p, n, n)``, from the ``lag_coefs`` extra (module
+        docstring); ``ValueError`` when it is absent or has other dims."""
+        da = self._ds.get("lag_coefs")
+        if da is None:
+            raise ValueError(
+                "lpd_method='integrated' at horizon > 1 needs the 'lag_coefs' variable, which "
+                "MCMC forecasts of a linear or zero mean carry (DESIGN §7.3); analytic, benchmark "
+                "and ordering-pooled forecasts do not"
+            )
+        if da.dims != LAG_DIMS:
+            raise ValueError(f"'lag_coefs' must have dims {LAG_DIMS}, got {da.dims}")
+        return np.asarray(self.stacked("lag_coefs"), dtype=np.float64)
+
+    def _integrated_moments(self, horizon: int, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """``(m_h[idx], F)`` per stacked draw for ``lpd_method="integrated"``: the zero-shock mean
+        ``m_h = cond_mean_h − Σ_{k<h} Φ_{h−k} u_k`` and the lower factor ``F`` of ``(M_h
+        M_hᵀ)[idx, idx]``, ``M_h = [Φ_{h−1} L_1 | … | Φ_0 L_h]`` (``log_pred_density``)."""
+        A = self._lag_matrices()
+        S, p, n = A.shape[0], A.shape[1], A.shape[2]
+        phi = np.zeros((S, horizon, n, n))  # Φ_0..Φ_{h−1}
+        phi[:, 0] = np.eye(n)
+        for j in range(1, horizon):
+            q = min(j, p)
+            phi[:, j] = (A[:, :q] @ phi[:, j - q : j][:, ::-1]).sum(axis=1)  # Σ_l A_l Φ_{j−l}
+        rev = phi[:, ::-1]  # Φ_{h−k} for k = 1..h
+        mean = self.stacked("cond_mean")[:, :horizon]
+        u = self.stacked("paths")[:, : horizon - 1] - mean[:, : horizon - 1]  # simulated shocks
+        m = mean[:, -1] - (rev[:, :-1] @ u[..., None])[..., 0].sum(axis=1)
+        blocks = rev @ self.stacked("cond_chol")[:, :horizon]  # (S, h, n, n): Φ_{h−k} L_k
+        M = np.swapaxes(blocks, 1, 2).reshape(S, n, horizon * n)
+        return m[:, idx], marginal_chol(M, idx)
+
+    def _integrated_logp(self, y: np.ndarray, horizon: int, idx: np.ndarray) -> np.ndarray:
+        """``log N(y; m_h[idx], (M_h M_hᵀ)[idx, idx])`` per stacked draw (horizon > 1)."""
+        mean, chol = self._integrated_moments(horizon, idx)
+        return mvn_logpdf_chol(y, mean, chol)
+
     # ------------------------------------------------------------------ summaries
 
     def quantiles(self, q: Sequence[float] | float, *, level: bool = False) -> xr.DataArray:
@@ -365,7 +453,10 @@ class ForecastResult:
         missing = [v for v in variables if v not in names]
         if missing:
             raise KeyError(f"unknown variables {missing}")
-        return np.array([names.index(v) for v in variables])
+        if not len(variables) or len(set(variables)) != len(variables):
+            # a repeated variable makes the subset covariance singular (finite nonsense or NaN)
+            raise ValueError(f"variables must be non-empty and distinct, got {list(variables)}")
+        return np.array([names.index(v) for v in variables], dtype=np.intp)
 
     def _source(self, level: bool) -> xr.DataArray:
         if not level:

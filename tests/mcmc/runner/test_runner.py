@@ -386,7 +386,7 @@ def test_production_smoke_structural_sv(monkeypatch):
     "structural_constant", "structural_sv_outliers", "structural_sv_t", "structural_mode2_constant",
     "structural_iw_equivalent", "reduced_constant", "reduced_sv", "reduced_sv_outliers", "reduced_sv_t",
     "reduced_iw_equivalent", "structural_sv_outliers_t", "reduced_sv_outliers_t", "structural_sv_rw",
-    "structural_sv_invgamma", "structural_sv_fixed_b0", "zero_sv",
+    "structural_sv_invgamma", "structural_sv_fixed_b0", "zero_sv", "reduced_sv_rw",
 ])  # fmt: skip
 def test_production_smoke_every_composition(name, monkeypatch):
     """DESIGN §13 WP14 acceptance: every composition of §9.5 runs (2 chains × 50 draws)."""
