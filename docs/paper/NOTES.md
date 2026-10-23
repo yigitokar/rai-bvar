@@ -59,6 +59,15 @@ re-derived before it goes into the paper).
 10. **Float64 failure in the prior's extreme tail.** One Geweke chain out of 4000 reached `h₀ ≈ 30`
     where `|y| ≈ 1e8` made a Cholesky pivot zero; the engine reports it (no silent jitter).
     Evidence: `tests/geweke/test_geweke_compositions.py` docstring. Status: recorded.
+    **Resolved by a QR draw (2026-10-23):** at the failing state (chain 3214, sweep 194; equation 0
+    at `h ≈ 31–37`) equation 2's `a`-row precision has exact eigenvalues 14.8 and 1.9e17
+    (`cond = 1.3e16`), so forming `ZᵀWZ` loses the small one; the posterior itself is benign (mean
+    (−0.17, −0.66), sd (0.20, 0.16)). Householder QR of `[diag(√prec); √w ⊙ Z]` (`R` = the upper
+    Cholesky factor of `K`, so the same noise map) gets it to 1.6e-8 sd and agrees with the
+    Cholesky draw to ≤ 3e-14 elsewhere. The alternative — narrowing the test prior's `h` tail
+    (`(φ+1)/2 ~ Beta(10, 3)` gives `P(max|h| > 30) < 5e-7` → 0 in 2e6 draws, from 5e-7) — would have
+    hidden a real numerical weakness and dropped high-persistence coverage. Status: verified
+    (`tests/mcmc/blocks/test_contemp_lstsq.py`).
 11. **The design-review errata (E1–E28)** in DESIGN §0.2 document what independent reviewers caught
     in the proposals before implementation. Status: verified (in repository).
 

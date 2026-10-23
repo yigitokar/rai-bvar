@@ -641,6 +641,12 @@ prior on the rows (Bayes' rule, covariance form; Matheron draws; Mode II integra
 `λ | d ~ IG(c + m/2, ·)`; `iw_equivalent`, where `λ | d` is not IG, draws it by exact rejection from
 `IG(c, C)` with acceptance `(|S₀|/|S(λ)|)^{½}exp(−½(q(λ) − q∞))`, and its log prior is exact up to a
 constant). Geweke rows 201–205 (§9.5), A1 extension (§9.8), mutants M17–M18 (§9.7).
+(6) Numerics (queue item 6): `Recursive.contemp_core` draws `a_i` by Householder QR of the
+whitened rows instead of the Jacobi-scaled Cholesky of the formed `K_a` (§3.7.1). The
+`test_g_full[reduced_sv]` chain that reached `h ≈ 31–37` had `cond(K_a) = 1.3e16` (exact
+eigenvalues 14.8 and 1.9e17) and a zero pivot; the QR draw matches the exact conditional there to
+1.6e-8 sd and agrees with the Cholesky draw to ≤ 3e-14 (sd units and relative) on ordinary states.
+The test prior's `h` tail is unchanged.
 
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 
@@ -819,7 +825,10 @@ log-likelihoods without knowing the batching.
 - `contemp_conditional` (N04 §6.2 with its minus sign; N05 §5.4): with `Z = cols ⊙ cmask`,
   `K_a = diag(prec) + Zᵀ diag(w) Z`, `b_a = prec ⊙ mean + Zᵀ(w ⊙ (target − g_i))`. Since `cols = −ỹ_{<}`, this
   is the regression of `ỹ_i − g_i` on `−ỹ_{<i}`.
-- `contemp_step`: `precision_draw(K_a, b_a, z)`, then `a ⊙ cmask`; `Coupling(n_active = Σ cmask,
+- `contemp_step`: the draw of `N(K_a⁻¹b_a, K_a⁻¹)` as `linalg.lstsq_draw` on the whitened rows
+  `[diag(√prec); √w ⊙ Z]` (QR, `diag(R) > 0`: the same function of `z` as `precision_draw(K_a, b_a, z)`
+  to rounding, without forming `ZᵀWZ`; WP25 queue item 6), `precision_draw(K_a, b_a, z)` when
+  `contemp_conditional` is overridden; then `a ⊙ cmask`; `Coupling(n_active = Σ cmask,
   quad = ½ Σ cmask·prec0·(a − mean0)²)` when scaled, zeros otherwise.
 - `chol`, `mean_map`, `reduced_form`: `solve_triangular(A, ·, lower=True, unit_diagonal=True)`; no inverses
   (N05 §8). `chol` is lower triangular with diagonal `exp(½ log λ) > 0`.

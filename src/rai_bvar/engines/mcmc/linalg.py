@@ -56,6 +56,7 @@ __all__ = [
     "fixed_factor_draw",
     "fixed_factor_prepare",
     "gram_from_packed",
+    "lstsq_draw",
     "precision_draw",
     "precision_draw_factored",
     "precision_factor",
@@ -191,6 +192,29 @@ def precision_draw(K: Array, b: Array, z: Array) -> tuple[Array, StepInfo]:
     L, s, info = precision_factor(K)
     theta = precision_draw_factored(L, s, b, z)
     return theta, StepInfo(info.ok & jnp.all(jnp.isfinite(theta)), info.min_pivot)
+
+
+def lstsq_draw(A: Array, rhs: Array, z: Array) -> tuple[Array, StepInfo]:
+    """``θ ~ N(K⁻¹b, K⁻¹)`` with ``K = AᵀA`` and ``b = Aᵀrhs`` **without forming K** (whitened
+    regression rows ``A``, e.g. ``[diag(√prec); √w ⊙ Z]``), for injected ``z ~ N(0, I)``.
+
+    Householder QR ``A = QR`` with ``diag(R) > 0`` makes ``R`` the upper Cholesky factor of ``K``,
+    so ``θ = R⁻¹(Qᵀrhs + z)`` is the same function of ``z`` as :func:`precision_draw` ``(K, b, z)``
+    (``= K⁻¹b + R⁻¹z``) up to rounding, but the condition number of ``A`` (``√cond(K)``) is never
+    squared: :func:`precision_draw` loses ``K``'s small eigenvalues once ``cond(K) ≳ 1/ε``
+    (the contemporaneous Gram of a ~1e8-scale regressor next to an O(1) one), this does not.
+    ``min_pivot = min_j (R_jj/‖A_·j‖)²``: the pivots of the Jacobi-scaled ``K`` (as
+    :func:`precision_factor` reports them). ``ok`` iff ``diag(R) > 0`` and ``θ`` is finite.
+    Padding is exact as in :func:`precision_draw` (unit prior rows, zero data columns)."""
+    Q, R = jnp.linalg.qr(A, mode="reduced")
+    sign = jnp.where(jnp.diagonal(R) < 0.0, -1.0, 1.0)
+    R = sign[:, None] * R
+    c = sign * jnp.matmul(Q.T, rhs, precision=lax.Precision.HIGHEST)
+    theta = solve_triangular(R, c + z, lower=False)
+    dR = jnp.diagonal(R)
+    norms = jnp.sqrt(jnp.sum(A * A, axis=0))
+    ok = jnp.all(jnp.isfinite(dR) & (dR > 0.0)) & jnp.all(jnp.isfinite(theta))
+    return theta, StepInfo(ok, _min_pivot((dR / norms) ** 2))
 
 
 def precision_moments(K: Array, b: Array) -> tuple[Array, Array]:

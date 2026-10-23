@@ -50,9 +50,11 @@ Known nightly finding (2026-10-22): ``test_g_full[reduced_sv]`` failed on one SC
 (sweep 194), which had reached the prior's extreme tail (``h₀ ≈ 30–36``, ``φ ≈ 0.999``,
 ``σ ≈ 0.9``; ``P(max h > 25) ≈ 1e-6`` per prior draw) where ``|y| ≈ 10⁸`` makes the
 contemporaneous precision of equation 2 singular in float64 (Cholesky pivot 0; status code 1003,
-``EQ_CONTEMP``, equation 2). The engine reports the failure as designed (D-18, no jitter) and the
-test counts it; the remedy belongs to the kernel (a QR form of the A-row draw) or to the test
-prior's ``h`` tail, not to this harness.
+``EQ_CONTEMP``, equation 2). The engine reported the failure as designed (D-18, no jitter).
+**Resolved** (WP25 queue item 6, 2026-10-23) in the kernel, not the harness or the test prior: the
+``a``-row draw is now the QR form of the whitened rows (``linalg.lstsq_draw``), which never forms
+the Gram (``cond(K_a) = 1.3e16`` at that state, exact eigenvalues 14.8 and 1.9e17); the replay of
+that chain is ``tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed``.
 
 Seeds are fixed (one per tier); the Geweke keys fold the CRC-32 of the composition name
 (``validation_key(seed, Tier.G, crc32(name), chain)``), so compositions use disjoint streams.
