@@ -28,7 +28,7 @@ from rai_bvar.linalg import (
     sample_inverse_wishart_chol,
     sample_matrix_normal,
 )
-from rai_bvar.models.base import SeedLike, spec_hash_of
+from rai_bvar.models.base import SeedLike, seed_label, spec_hash_of
 
 ParamSampler = Callable[[int, np.random.Generator], tuple[np.ndarray, np.ndarray]]
 
@@ -48,6 +48,10 @@ class RandomWalk:
     def spec(self) -> dict[str, Any]:
         return {"class": "RandomWalk", **asdict(self)}
 
+    @classmethod
+    def from_spec(cls, spec: dict[str, Any]) -> RandomWalk:
+        return cls(**{k: v for k, v in spec.items() if k != "class"})
+
     def fit(self, data: VARData) -> LinearGaussianFit:
         values = data.values
         if len(values) < 3:
@@ -55,7 +59,9 @@ class RandomWalk:
         dy = np.diff(values, axis=0)
         n = values.shape[1]
         drift = dy.mean(axis=0) if self.drift else np.zeros(n)
-        chol = gram_cholesky((dy - dy.mean(axis=0)) / np.sqrt(len(dy) - 1))
+        scale = np.sqrt(len(dy) - 1)
+        ref = np.linalg.norm(dy, axis=0) / scale  # norms before demeaning cancels anything
+        chol = gram_cholesky((dy - dy.mean(axis=0)) / scale, ref_norms=ref)
         deterministic = "c" if self.drift else "n"
         coefs = np.vstack([drift[None, :], np.eye(n)]) if self.drift else np.eye(n)
 
@@ -87,6 +93,10 @@ class OLSVAR:
     def spec(self) -> dict[str, Any]:
         return {"class": "OLSVAR", **asdict(self)}
 
+    @classmethod
+    def from_spec(cls, spec: dict[str, Any]) -> OLSVAR:
+        return cls(**{k: v for k, v in spec.items() if k != "class"})
+
     def fit(self, data: VARData) -> LinearGaussianFit:
         Y, X = lagged_design(data.values, self.lags, self.deterministic)
         T, k = X.shape
@@ -97,7 +107,9 @@ class OLSVAR:
                 f"OLS-VAR({self.lags}) needs at least {k + n + 1} usable observations, got {T}"
             )
         B, R, resid = qr_least_squares(X, Y)
-        scale_chol = gram_cholesky(resid)  # Cholesky factor of S = resid'resid
+        scale_chol = gram_cholesky(
+            resid, ref_norms=np.linalg.norm(Y, axis=0)
+        )  # factor of S = resid'resid
 
         if self.uncertainty == "none":
             chol = scale_chol / np.sqrt(df)
@@ -136,6 +148,7 @@ class LinearGaussianFit:
         if horizon < 1 or draws < 1:
             raise ValueError("horizon and draws must be positive")
         rng = np.random.default_rng(seed)
+        label = seed_label(seed, rng)
         coefs, chol = self._sampler(draws, rng)
         paths, mean, cond_chol = simulate_linear_var(
             coefs,
@@ -158,6 +171,7 @@ class LinearGaussianFit:
                 "engine": self.engine,
                 "spec": self.spec,
                 "spec_hash": spec_hash_of(self.spec),
+                "seed": label,
                 "tcodes": self.data.tcodes,
                 "rai_bvar_version": __version__,
             },

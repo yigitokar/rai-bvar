@@ -237,7 +237,7 @@ for each iteration:
 
 | Prior | Parameters | Phase |
 | :--- | :--- | :--- |
-| `Minnesota` | `lambda_` (overall tightness), `alpha` (lag decay; fixed at 2, i.e. `1/s²`, as in GLP, or optionally a hyperparameter), `cross` (cross-variable tightness; must be 1 in conjugate form), `psi` (scales; default: residual s.d. of univariate AR(p)), `soc` (μ), `sur` (δ), `mean` (prior mean of own first lag; default from transform codes, §5.3), `form` (`"conjugate"`, `"structural"`, `"reduced"`), `hierarchy` (`"fixed"`, `"eb"`, `"mh"`) | 1–2 |
+| `Minnesota` | `lambda_` (overall tightness), `alpha` (lag decay; fixed at 2, i.e. `1/s²`, as in GLP, or optionally a hyperparameter), `cross` (cross-variable tightness; must be 1 in conjugate form), `psi` (IW scale diagonal, in variance units; default: residual variance of a univariate AR(p) with constant, by least squares), `soc` (μ), `sur` (δ), `mean` (prior mean of own first lag; default from transform codes, §5.3), `form` (`"conjugate"`, `"structural"`, `"reduced"`), `hierarchy` (`"fixed"`, `"eb"`, `"mh"`) | 1–2 |
 | `Horseshoe`, `NormalGamma`, `DirichletLaplace`, `R2D2`, `SSVS` | Global-local shrinkage with coefficient groups (own lags, cross lags, deterministics, contemporaneous) | 3 |
 | `AsymmetricConjugate` | Chan (2022): cross-variable shrinkage with conjugate-like speed | 3 |
 
@@ -259,7 +259,7 @@ Conjugate Normal-Inverse-Wishart: `B | Σ ~ MN(B̄, Σ ⊗ Ω̄)`, `Σ ~ IW(S̄,
 
 Implementation:
 
-- The prior is expressed as dummy observations `(Y_d, X_d)` (Minnesota, SOC, SUR) stacked on the data: `Y* = [Y_d; Y]`, `X* = [X_d; X]`. SOC/SUR dummies use `ȳ_0`, the mean of the first `p` observations of the window.
+- The prior is expressed as dummy observations `(Y_d, X_d)` (Minnesota, SOC, SUR) stacked on the data: `Y* = [Y_d; Y]`, `X* = [X_d; X]`. SOC/SUR dummies use `ȳ_0`, the mean of the first `p` observations of the window. SOC rows are built only for variables with a non-zero own-lag prior mean (`soc_scope="persistent"`, default), so differenced variables are not pulled towards a unit root; `soc_scope="all"` keeps GLP's rows for every variable (as R `BVAR` and BoE `bvar` do).
 - Thin QR: `X* = QR`. Posterior mean `B̄ = R⁻¹Q'Y*` via a triangular solve. `Ω̄ = (R'R)⁻¹` is never formed.
 - Draws: `Σ ~ IW(S̄, ν̄)` via the Bartlett decomposition, then `B = B̄ + R⁻¹ Z C'` with `Σ = CC'` and `Z` a `k × n` standard normal matrix (two triangular solves).
 - Closed-form log marginal likelihood (matrix-t), with all log-determinants taken from triangular factors (`log|X*'X*| = 2 Σ log|R_ii|`).
@@ -267,6 +267,8 @@ Implementation:
   - `hierarchy="eb"`: maximise `log p(Y | h) + log p(h)` with L-BFGS-B on log-transformed `h`.
   - `hierarchy="mh"`: random-walk Metropolis on `h`, proposal covariance from the inverse Hessian at the mode; then draw `(B, Σ) | h, Y` directly.
 - **COVID scaling (Lenza & Primiceri 2022).** `y_t = B'x_t + s_t ε_t`, so the residual covariance is `s_t² Σ`, with one scalar common to all variables. `s_t = 1` before `t*`; `s_{t*}, s_{t*+1}, s_{t*+2}` are free (March, April, May 2020 in monthly data); afterwards the excess over one decays geometrically, `s_{t*+j} = 1 + (s_{t*+2} − 1) ρ^{j−2}`. Rows of `Y` and `X` are divided by `s_t` (GLS), which preserves conjugacy. `(s_{t*}, s_{t*+1}, s_{t*+2}, ρ)` join `h`, with Pareto(1, 1) priors on the scales and a Beta prior (mode 0.8, s.d. 0.2) on `ρ`.
+  - The Pareto(1, 1) scale priors are truncated at `ParetoPrior.upper` (default 1000). A scale that no sample period informs (forecast origins at `t*` or `t*+1`, rolling windows starting after `t*`) is not estimated: EB keeps it at the prior mode (1), MH draws it from the truncated prior when forecasting, so the truncation point sets the prior predictive variance there (`E[s²] = upper`).
+  - With the scaling active, the default ψ (`psi="ar"`) is estimated on the periods before `t*` only, where `s_t = 1` (as in Lenza & Primiceri's code).
 - Given `h`, draws are iid. Only the MH chain over `h` needs convergence diagnostics.
 
 ---
@@ -666,6 +668,16 @@ Each phase ends with explicit exit criteria. Phases 1 and 2 can run in parallel 
 - Recursive IRFs and FEVD.
 
 **Exit:** parity with R's `BVAR` and with the Bank of England `bvar` (§10.4, decision D5); analytic tests green; GLP / Kuschnig-Vashold replication; `n = 100` fit within a documented time budget.
+
+*Status (2026-10-22): met.* Log marginal likelihoods match R `BVAR` (exact cases) and BoE `bvar` to ~1e-11 relative; posterior moments to ~1e-9; EB modes to 1e-3; MH quantiles within Monte Carlo error. Measured time budget (simulated `n = 100`, `p = 13`, `T = 300`, laptop CPU):
+
+| Hierarchy | Fit | Forecast, 1000 draws × 8 steps | Forecast peak memory |
+| :--- | :--- | :--- | :--- |
+| `fixed` | 0.1 s | 3.7 s | 0.45 GB |
+| `eb`, λ only | 2.1 s | 3.6 s | 0.45 GB |
+| `eb`, λ, μ, δ | ~100 s (≈35 s on FRED-QD) | 3.6 s | 0.45 GB |
+
+EB with dummy hyperparameters runs a deterministic multistart (secondary modes in μ, δ and the COVID decay were found in review), which dominates its cost; screening the extra starts at a looser tolerance is a known optimisation for later. MH over hyperparameters at `n = 100` takes minutes and is meant for smaller systems or final fits, not wide backtests.
 
 ### Phase 2: MCMC engine and the volatility axis
 

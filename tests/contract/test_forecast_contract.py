@@ -3,18 +3,52 @@
 Every model in ``REGISTERED_MODELS`` must produce a ``ForecastResult`` whose paths are joint
 draws consistent with the stored conditional Gaussian moments. Analytic checks compare the
 Rao-Blackwellised log predictive density with closed forms where they exist.
+
+The conjugate Minnesota ``BVAR`` compositions (analytic engine, SPEC §4.6) are registered too;
+their closed forms (normal-inverse-Wishart posterior, multivariate-t one-step predictive) are
+written out below with normal equations, independently of the QR code in ``rai_bvar``.
 """
 
 from __future__ import annotations
+
+import copy
+import dataclasses
+import json
 
 import numpy as np
 import pandas as pd
 import pytest
 from scipy import stats
+from scipy.special import logsumexp
 
-from rai_bvar import __version__
+from rai_bvar import BVAR, LenzaPrimiceri, Linear, MHSettings, Minnesota, __version__
 from rai_bvar.forecast import ContractError, ForecastResult, check_structure, simulation_consistency
 from rai_bvar.models import OLSVAR, FittedModel, Model, RandomWalk, spec_hash
+
+FAST_MH = MHSettings(draws=100, burn=100, chains=2, seed=7)  # small: the contract, not mixing
+
+
+def _bvar(lags: int = 1, deterministic: str = "c", outliers=None, **prior) -> BVAR:
+    return BVAR(
+        mean=Linear(prior=Minnesota(**prior)),
+        lags=lags,
+        deterministic=deterministic,
+        outliers=outliers,
+    )
+
+
+# Own-lag prior means come from the tcodes (SPEC §5.3): 0 for gdp/prices (Δlog), 1 for the rate.
+BVAR_MODELS = [
+    _bvar(1, hierarchy="fixed"),
+    _bvar(2, "n", hierarchy="fixed"),
+    _bvar(2, hierarchy="fixed", soc=1.0, sur=1.0),
+    _bvar(1, "n", hierarchy="fixed", soc=0.5),
+    _bvar(2, hierarchy="eb"),
+    _bvar(1, hierarchy="eb", soc=1.0, sur=1.0),
+    _bvar(2, "n", hierarchy="eb", sur=1.0),
+    _bvar(1, hierarchy="mh", mh=FAST_MH),
+    _bvar(1, outliers=LenzaPrimiceri(), hierarchy="eb"),  # sim_data ends 2019Q4: inactive
+]
 
 REGISTERED_MODELS = [
     RandomWalk(),
@@ -23,6 +57,7 @@ REGISTERED_MODELS = [
     OLSVAR(2),
     OLSVAR(2, uncertainty="none"),
     OLSVAR(1, deterministic="ct"),
+    *BVAR_MODELS,
 ]
 
 H = 12  # > number of regressors of every registered model (needed by the joint-path check)
@@ -31,6 +66,12 @@ SEED = 20261021
 
 
 def model_id(model) -> str:
+    if isinstance(model, BVAR):  # the nested spec is too long for an id
+        prior = model.mean.prior
+        dummies = [d.upper() for d in ("soc", "sur") if getattr(prior, d) is not None]
+        outliers = ["LP"] if model.outliers is not None else []
+        parts = [f"BVAR({prior.hierarchy})", *dummies, f"p{model.lags}", model.deterministic]
+        return "-".join([*parts, *outliers])
     spec = model.spec()
     extras = [f"{k}={v}" for k, v in spec.items() if k not in ("class", "lags")]
     return "-".join([model.name, *extras])
@@ -98,7 +139,7 @@ def _model_design(model, fitted) -> tuple[int, str]:
     """Lags and deterministic terms of a linear conditional mean (skip for other models)."""
     if isinstance(model, RandomWalk):
         return 1, "c" if model.drift else "n"
-    if isinstance(model, OLSVAR):
+    if isinstance(model, OLSVAR | BVAR):
         return model.lags, model.deterministic
     lags, deterministic = getattr(fitted, "lags", None), getattr(fitted, "deterministic", None)
     if lags is None or deterministic is None:
@@ -143,9 +184,10 @@ def forecast(fitted) -> ForecastResult:
 def test_model_protocol(model, fitted):
     assert isinstance(model, Model)
     assert isinstance(fitted, FittedModel)
-    assert spec_hash(model) == spec_hash(
-        type(model)(**{k: v for k, v in model.spec().items() if k != "class"})
-    )
+    # specs round-trip through JSON and rebuild an equal model
+    rebuilt = type(model).from_spec(json.loads(json.dumps(model.spec(), default=list)))
+    assert rebuilt == model
+    assert spec_hash(model) == spec_hash(rebuilt)
     assert len({spec_hash(m) for m in REGISTERED_MODELS}) == len(REGISTERED_MODELS)
 
 
@@ -168,6 +210,7 @@ def test_coordinates_and_attributes(forecast, model, sim_data):
     if isinstance(model, RandomWalk | OLSVAR):
         assert ds.attrs["engine"] == ("plug-in" if _is_plug_in(model) else "analytic")
     assert ds.attrs["rai_bvar_version"] == __version__
+    assert ds.attrs["seed"] not in ("", "unknown")
     assert '"gdp": 5' in ds.attrs["tcodes"]
 
 
@@ -471,3 +514,256 @@ def test_simulation_consistency_detects_wrong_moments(fitted):
     ds = fr.dataset.copy(deep=True)
     ds["cond_chol"] = ds["cond_chol"] * 0.8  # stored scale too small for the simulated paths
     assert simulation_consistency(ForecastResult(ds)) < 1e-6
+
+
+# --------------------------------------------------------------------------- BVAR compositions
+
+BVAR_IID = [m for m in BVAR_MODELS if m.mean.prior.hierarchy != "mh"]  # one h: iid (B, Σ) draws
+BVAR_MH = [m for m in BVAR_MODELS if m.mean.prior.hierarchy == "mh"]
+_SCALAR_HYPER = ("lambda", "alpha", "soc", "sur")
+
+
+def _own_lag_means(data) -> np.ndarray:
+    """SPEC §5.3: 1 for persistent levels (tcodes 1 and 4), 0 for differenced series."""
+    return np.array([1.0 if data.tcodes[v] in (1, 4) else 0.0 for v in data.variables])
+
+
+def _conjugate_posterior(model, values: np.ndarray, own_mean: np.ndarray, hyper: dict):
+    """GLP (2015) normal-inverse-Wishart posterior, written out with normal equations.
+
+    Prior ``Σ ~ IW(diag ψ, d = n + 2)``, ``vec B | Σ ~ N(vec b, Σ ⊗ Ω)``, Ω diagonal with
+    ``λ² / (l^α ψ_j / (d − n − 1))`` on lag ``l`` of variable ``j`` and ``var_const`` on the
+    deterministic terms; SOC (μ) and SUR (δ) dummy rows built from the mean of the first ``p``
+    observations are stacked on the data. Returns ``B̄``, the posterior precision
+    ``P = Ω⁻¹ + X*'X*`` (so ``Ω̄ = P⁻¹``), ``S̄`` and ``ν̄``.
+    """
+    lags, deterministic = model.lags, model.deterministic
+    Y, X, _, _ = _ols(values, lags, deterministic)
+    p, n_det = _design_terms(lags, deterministic)
+    n, k = Y.shape[1], X.shape[1]
+    d = n + 2.0
+    psi = np.asarray(hyper["psi"], dtype=np.float64)
+    lag = np.repeat(np.arange(1, p + 1), n)
+    omega = np.concatenate(
+        [
+            np.full(n_det, model.mean.prior.var_const),
+            hyper["lambda"] ** 2 / (lag ** hyper["alpha"] * np.tile(psi, p) / (d - n - 1.0)),
+        ]
+    )
+    b = np.zeros((k, n))
+    b[n_det + np.arange(n), np.arange(n)] = own_mean
+    ybar0 = values[:p].mean(axis=0)
+    Yd, Xd = [np.zeros((0, n))], [np.zeros((0, k))]
+    if hyper["soc"] is not None:  # SOC rows only for variables with a non-zero own-lag mean
+        rows = (np.diag(ybar0) / hyper["soc"])[np.asarray(own_mean) != 0]
+        Yd.append(rows)
+        Xd.append(np.hstack([np.zeros((len(rows), n_det)), np.tile(rows, p)]))
+    if hyper["sur"] is not None:
+        row = ybar0[None, :] / hyper["sur"]
+        Yd.append(row)
+        const = np.array([1.0, 0.0])[:n_det][None, :] / hyper["sur"]
+        Xd.append(np.hstack([const, np.tile(row, p)]))
+    Ys, Xs = np.vstack([*Yd, Y]), np.vstack([*Xd, X])
+    prior_precision = np.diag(1.0 / omega)
+    P = prior_precision + Xs.T @ Xs
+    B = np.linalg.solve(P, prior_precision @ b + Xs.T @ Ys)
+    E = Ys - Xs @ B
+    S = np.diag(psi) + E.T @ E + (B - b).T @ prior_precision @ (B - b)
+    return B, P, S, d + Ys.shape[0]
+
+
+def _bvar_one_step_t(model, data, hyper: dict):
+    """Frozen ``scipy.stats.multivariate_t``: ``y_{T+1} | Y, h ~ t_ν(B̄'x, S̄(1 + x'Ω̄x)/ν)``
+    with ``ν = ν̄ − n + 1``."""
+    values = data.values
+    B, P, S, nu_bar = _conjugate_posterior(model, values, _own_lag_means(data), hyper)
+    p, n_det = _design_terms(model.lags, model.deterministic)
+    x = _regressor([values[-j] for j in range(1, p + 1)], len(values) + 1.0, n_det)
+    nu = nu_bar - data.n_vars + 1.0
+    shape = S * (1.0 + x @ np.linalg.solve(P, x)) / nu
+    return stats.multivariate_t(loc=B.T @ x, shape=shape, df=nu)
+
+
+def _mh_hypers(fitted) -> list[dict]:
+    """One complete hyperparameter dict per pooled MH draw (scalar hyperparameters only)."""
+    draws = fitted.mh.draws
+    assert set(draws) <= set(_SCALAR_HYPER), sorted(draws)
+    size = len(next(iter(draws.values())))
+    return [{**fitted.hyper, **{k: float(v[i]) for k, v in draws.items()}} for i in range(size)]
+
+
+@pytest.fixture(scope="module", params=BVAR_MODELS, ids=model_id)
+def bvar(request) -> BVAR:
+    return request.param
+
+
+@pytest.fixture(scope="module")
+def bvar_fit(bvar, sim_data):
+    return bvar.fit(sim_data)
+
+
+def test_bvar_attributes(bvar, bvar_fit):
+    """SPEC §4.5/§7: the engine is chosen by the composition; attrs carry the spec and its hash."""
+    attrs = bvar_fit.forecast(3, draws=20, seed=SEED).dataset.attrs
+    assert bvar.engine == bvar_fit.engine == attrs["engine"] == "analytic"
+    assert attrs["model"] == bvar.name
+    assert attrs["spec_hash"] == spec_hash(bvar)
+    assert json.loads(attrs["spec"]) == json.loads(json.dumps(bvar.spec(), default=str))
+    assert attrs["converged"] == int(bvar_fit.converged)
+    assert bvar.axes["outliers"] == ("none" if bvar.outliers is None else "lenza-primiceri")
+
+
+def test_bvar_hierarchy(bvar, bvar_fit):
+    """fixed: h is the spec; eb: one optimised h; mh: draws of h within the bounds."""
+    prior = bvar.mean.prior
+    if prior.hierarchy == "fixed":
+        assert bvar_fit.optimization is None and bvar_fit.mh is None
+        spec_values = (prior.lambda_, prior.alpha, prior.soc, prior.sur)
+        for name, value in zip(_SCALAR_HYPER, spec_values, strict=True):
+            assert bvar_fit.hyper[name] == value
+        assert bvar_fit.converged
+    elif prior.hierarchy == "eb":
+        assert bvar_fit.optimization["success"] and bvar_fit.mh is None
+        assert bvar_fit.hyper["alpha"] == prior.alpha  # not free by default
+        assert bvar_fit.converged
+    else:
+        chains = bvar_fit.mh.chains
+        assert chains.shape == (FAST_MH.chains, FAST_MH.draws, len(prior.free))
+        lam = bvar_fit.mh.draws["lambda"]
+        bounds = prior.hyperpriors.lambda_
+        assert np.all((lam >= bounds.lower) & (lam <= bounds.upper))
+        assert np.ptp(lam) > 0  # the chain moved
+
+
+def test_bvar_equal_specs_give_identical_forecasts(bvar, bvar_fit, sim_data):
+    """``Model.spec`` contract: an equal, separately built composition forecasts identically."""
+    twin = copy.deepcopy(bvar)
+    assert twin == bvar and twin is not bvar and spec_hash(twin) == spec_hash(bvar)
+    a = bvar_fit.forecast(H, draws=200, seed=SEED)
+    b = twin.fit(sim_data).forecast(H, draws=200, seed=SEED)
+    for name in ("paths", "cond_mean", "cond_chol", "paths_level"):
+        np.testing.assert_array_equal(a.dataset[name].values, b.dataset[name].values)
+
+
+@pytest.mark.parametrize("model", BVAR_IID, ids=model_id)
+def test_bvar_coefficient_draws_match_the_conjugate_posterior(model, sim_data):
+    """The B_s behind the joint paths: mean B̄ and Var(B_ij) = Ω̄_ii E[Σ_jj], E[Σ] = S̄/(ν̄−n−1)."""
+    fitted = model.fit(sim_data)
+    draws = 4000
+    fr = fitted.forecast(H, draws=draws, seed=5)
+    X = _forecast_regressors(sim_data.values, fr.stacked(), model.lags, model.deterministic)
+    coefs = np.linalg.pinv(X) @ fr.stacked("cond_mean")  # (S, k, n), exact: H > k
+    B, P, S, nu_bar = _conjugate_posterior(
+        model, sim_data.values, _own_lag_means(sim_data), fitted.hyper
+    )
+    z = (coefs.mean(axis=0) - B) / (coefs.std(axis=0) / np.sqrt(draws))
+    assert np.all(np.abs(z) < 5), z
+    n = sim_data.n_vars
+    expected = np.outer(np.diag(np.linalg.inv(P)), np.diag(S) / (nu_bar - n - 1))
+    ratio = coefs.var(axis=0) / expected
+    # the sampling sd of each variance ratio is about √(2/4000) ≈ 0.022
+    assert np.all(np.abs(ratio - 1.0) < 0.12), ratio
+
+
+@pytest.mark.parametrize("model", BVAR_IID, ids=model_id)
+def test_bvar_one_step_lpd_is_multivariate_t(model, sim_data):
+    """Rao-Blackwellised one-step LPD vs the closed-form multivariate t, within 4 MCSE."""
+    fitted = model.fit(sim_data)
+    fr = fitted.forecast(1, draws=20_000, seed=11)
+    exact = _bvar_one_step_t(model, sim_data, fitted.hyper)
+    loc, sd = exact.loc, np.sqrt(np.diag(exact.shape))
+    for y in (loc, loc + sd * np.array([1.0, -0.5, 1.5]), loc + 2.5 * sd):
+        lpd, mcse = fr.log_pred_density(y, 1, return_mcse=True)
+        assert 0 < mcse < 0.05
+        assert abs(lpd - exact.logpdf(y)) < 4 * mcse, (lpd, exact.logpdf(y), mcse)
+    idx = [0, 2]
+    y = loc + sd * np.array([-1.0, 0.0, 2.0])
+    lpd, mcse = fr.log_pred_density(y[idx], 1, ["gdp", "rate"], return_mcse=True)
+    marginal = stats.multivariate_t(
+        loc=loc[idx], shape=exact.shape[np.ix_(idx, idx)], df=exact.df
+    ).logpdf(y[idx])
+    assert abs(lpd - marginal) < 4 * mcse, (lpd, marginal, mcse)
+
+
+@pytest.mark.parametrize(
+    ("model", "window"),
+    [
+        *(pytest.param(m, None, id=model_id(m)) for m in BVAR_MH),
+        # few observations and free (λ, μ, δ): h is uncertain enough that plugging in the mode
+        # is detectably wrong, so this case has power against ignoring the MH draws
+        pytest.param(
+            _bvar(1, hierarchy="mh", mh=FAST_MH, soc=1.0, sur=1.0), 40, id="BVAR(mh)-SOC-SUR-T40"
+        ),
+    ],
+)
+def test_bvar_mh_draws_mix_over_hyperparameter_draws(model, window, sim_data):
+    """hierarchy="mh": the predictive integrates over the MH draws h_1..h_M (pooled chains).
+
+    One step ahead, ``p(y_{T+1} | Y) = M⁻¹ Σ_i t(y; h_i)``; the coefficient draws behind the
+    paths have mean ``M⁻¹ Σ_i B̄(h_i)`` and variance ``M⁻¹ Σ_i Ω̄_ii(h_i) E[Σ_jj | h_i]`` plus the
+    between-draw variance of ``B̄(h_i)``.
+    """
+    data = sim_data if window is None else sim_data.tail(window)
+    fitted = model.fit(data)
+    hypers = _mh_hypers(fitted)
+    fr = fitted.forecast(1, draws=20_000, seed=11)
+    dists = [_bvar_one_step_t(model, data, h) for h in hypers]
+    at_mode = _bvar_one_step_t(model, data, fitted.hyper)
+    loc, sd = at_mode.loc, np.sqrt(np.diag(at_mode.shape))
+    gaps_to_mode = []
+    for y in (loc, loc + sd * np.array([1.0, -0.5, 1.5]), loc + 2.5 * sd):
+        exact = logsumexp([dist.logpdf(y) for dist in dists]) - np.log(len(dists))
+        lpd, mcse = fr.log_pred_density(y, 1, return_mcse=True)
+        assert 0 < mcse < 0.05
+        assert abs(lpd - exact) < 4 * mcse, (lpd, exact, mcse)
+        gaps_to_mode.append(abs(lpd - at_mode.logpdf(y)) / mcse)
+
+    draws, n = 4000, data.n_vars
+    fr = fitted.forecast(H, draws=draws, seed=5)
+    X = _forecast_regressors(data.values, fr.stacked(), model.lags, model.deterministic)
+    coefs = np.linalg.pinv(X) @ fr.stacked("cond_mean")
+    posteriors = [_conjugate_posterior(model, data.values, _own_lag_means(data), h) for h in hypers]
+    means = np.stack([B for B, *_ in posteriors])
+    within = np.stack(
+        [
+            np.outer(np.diag(np.linalg.inv(P)), np.diag(S) / (nu - n - 1))
+            for _, P, S, nu in posteriors
+        ]
+    )
+    z = (coefs.mean(axis=0) - means.mean(axis=0)) / (coefs.std(axis=0) / np.sqrt(draws))
+    assert np.all(np.abs(z) < 5), z
+    ratio = coefs.var(axis=0) / (within.mean(axis=0) + means.var(axis=0))
+    assert np.all(np.abs(ratio - 1.0) < 0.12), ratio
+    if window is not None:  # power: the mode-only predictive is rejected
+        _, P, S, nu = _conjugate_posterior(model, data.values, _own_lag_means(data), fitted.hyper)
+        mode_ratio = coefs.var(axis=0) / np.outer(
+            np.diag(np.linalg.inv(P)), np.diag(S) / (nu - n - 1)
+        )
+        assert max(gaps_to_mode) > 10
+        assert np.max(np.abs(mode_ratio - 1.0)) > 0.3
+
+
+@pytest.mark.parametrize(
+    "model",
+    [m for m in BVAR_MODELS if m.outliers is not None]
+    + [
+        _bvar(
+            2, "n", outliers=LenzaPrimiceri(fixed=(3.0, 2.0, 1.5, 0.8)), hierarchy="fixed", soc=1.0
+        )
+    ],
+    ids=model_id,
+)
+def test_bvar_inactive_lenza_primiceri_is_inert(model, sim_data):
+    """A sample ending before t* = 2020Q1 never reaches the COVID scaling: s_t ≡ 1 in the
+    likelihood and in the forecast, so the forecasts equal those without ``outliers``
+    (``hierarchy="fixed"`` needs fixed scales, which then never enter)."""
+    assert sim_data.last < LenzaPrimiceri().start_period(sim_data.index.freq)
+    assert isinstance(model.outliers, LenzaPrimiceri)
+    if model.outliers.fixed is None:
+        assert dataclasses.replace(model, outliers="lenza-primiceri") == model
+    plain = dataclasses.replace(model, outliers=None)
+    assert spec_hash(plain) != spec_hash(model)
+    a = model.fit(sim_data).forecast(H, draws=200, seed=SEED)
+    b = plain.fit(sim_data).forecast(H, draws=200, seed=SEED)
+    for name in ("paths", "cond_mean", "cond_chol", "paths_level"):
+        np.testing.assert_array_equal(a.dataset[name].values, b.dataset[name].values)

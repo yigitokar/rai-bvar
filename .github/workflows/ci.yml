@@ -2,10 +2,16 @@ name: CI
 
 on:
   push:
+    branches: [main]  # branches with a PR run once, through pull_request
   pull_request:
   schedule:
-    - cron: "17 3 * * *"  # nightly: slow statistical tests and network downloads
+    - cron: "17 3 * * 0"  # weekly (Sunday): slow statistical tests and network downloads
   workflow_dispatch:
+    inputs:
+      bench:
+        description: "Run only the BENCH-P2 pre-release benchmark (DESIGN §9.10, §10) instead of the weekly jobs"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,20 +36,50 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python-version: ["3.12", "3.13", "3.14"]
-        include:
-          - os: macos-latest
-            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --group dev
+      # Persistent XLA compilation cache (DESIGN §9.10 budgets the PR tier with it): a warm cache
+      # makes the MCMC tests about 3x faster and changes no result (a hit loads the executable the
+      # same program compiles to). The key carries the CPU model, so an executable built for one
+      # instruction set is never loaded on another; a new key per run keeps the cache current.
+      - name: CPU model
+        id: cpu
+        run: echo "model=$(grep -m1 'model name' /proc/cpuinfo | md5sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/jax-xla
+          key: xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-
       - name: Fast suite (unit, contract, integration)
-        run: uv run pytest -m "not slow and not network"
+        env:
+          JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-xla
+          JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+        run: uv run pytest -m "not slow and not network and not bench" --durations=30
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ runner.temp }}/jax-xla
+          key: xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
 
-  nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+  macos:  # weekly: macOS minutes bill at 10x; local development runs on macOS anyway
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      - name: Fast suite (unit, contract, integration)
+        run: uv run pytest -m "not slow and not network and not bench"
+
+  nightly:  # weekly despite the name (DESIGN §9.10 nightly + weekly tiers, run together)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,5 +87,49 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --group dev
+      # Same persistent XLA compilation cache as the fast suite (own key: different programs).
+      - name: CPU model
+        id: cpu
+        run: echo "model=$(grep -m1 'model name' /proc/cpuinfo | md5sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/jax-xla
+          key: xla-slow-${{ runner.os }}-py3.12-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            xla-slow-${{ runner.os }}-py3.12-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-
+      # bench (BENCH-P2, timing gates) is pre-release only: never in the weekly tier
       - name: Slow and network tests
-        run: uv run pytest -m "slow or network"
+        env:
+          JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-xla
+          JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+        run: uv run pytest -m "(slow or network) and not bench" --durations=30
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ runner.temp }}/jax-xla
+          key: xla-slow-${{ runner.os }}-py3.12-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+
+  bench:  # pre-release tier (DESIGN §9.10): manual only (Actions > CI > Run workflow > bench)
+    if: github.event_name == 'workflow_dispatch' && inputs.bench
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      # A shared cloud runner is not the reference laptop: the gate compares only on a machine
+      # matching tests/bench/baseline.json and asserts 120 s only on the reference machine.
+      - name: BENCH-P2 and kernel microbenchmarks
+        run: uv run python benchmarks/phase2_perf.py --kernels --out bench-p2.json
+      # the gates: test_perf_phase2 compares only on a machine matching baseline.json; the
+      # weighted-path timing test (tests/mcmc) is machine-independent and runs nowhere else
+      - name: Bench-marked tests (gates)
+        if: always()
+        run: uv run pytest -m bench -s
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-p2
+          path: bench-p2.json
