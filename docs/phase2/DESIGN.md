@@ -613,7 +613,7 @@ is the plug-in at `λ_i = exp(b_μ)` (RW: `exp(m_0)`) and says so in a `vol_mean
 importance-sampling SV-t oracle (4 observations, max |z| ≈ 1.8): stochvol 3.2.1's Student-t sampler does not
 target the standardized-t SV posterior (`tests/parity/SV_PARAMETRIZATION.md` §3.2), so the `stochvol_v_t5` row
 stays a strict xfail (`raises=OracleDeviation`) until a fixture from stochvol ≥ 3.2.5 (ideally 3.2.9) is built.
-(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it.
+(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it. (3) WP23 review: backtest cache keys of `uses_fit_seed` models carry `"seeding": "fit_seed-v1"` (analytic keys stay the Phase 1 keys), so scores cached before the per-origin fit seeds are never served; `warm_start=True` requires strictly increasing origins (a warm start from a later origin would carry later data into an earlier fit, R9). (4) Known limitation, not changed here: the SPEC §7 RB log predictive density for h > 1 conditions on the simulated path to T + h − 1; for outcomes far in a predictive's tail its weights collapse onto one draw, the estimate is biased low by up to tens of nats and the delta-method MCSE saturates near 1 (Clark–Ravazzolo crisis origins at h ≥ 4). The replication report flags such cells; a path-integrated estimator is an open SPEC-level decision.
 
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 

@@ -10,10 +10,14 @@ right-hand sides per kept draw) took 9 ms per draw on an idle 4-core x86 machine
 draw at load 12, against 0.7 ms single-threaded, while the sweep itself costs ≈ 16 ms.
 
 :func:`single_thread` sets the OpenBLAS thread count to 1 for the duration of a run and restores
-it afterwards. It changes no result: a column of a triangular solve and a ``≤ 100 × 100``
-Cholesky are computed by the same kernel sequence whatever the thread count (checked bitwise on
-BENCH-P2-shaped fits: every monitor value, stored draw and the final state; and by the engine's
-bitwise-invariance tests). Where no OpenBLAS with a thread-count API is loaded (macOS
+it afterwards. Below OpenBLAS's threading threshold it changes no result: a column of a
+triangular solve and a Cholesky smaller than ``128 × 128`` are computed by the same kernel
+sequence whatever the thread count (checked bitwise on BENCH-P2-shaped fits, whose largest
+factor is ``81 × 81``: every monitor value, stored draw and the final state; and by the
+engine's bitwise-invariance tests). A Cholesky of ``128 × 128`` or more (``k = 1 + np ≥ 128``)
+is blocked differently when threaded, so its last bits (≈ 1e-15 relative) can differ from the
+threaded result; single-threaded, they no longer depend on the machine's core count, which makes
+such runs more reproducible, not less. Where no OpenBLAS with a thread-count API is loaded (macOS
 Accelerate, MKL, a NumPy-only process) it is a no-op. Re-entrant and thread-safe: the outermost
 context sets and restores the count.
 """

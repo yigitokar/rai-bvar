@@ -50,6 +50,16 @@ re-derived before it goes into the paper).
    with passing controls (`tests/mutation`, ~10 min with a warm compilation cache). Re-run on
    the release commit for the paper table (`RAI_BVAR_VALIDATION_RECORD=<dir>` writes the JSON).
 
+8b. **The path-conditioned RB log score breaks down in the tails at h > 1.** SPEC §7's estimator
+   averages p(y_{T+h} | θ_s, simulated path_s up to T+h−1). For outcomes far in the predictive's tail
+   (US unemployment 2008–10 at h = 8) one draw carries all the weight: Constant's UR h = 8 score at
+   2008Q2 was −93.6 (1000 draws), −46 to −63 (8000), −36 (64,000) against −19.1 for the exact
+   path-integrated mixture, while the delta-method MCSE stayed at ≈ 1. It inflated the quick
+   Clark–Ravazzolo UR h = 8 ΔLPS about 8× (+1.92 vs ≈ +0.23 converged). A methods point worth a
+   section: integrate the path out (Gaussian given θ and the volatility path) instead of conditioning
+   on it. Evidence: WP23 review (2026-10-23), `benchmarks/clark_ravazzolo.py` RELIABILITY_NOTE.
+   Status: recorded (review computations; re-run with the library fix before publishing).
+
 ## C. Engineering lessons
 
 9. **Bitwise reproducibility has limits.** Results are bitwise identical across chunk sizes,

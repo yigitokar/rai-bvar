@@ -930,8 +930,8 @@ def run_chains(
     the stored draws exceed the memory budget.
     """
     t_start = time.perf_counter()
-    # one OpenBLAS thread for jaxlib's LAPACK calls while the chains run: no result changes,
-    # oversubscription removed (engines.mcmc._blas; WP24)
+    # one OpenBLAS thread for jaxlib's LAPACK calls while the chains run: oversubscription
+    # removed; results unchanged below a 128 × 128 factor (engines.mcmc._blas; WP24)
     with _jax.x64(), _blas.single_thread(), _CompileTimer() as ct:
         if fns.program is None or fns.chain is None:
             raise TypeError("fns must come from make_runner")

@@ -295,6 +295,12 @@ def structural_models(mcmc: MCMCSettings) -> dict[str, BVAR]:
 PRIMARY_SV = "SV(rw)"
 BASELINE = "Constant"
 
+RB_CEILING = 0.9
+"""An origin's RB log score counts as degenerate when the library's delta-method MCSE of the
+joint score (``lpd_mcse``) is at least this: the importance weights sit on about one forecast
+draw, and the MCSE saturates near 1 however far off the estimate is (:data:`RELIABILITY_NOTE`,
+printed in the report)."""
+
 
 @dataclass(frozen=True)
 class MomentsProbe:
@@ -305,6 +311,7 @@ class MomentsProbe:
     store: str
     seed: int
     draws: int
+    data_tag: str = ""  # fingerprint of the data the backtest runs on (the scores' keys hash it)
 
     @property
     def name(self) -> str:
@@ -326,7 +333,13 @@ class MomentsProbe:
         return {**self.inner.spec(), "probe": "gaussian-moments-v1"}
 
     def directory(self) -> Path:
-        tag = json.dumps([self.spec(), self.seed, self.draws], sort_keys=True, default=str)
+        """Keyed like the scores (spec, seed, draws, the data, the package version), so a
+        score-cache hit can never be paired with moments written by another run."""
+        tag = json.dumps(
+            [self.spec(), self.seed, self.draws, self.data_tag, rb.__version__],
+            sort_keys=True,
+            default=str,
+        )
         return Path(self.store) / hashlib.sha256(tag.encode()).hexdigest()[:24]
 
     def fit(self, data: VARData, **kwargs: Any) -> _ProbeFit:
@@ -392,6 +405,13 @@ def sliced(result: BacktestResult, origins: Sequence[str]) -> BacktestResult:
     return dataclasses.replace(result, scores=result.scores.sel(origin=list(origins)))
 
 
+def _degenerate(m: Any, b: Any, h: int) -> np.ndarray:
+    """Origins whose joint RB score at ``h`` is degenerate for the model or the baseline."""
+    mm = m["lpd_mcse"].sel(horizon=h).values
+    bm = b["lpd_mcse"].sel(horizon=h).values
+    return (np.nan_to_num(mm) >= RB_CEILING) | (np.nan_to_num(bm) >= RB_CEILING)
+
+
 def relative_table(
     results: dict[str, BacktestResult],
     model: str,
@@ -409,9 +429,11 @@ def relative_table(
         pos = {o: i for i, o in enumerate(all_origins)}
         idx = [pos[o] for o in origins]
     out: dict[str, Any] = {"variables": {}, "joint": {}}
+    labels_all = np.asarray(list(origins))
     for v_i, v in enumerate(VARS):
         rows = {}
         for h in HORIZONS:
+            degen = _degenerate(m, b, h)
             lm = m["lpd_marginal"].sel(variable=v, horizon=h).values
             lb = b["lpd_marginal"].sel(variable=v, horizon=h).values
             ok = np.isfinite(lm) & np.isfinite(lb)
@@ -434,29 +456,36 @@ def relative_table(
                 "lps_model": float(np.mean(lm[ok])),
                 "lps_base": float(np.mean(lb[ok])),
                 "rmse_base": float(math.sqrt(sb.mean())),
+                "rb_degenerate": int((degen & ok).sum()),
+                "rb_degenerate_origins": [str(o) for o in labels_all[degen & ok]],
             }
             if idx is not None:
                 gm = glps[model]["marginal"][idx, h - 1, v_i]
                 gb = glps[base]["marginal"][idx, h - 1, v_i]
                 okg = np.isfinite(gm) & np.isfinite(gb)
                 row["dlps_gauss"] = float(np.mean(gm[okg] - gb[okg]))
+                row["rb_gauss_disagree"] = bool(np.sign(row["dlps"]) != np.sign(row["dlps_gauss"]))
             rows[h] = row
         out["variables"][v] = rows
     for h in HORIZONS:
         jm = m["lpd"].sel(horizon=h).values
         jb = b["lpd"].sel(horizon=h).values
         ok = np.isfinite(jm) & np.isfinite(jb)
+        degen = _degenerate(m, b, h)
         dm = diebold_mariano(-jm[ok], -jb[ok], h, alternative="less")
         row = {
             "n": int(ok.sum()),
             "dlpd": float(np.mean(jm[ok] - jb[ok])),
             "dm_p_better": float(dm.pvalue),
+            "rb_degenerate": int((degen & ok).sum()),
+            "rb_degenerate_origins": [str(o) for o in labels_all[degen & ok]],
         }
         if idx is not None:
             gm = glps[model]["joint"][idx, h - 1]
             gb = glps[base]["joint"][idx, h - 1]
             okg = np.isfinite(gm) & np.isfinite(gb)
             row["dlpd_gauss"] = float(np.mean(gm[okg] - gb[okg]))
+            row["rb_gauss_disagree"] = bool(np.sign(row["dlpd"]) != np.sign(row["dlpd_gauss"]))
         out["joint"][h] = row
     return out
 
@@ -532,6 +561,20 @@ def _c4_secondary(full: dict[str, Any], pre: dict[str, Any]) -> str:
         r8 = pre["variables"][v][8]
         if "dlps_gauss" in r8:
             parts.append(f"pre-crisis {v} h8 Gaussian-approx {r8['dlps_gauss']:+.3f}")
+    flagged = [
+        f"{s} {v} h{h}: {t['variables'][v][h]['rb_degenerate']} origin(s)"
+        + (" (RB and Gaussian-approx ΔLPS differ in sign)"
+           if t["variables"][v][h].get("rb_gauss_disagree") else "")
+        for s, t, cells in (("full", full, (("UR", 1), ("UR", 8), ("TBILL", 1), ("TBILL", 8))),
+                            ("pre-crisis", pre, (("GDP", 8), ("INFL", 8))))
+        for v, h in cells
+        if t["variables"][v][h]["rb_degenerate"]
+    ]  # fmt: skip
+    if flagged:
+        parts.append(
+            "RB estimate degenerate (joint lpd_mcse ≥ "
+            f"{RB_CEILING}; see 'Reliability of the RB log score') at " + ", ".join(flagged)
+        )
     return ". Secondary (not part of the rule): " + "; ".join(parts)
 
 
@@ -819,6 +862,31 @@ def _f(x: Any, fmt: str = "+.3f") -> str:
     return "n/a" if x is None or (isinstance(x, float) and not math.isfinite(x)) else format(x, fmt)
 
 
+RELIABILITY_NOTE = (
+    "### Reliability of the RB log score\n\n"
+    "The primary LPD is the library's Rao–Blackwellised estimator (SPEC §7): for h > 1 it averages "
+    "the density of y_{T+h} given each forecast draw's parameters **and its simulated path up to "
+    "T+h−1**. When the outcome lies far in a predictive's tail (unemployment in 2008–10), one of "
+    "the forecast draws carries almost all the weight, the estimate is biased low by up to tens "
+    "of nats, and its delta-method MCSE saturates near 1 however far off it is. In the review of "
+    "the quick run, Constant's UR h = 8 score at 2008Q2 was −93.6 with 1000 draws, −46 to −63 "
+    "with 8000 and −36 with 64,000, against −19.1 for the exact path-integrated mixture; "
+    "SV(rw)'s was −23.9 against about −12.7. The column **RB degen.** counts origins whose joint "
+    f"`lpd_mcse` is ≥ {RB_CEILING} for the arm or the baseline: cells with a non-zero count have "
+    "RB means that are not reliable (they are kept, never dropped, because dropping exactly the "
+    "tail origins biases the comparison). The criteria are evaluated as specified, on the primary "
+    "estimator; the review found criterion 4's verdict unchanged when the degenerate origins are "
+    "replaced by converged values (UR h = 8 about +0.23 against +0.157 at h = 1), but the "
+    "magnitudes of h ≥ 4 cells with degenerate origins are inflated. A path-integrated RB "
+    "estimator for h > 1 is a library change (SPEC §7) outside WP23.\n"
+)
+
+
+def _degen(row: dict[str, Any]) -> str:
+    k = row.get("rb_degenerate")
+    return "" if k is None else (f"**{k}**" if k else "0")
+
+
 def markdown(rep: dict[str, Any]) -> str:
     cfg = rep["config"]
     L: list[str] = []
@@ -897,6 +965,20 @@ def markdown(rep: dict[str, Any]) -> str:
         "* LPD is the library's Rao–Blackwellised predictive density (primary); `ΔLPS gauss` is "
         "CR's Gaussian approximation (Adolfson et al. 2007) from the same draws.\n"
     )
+    add(RELIABILITY_NOTE)
+    disagree = [
+        f"{sample.replace('_', '-')} {model} {v} h{h}"
+        for sample, by_model in rep["relative"].items()
+        for model, t in by_model.items()
+        for v in VARS
+        for h in HORIZONS
+        if t["variables"][v][h].get("rb_gauss_disagree")
+    ]
+    add(
+        "RB and Gaussian-approx ΔLPS differ in sign (N08 §C6 expects the rankings to agree) in: "
+        + (", ".join(disagree) if disagree else "no cell")
+        + ".\n"
+    )
     for sample in ("full", "pre_crisis"):
         add(
             f"## {'Full sample' if sample == 'full' else 'Pre-crisis'}: "
@@ -909,10 +991,10 @@ def markdown(rep: dict[str, Any]) -> str:
                 f"{conv[BASELINE]:.0%})\n"
             )
             add(
-                "| variable | h | ΔLPS | ΔLPS gauss | DM p (1-sided) | CRPS ratio | RMSE ratio |"
-                " CR ΔLPS | CR CRPS | CR RMSE |"
+                "| variable | h | ΔLPS | ΔLPS gauss | RB degen. | DM p (1-sided) | CRPS ratio |"
+                " RMSE ratio | CR ΔLPS | CR CRPS | CR RMSE |"
             )
-            add("| :- | -: | -: | -: | -: | -: | -: | -: | -: | -: |")
+            add("| :- | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: |")
             for v in VARS:
                 for k, h in enumerate(HORIZONS):
                     r = t["variables"][v][h]
@@ -927,25 +1009,25 @@ def markdown(rep: dict[str, Any]) -> str:
                         cr = " | | "
                     add(
                         f"| {v} | {h} | {_f(r['dlps'])} | {_f(r.get('dlps_gauss'))} | "
-                        f"{_f(r['dm_p_better'], '.3f')} | {_f(r['crps_ratio'], '.3f')} | "
-                        f"{_f(r['rmse_ratio'], '.3f')} | {cr} |"
+                        f"{_degen(r)} | {_f(r['dm_p_better'], '.3f')} | "
+                        f"{_f(r['crps_ratio'], '.3f')} | {_f(r['rmse_ratio'], '.3f')} | {cr} |"
                     )
             add("")
-            add("| joint | h | ΔLPD | ΔLPD gauss | DM p (1-sided) |")
-            add("| :- | -: | -: | -: | -: |")
+            add("| joint | h | ΔLPD | ΔLPD gauss | RB degen. | DM p (1-sided) |")
+            add("| :- | -: | -: | -: | -: | -: |")
             for h in HORIZONS:
                 r = t["joint"][h]
                 add(
                     f"| joint | {h} | {_f(r['dlpd'])} | {_f(r.get('dlpd_gauss'))} | "
-                    f"{_f(r['dm_p_better'], '.3f')} |"
+                    f"{_degen(r)} | {_f(r['dm_p_better'], '.3f')} |"
                 )
             add("")
         add(f"### `compare()` verdicts vs `{BASELINE}` ({sample.replace('_', '-')})\n")
         add(
             "| model | h | verdict (gate on) | verdict (gate off) | ΔLPD total | MC s.e. | "
-            "DM p | model in MCS25 | baseline in MCS25 |"
+            "RB degen. | DM p | model in MCS25 | baseline in MCS25 |"
         )
-        add("| :- | -: | :- | :- | -: | -: | -: | :- | :- |")
+        add("| :- | -: | :- | :- | -: | -: | -: | -: | :- | :- |")
         vs = rep["verdicts"][sample]
         for r in [x for x in vs if x["convergence_gate"]]:
             off = next(
@@ -955,9 +1037,11 @@ def markdown(rep: dict[str, Any]) -> str:
                 and x["model"] == r["model"]
                 and x["horizon"] == r["horizon"]
             )
+            rel = rep["relative"][sample].get(r["model"], {}).get("joint", {})
             add(
                 f"| {r['model']} | {r['horizon']} | {r['verdict']} | {off['verdict']} | "
                 f"{_f(r['dlpd'], '+.1f')} | {_f(r['dlpd_mcse'], '.2f')} | "
+                f"{_degen(rel.get(r['horizon'], {}))} | "
                 f"{_f(r['dm_pvalue_better'], '.3f')} | {r['model_in_mcs']} | "
                 f"{r['reference_in_mcs']} |"
             )
@@ -1151,7 +1235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     probes: dict[str, MomentsProbe] = {}
     warn_counts: dict[str, dict[str, dict[str, Any]]] = {}
     for name, model in mods.items():
-        probe = MomentsProbe(model, store, args.seed, cfg.draws)
+        probe = MomentsProbe(model, store, args.seed, cfg.draws, data.fingerprint())
         probes[name] = probe
         t0 = time.time()
         with warnings.catch_warnings():

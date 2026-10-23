@@ -29,6 +29,11 @@ MCMC models (DESIGN §11.6, WP23):
   the cold fit; a dict entry ``"init": "cold"`` would only duplicate work). An origin whose
   scores are cached but whose state is needed and missing (e.g. scores cached by a cold run) is
   refit, which reproduces the same state. ``n_jobs`` is ignored, with a warning, in this mode.
+  The origins must be strictly increasing: a warm start from a later origin would carry data
+  after the earlier origin into its fit (R9).
+* **Cache keys.** Analytic models keep the Phase 1 keys. Models with ``uses_fit_seed`` add
+  ``"seeding": "fit_seed-v1"``, so scores cached before the per-origin fit seeds (fit with
+  ``MCMCSettings.seed`` at every origin) are never served as results of the current seeding.
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import io
+import itertools
 import json
 import multiprocessing
 import os
@@ -236,6 +242,10 @@ def backtest(
 
     start = time.perf_counter()
     if warm_start:
+        # origin i is fit from the final state of origin i − 1: out of time order, that state was
+        # sampled on data after origin i (an R9 look-ahead through init)
+        if any(b <= a for a, b in itertools.pairwise(origin_list)):
+            raise ValueError("warm_start=True needs strictly increasing origins (time order)")
         if n_jobs != 1:
             warnings.warn(
                 "warm_start=True runs the origins sequentially in one process; n_jobs is ignored",
@@ -489,6 +499,8 @@ def _cache_key(model, sample, truth, origin, window, horizon, draws, seed, init=
         "seed": seed,
         "version": __version__,
     }
+    if getattr(model, "uses_fit_seed", False):  # per-origin fit seeds (§11.6) since this tag;
+        payload["seeding"] = "fit_seed-v1"  # scores cached before it used MCMCSettings.seed
     if init is not None:  # warm starts only: cold keys stay the Phase 1 keys (DESIGN §11.6)
         payload["init"] = init
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
