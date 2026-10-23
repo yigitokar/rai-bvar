@@ -2925,6 +2925,13 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
   provenance; spawn context; one compile per `T` bucket.
 - **Acceptance (exit criterion)**: tests green; the replication report meets N08 §C5 criteria 1–6 (including all 24
   orderings) or documents each failure.
+- **Acceptance result (2026-10-23, `65dd212`)**: `benchmarks/reports/clark_ravazzolo_acceptance.{md,json,log}`, run at
+  `c823d20` on a clean tree (3.58 h; every arm converged at 100% of origins). Criteria 1, 2, 3, 5 and 6 met (6: verdict
+  'better' in 24/24 orderings with the convergence gate on); criterion 4 not met and documented: full-sample UR
+  ΔLPS h1 +0.160 → h8 +0.273 (the rule needs h8 < h1; TBILL and the pre-crisis cells pass). The path-conditioned
+  estimator on the same forecasts gives UR h8 +1.309; the largest UR h8 origins fall from about +41 nats (first run)
+  to +7.6. The remaining gap to CR's shrinking UR gain is reported as a difference from CR (pseudo-real-time final
+  vintage, the iw_equivalent baseline, library-default SV priors), not tuned.
 - **Acceptance run (D-34, 2026-10-23)**: `--config acceptance` (4 × 20,000 draws, `lpd_method="integrated"`,
   `benchmarks/reports/clark_ravazzolo_preregistration.md`); the criteria rules are unchanged. Review amendments to
   `benchmarks/clark_ravazzolo.py`: the report records the commit and whether tracked files differ from it (`git

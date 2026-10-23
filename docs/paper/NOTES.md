@@ -96,7 +96,10 @@ re-derived before it goes into the paper).
    ≈ 1.3 nats across fit seeds). Evidence: D-34 review (2026-10-23, finding math-2). The
    pre-registered CR acceptance config therefore uses 8000 forecast draws (thinning error sd
    0.09–0.19 nats, bias ≈ 0 in the same review). Status: estimator verified
-   (tests); the Clark–Ravazzolo numbers above still to be re-run with it. Plumbing:
+   (tests). **Acceptance run (`65dd212`, pre-registered at `c823d20`):** UR h8 ΔLPS +0.273 with the
+   integrated estimator against +1.309 with the conditioned one on the same forecasts (h1 +0.160
+   for both); the largest UR h8 origin contributions fall from about +41 nats to +7.6. Criterion 4
+   still fails (+0.273 > +0.160), as the pre-registration allowed; criteria 1, 2, 3, 5, 6 are met. Plumbing:
    `score_forecast`, `backtest`, `compare` and `ordering_sensitivity` take `lpd_method`; integrated
    backtest scores also carry the conditioned estimator on the same forecast (so the paper can show
    both from one run) and have their own cache keys. The pre-registered CR `acceptance` config
