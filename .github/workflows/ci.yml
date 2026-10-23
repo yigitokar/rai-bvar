@@ -123,6 +123,11 @@ jobs:
       # matching tests/bench/baseline.json and asserts 120 s only on the reference machine.
       - name: BENCH-P2 and kernel microbenchmarks
         run: uv run python benchmarks/phase2_perf.py --kernels --out bench-p2.json
+      # the gates: test_perf_phase2 compares only on a machine matching baseline.json; the
+      # weighted-path timing test (tests/mcmc) is machine-independent and runs nowhere else
+      - name: Bench-marked tests (gates)
+        if: always()
+        run: uv run pytest -m bench -s
       - uses: actions/upload-artifact@v4
         if: always()
         with:
