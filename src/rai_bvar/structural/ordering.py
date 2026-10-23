@@ -618,8 +618,13 @@ def _leaves(tree: Any) -> list[Any]:
 def _with_seed(model: Model, seed: int) -> Model:
     """``model`` whose own sampler seed is ``seed`` (MCMC ``BVAR``: ``MCMCSettings.seed``;
     analytic ``BVAR`` with ``hierarchy="mh"``: ``MHSettings.seed``); other models unchanged.
-    Backtests fit without a seed argument, so this is how backtest-mode replicates differ in
-    their MCMC noise (on top of the per-origin fit seeds the backtest derives from its seed)."""
+    For models that declare ``uses_fit_seed`` (MCMC) the backtest fits every origin with
+    ``fit(sample, seed=fit_seed(backtest seed, origin))``
+    (:func:`rai_bvar.evaluation.backtest.fit_seed`, DESIGN §11.6), which overrides
+    ``MCMCSettings.seed``; for them the seed set here only enters the spec and hence the cache
+    key, and backtest-mode runs differ in their MCMC noise through their own backtest seeds
+    (``_derive(seed, "backtest", j)`` / ``"noise-backtest"``). For an analytic ``hierarchy="mh"``
+    model (called as ``fit(sample)``) the seed set here is the MH seed."""
     from rai_bvar.api import BVAR
 
     if not isinstance(model, BVAR):
@@ -842,7 +847,11 @@ class OrderingSensitivityResult:
       origin, variable, horizon, score)``, ``origin_joint_lpd (ordering, origin, horizon)``,
       ``rank_corr (cell, cell_)`` and ``mcs_pvalue (ordering, horizon)``; prior mode: ``corr
       (ordering, variable, variable_, cstat)``;
-    * attrs: mode, design, orderings (JSON), seeds, thresholds, spec hash, versions.
+    * attrs: mode, design, orderings (JSON), seeds, thresholds, spec hash, versions. ``fit_seeds``
+      are the seeds each run's model is fit with; in backtest mode they are set as the models'
+      own sampler seeds, which for ``uses_fit_seed`` (MCMC) models the per-origin backtest fit
+      seed (:func:`rai_bvar.evaluation.backtest.fit_seed`, DESIGN §11.6) overrides, so there they
+      only enter the spec and the cache key (``backtest_seeds`` drive the sampler).
     """
 
     def __init__(self, dataset: xr.Dataset, pooled: ForecastResult | None = None):
@@ -1121,11 +1130,17 @@ def ordering_sensitivity(
     draws per ordering (default 10,000). ``window``, ``cache`` and ``n_jobs`` go to
     :func:`~rai_bvar.evaluation.backtest`. Seeds: every ordering is fit with ``seed`` (data salts
     keep MCMC chains independent across orderings, DESIGN §5.6; in backtest mode ``seed`` becomes
-    the model's own sampler seed, ``MCMCSettings.seed`` or ``MHSettings.seed``, since backtests
-    fit without a seed argument); forecast, backtest, prior and noise-replicate seeds (each noise
-    replicate's fit seed differs from ``seed`` and from the others) are derived from ``(seed,
-    stream, index)`` and recorded in attrs (``fit_seeds``, ``forecast_seeds``,
-    ``backtest_seeds``, ``prior_seeds``, ``noise_seeds``).
+    the model's own sampler seed, ``MCMCSettings.seed`` or ``MHSettings.seed``); forecast,
+    backtest, prior and noise-replicate seeds (each noise replicate's fit seed differs from
+    ``seed`` and from the others) are derived from ``(seed, stream, index)`` and recorded in attrs
+    (``fit_seeds``, ``forecast_seeds``, ``backtest_seeds``, ``prior_seeds``, ``noise_seeds``).
+    In backtest mode, for models that declare ``uses_fit_seed`` (MCMC), the sampler seed of each
+    origin is the backtest's fit seed, derived from ``(backtest seed, origin)`` by
+    :func:`rai_bvar.evaluation.backtest.fit_seed` (DESIGN §11.6); it overrides
+    ``MCMCSettings.seed``, so ``fit_seeds`` then only enters the spec and the cache key. Results
+    stay distinct per ordering and noise replicate because each run has its own backtest seed
+    (``_derive(seed, "backtest", j)`` / ``"noise-backtest"``, in ``backtest_seeds``). Analytic
+    ``hierarchy="mh"`` models are fit as ``fit(sample)``, so for them ``fit_seeds`` is the MH seed.
     """
     if not isinstance(data, VARData):
         raise TypeError(f"data must be a VARData, got {type(data).__name__}")
