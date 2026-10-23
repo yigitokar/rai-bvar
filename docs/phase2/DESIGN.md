@@ -936,11 +936,13 @@ y*_t   = where(m_t, logaddexp(log_e2c_t, log_c), 0)                             
   Step (a) draws in the scaled form `Q̃ = σ²Q`, `h = σx̃`, and factors `Q̃` as a path-graph Laplacian (unit
   edges on the live transitions) plus `diag(σ²/V₀, σ²D)` (`awol_rw_laplacian` →
   `linalg.laplacian_precision_sample`): the pivots are carried as their excess over the next edge,
-  `q_0 = δ_0`, `q_t = δ_t + q_{t−1}/(1 + q_{t−1})`, which never cancels; `p_t = q_t + w_t`. Assembling `Q̃`
+  `q_0 = δ_0`, `q_t = δ_t + q_{t−1}/(1 + q_{t−1})` on a unit edge (`q_t = δ_t` after a padded one), which
+  never cancels; `p_t = q_t + w_t`. Assembling `Q̃`
   first rounds `σ²D` away once it is below the ulp of 2 (`σ ≲ 1e-8`, positive prior density under `B_σχ²₁`),
   and the level direction's pivot `≈ σ²(1/V₀ + ΣD)` is then rounding noise (status 2001, pivot 0; the
   Clark–Ravazzolo ordering-stage crash, WP25 queue item 7). Same function of `z` as
-  `tridiag_precision_sample` on the assembled system to rounding; the AR path is unchanged.
+  `tridiag_precision_sample` on the assembled system to rounding; `aux_log_likelihood` (RW) uses the same
+  factorisation; the AR path is unchanged.
 - Cost of the exact mode: two extra `(T_pad, J)` `logsumexp`s per equation and sweep (at `h′` and at the NC
   proposal), because `log g(y* − h_cur)` comes from the indicator step (performance §3.7.4).
 - `ahead`: `h_{T+j} = μ + φ(h_{T+j−1} − μ) + ση_j` (RW: no μ), from `h[T_eff]`; `transition` is one such step.

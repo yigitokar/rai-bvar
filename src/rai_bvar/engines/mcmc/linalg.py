@@ -427,22 +427,26 @@ def laplacian_precision_sample(
 ) -> tuple[Array, Array, Array]:
     """``x = Q⁻¹b + L⁻ᵀz ~ N(Q⁻¹b, Q⁻¹)`` for ``Q = Lap_w + diag(δ)``: the path-graph Laplacian
     with edge weights ``w[t−1] ≥ 0`` on ``(t−1, t)`` (``Q[t, t−1] = −w[t−1]``,
-    ``Q[t, t] = δ_t + w[t−1] + w[t]``) plus ``δ ≥ 0`` (the RW AWOL system, DESIGN §3.7.4).
+    ``Q[t, t] = δ_t + w[t−1] + w[t]``) plus ``δ ≥ 0`` (the RW AWOL system, DESIGN §3.7.4, where
+    ``w ∈ {0, 1}``; the series term is not guarded against overflow, so weights far outside the
+    scale of ``δ`` and ``q`` are out of scope).
 
     The pivots are those of :func:`tridiag_precision_sample` on the assembled ``Q``, but computed
     without cancellation: with ``q_t = p_t − w[t]`` (the pivot less the next edge),
     ``q_0 = δ_0`` and ``q_t = δ_t + w[t−1]q_{t−1}/(w[t−1] + q_{t−1})`` (a series conductance), so
     every term is non-negative. Assembling ``Q`` first rounds ``δ`` away when it is below the ulp
     of the degrees (``σ²D ≪ ε``), and the pivot of the near-null level direction, ``≈ Σδ``, is
-    then rounding noise; here it keeps its relative accuracy. ``log|Q| = Σ log p_t`` (``log1p``
-    on unit edges). Same returns as :func:`tridiag_precision_sample`; ``δ_t = 1``, ``w = 0`` is a
-    decoupled padded state.
+    then rounding noise; here it keeps its relative accuracy. After an edge of weight 0 (a
+    padded state) ``q_t = δ_t``. ``log|Q| = Σ log p_t`` (``log w + log1p(q/w)`` on edges).
+    Same returns as :func:`tridiag_precision_sample`; ``δ_t = 1``, ``w = 0`` is a decoupled
+    padded state. The masked branches use safe denominators, so no NaN is ever formed.
     """
     w_next = jnp.concatenate([w, jnp.zeros((1,), w.dtype)])
 
     def piv_scan(q_prev, inp):
         d_t, w_t = inp
-        series = jnp.where(w_t > 0.0, w_t * q_prev / (w_t + q_prev), 0.0)
+        edge = w_t > 0.0
+        series = jnp.where(edge, w_t * q_prev / jnp.where(edge, w_t + q_prev, 1.0), 0.0)
         q_t = d_t + series
         return q_t, q_t
 
@@ -450,7 +454,9 @@ def laplacian_precision_sample(
     _, qs = lax.scan(piv_scan, q0, (delta[1:], w))
     q = jnp.concatenate([q0[None], qs])
     piv = q + w_next
-    log_piv = jnp.where(w_next > 0.0, jnp.log(w_next) + jnp.log1p(q / w_next), jnp.log(q))
+    edge_next = w_next > 0.0
+    w_safe = jnp.where(edge_next, w_next, 1.0)
+    log_piv = jnp.where(edge_next, jnp.log(w_safe) + jnp.log1p(q / w_safe), jnp.log(q))
     ell = jnp.sqrt(piv)
     c = -w / ell[:-1]  # L[t, t−1]
     v0 = b[0] / ell[0]

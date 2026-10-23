@@ -258,6 +258,8 @@ def test_awol_rw_laplacian_is_the_rw_system():
         np.testing.assert_array_equal(np.asarray(x1)[m:], z[m:])
         assert float(ld1) == pytest.approx(float(ld0), rel=1e-13)
         assert float(p1) == pytest.approx(float(p0), rel=1e-12)
+    with jax.debug_nans(True):  # the masked branches (padded edges) form no NaN
+        laplacian_precision_sample(*(jnp.asarray(a) for a in (delta, w, b, z)))
 
 
 def _decimal_laplacian_sample(delta, w, b, z):
@@ -297,17 +299,43 @@ def test_rw_awol_at_a_tiny_sigma():
     sp = prior()
     P = problem(4, T_eff=88, T_pad=96, rw=True, sigma=5e-9)
     delta, w, b = (np.asarray(a) for a in lap(P, sp))
+    sigma, T = P["sigma"], P["T_eff"]
+    live = T + 1
+    # δ itself carries σ²D (not (σ²D + 2) − 2, which would bring the cancellation back)
+    D = P["obs"][:T] / MX.OCSN10.v[P["s"][:T]]
+    assert delta[0] == pytest.approx(sigma**2 / float(sp.V0), rel=1e-15)
+    np.testing.assert_allclose(delta[1:live], sigma**2 * D, rtol=1e-15, atol=0)
     z = rng(41).normal(size=delta.size)
     x, logdet, piv = laplacian_precision_sample(*(jnp.asarray(a) for a in (delta, w, b, z)))
     x_ref, ld_ref, piv_ref = _decimal_laplacian_sample(delta, w, b, z)
-    live = P["T_eff"] + 1
     assert piv_ref[live - 1] < 1e-14  # the level direction (exact)
     assert float(piv) == pytest.approx(piv_ref.min(), rel=1e-12)
     assert float(logdet) == pytest.approx(ld_ref, rel=1e-13)
-    sigma = P["sigma"]
     np.testing.assert_allclose(sigma * np.asarray(x), sigma * x_ref, rtol=1e-12, atol=1e-15)
     h = sigma * np.asarray(x)[:live]
     assert np.ptp(h) < 1e-6 and -5.0 < h[0] < 5.0
+    # the increments σΔx (what the C-step and the NC move read) to rounding of h itself
+    dh, dh_ref = np.diff(h), np.diff(sigma * x_ref[:live])
+    assert np.max(np.abs(dh - dh_ref)) <= 1e-6 * np.sqrt(np.mean(dh_ref**2))
+
+
+def test_rw_integrated_likelihood_at_a_tiny_sigma():
+    """``aux_log_likelihood`` (RW) at ``σ = 5e-9`` against the dense MVN with the RW covariance in
+    closed form, ``Cov(h_s, h_t) = V₀ + σ² min(s, t)`` (well conditioned, unlike ``Q⁻¹``)."""
+    sp = prior()
+    P = problem(4, T_eff=88, T_pad=96, rw=True, sigma=5e-9)
+    T, sigma = P["T_eff"], P["sigma"]
+    on = P["obs"][:T] > 0
+    rows = np.flatnonzero(on) + 1
+    v = MX.OCSN10.v[P["s"][:T]][on]
+    yobs = (P["ys"][:T] - MX.OCSN10.m[P["s"][:T]])[on]
+    cov = float(sp.V0) + sigma**2 * np.minimum.outer(rows, rows) + np.diag(v)
+    ref = stats.multivariate_normal.logpdf(yobs, np.full(on.sum(), float(sp.m0)), cov)
+    got = SV.aux_log_likelihood(
+        jnp.asarray(P["ys"]), jnp.asarray(P["s"]), jnp.asarray(P["obs"]), jnp.int32(T),
+        jnp.asarray(P["mu"]), jnp.asarray(P["phi"]), jnp.asarray(sigma), sp, MX.OCSN10, rw=True,
+    )  # fmt: skip
+    assert float(got) == pytest.approx(ref, abs=1e-8)
 
 
 def test_rw_step_at_a_tiny_sigma_is_ok():
