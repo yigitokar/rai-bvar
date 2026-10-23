@@ -62,6 +62,41 @@ re-derived before it goes into the paper).
 11. **The design-review errata (E1–E28)** in DESIGN §0.2 document what independent reviewers caught
     in the proposals before implementation. Status: verified (in repository).
 
+## D. SOC/SUR dummy rows on the MCMC engine (WP25)
+
+12. **In conjugate (Mode II) structural form the λ step must count the dummy rows.** The rows are
+    weighted `1/λ_i` like data rows, so `λ_i | ·` gains `m/2` in its shape and the rows' λ-free
+    squared residuals in its scale (`IG(c + (T + q_i + m)/2, …)`); this is what makes the MCMC
+    posterior the NIW-plus-dummies posterior. Omitting it is easy to do (the coefficient step
+    alone looks right) and it is not caught by the dense oracles of the coefficient step; the
+    MCMC-vs-Phase-1 twin catches it at once (33 of 165 quantiles outside 4 MCSE, n = 3, p = 2,
+    T = 60). Evidence: `test_a1_dummies_*` in `tests/analytic/test_mcmc_twin.py` (the omission
+    was injected by hand; not a registered mutant, because the coupling is not an overridable
+    internal). Status: recorded.
+13. **The dummy-augmented Mode II prior has a closed-form λ marginal,** `λ_i | d ~ IG(c + m/2,
+    C + ½ r'(F_d P̃⁻¹F_dᵀ + I/w)⁻¹r)` with `r = y_d − F_dμ₀`, so the Geweke reference can sample
+    the prior exactly (integrate θ, then condition θ on the rows by Matheron's rule). Under
+    `iw_equivalent` (only `a_i` λ-scaled, rows with fixed weight) `p(d | λ)` is not inverse-gamma
+    and there is no closed-form prior sampler; the log prior is still exact up to a constant.
+    Evidence: `validation/dummies.py`, `tests/validation/test_reference_dummies.py`. Status:
+    verified.
+14. **Dummy rows break the diagonal prior precision,** so the O(q²) eigen fast path of Mode I ×
+    Constant falls back to the exact Cholesky path (`cholesky_const`) when dummies are on; Mode
+    II keeps its fixed-factor path because its rows are λ-free like the data. Status: verified
+    (design decision; `resolve_const_path`).
+15. **A "wrong weight" dummy bug is loud.** Weighting Mode I rows by the current `1/λ_i` instead of
+    the fixed `1/σ̄_i²` (N05 §7.7's warning; M17) gives Geweke max |z| 23 (control 2.4); dropping
+    the rows from the CCCM step (M18) gives 100 (control 2.6), at 3–6 s per G-small run. The
+    reference is written in covariance form (`m × m` systems), the kernels in precision form
+    (`q × q` Gram updates), which keeps the two implementations algebraically distinct. Status:
+    verified (`tests/mutation`).
+16. **Adding the feature left every existing composition bitwise unchanged.** With
+    `MeanStatic.n_dummy = 0` no dummy code is traced; 537 arrays (prior draws, simulated data,
+    caches, three production sweeps of all 17 compositions and 7 block configurations, and 7
+    end-to-end EB fits with forecasts) were identical bit for bit before and after the change on
+    one machine. Evidence: WP25 report; `test_dummy_path_is_closed_without_dummies`. Status:
+    recorded (M1 Pro, one run).
+
 ## Before submission
 
 - Re-run every "recorded" / "to check" item on the release commit and cite the commit hash.
