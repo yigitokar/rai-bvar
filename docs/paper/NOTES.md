@@ -43,6 +43,16 @@ re-derived before it goes into the paper).
 6. **SBC thinning cap.** With `t_max = 50` the ESS rule failed on slow-mixing datasets (outlier/t
    rows) while the γ test was clean; `t_max = 200` covers every replication observed. Evidence:
    `tests/sbc/test_sbc_compositions.py` docstring. Status: recorded.
+   **Row 18 (reduced × RW SV, the Clark–Ravazzolo primary SV arm; added 2026-10-23)** failed the
+   same rule at 200 by one replication (987 of 997 at ≥ 0.8 L; pilot IATs up to 319, γ clean, min
+   p 0.019 over 59 quantities) and passes at a per-row cap of 400 (ESS rule 100%, same min p).
+   That pass rests on the rule's blind spot: with a 4000-draw pilot the same run fails the ESS rule
+   alone (98.4%; pilot IATs up to 1438, γ and pooled-ESS gates clean). The slow quantities are the
+   reduced-form coefficients (intercepts most often), not σ, and in half of the 20 slowest chains
+   the IAT estimate still grows at 16000 sweeps (up to 4376): about 1–2% of prior-drawn T = 50
+   datasets mix very slowly under reduced × RW SV. The pre-registered pilot (1000) is kept.
+   Evidence: the same docstring; DESIGN §9.5 row 18 note and §9.6 erratum. Status: recorded (one
+   run each, Apple M5 Max under load); the paper should state the row's SBC pass with this caveat.
 7. **Geweke "error 2" (simulator draws fresh latents)** is caught by Geweke tests (M3, max |z|
    23.5 vs control 2.59). Status: verified.
 8. **Every mutant must be caught by some tier** (DESIGN §9.7): the table of mutant × catching tier

@@ -1909,12 +1909,49 @@ within-block cross-products (`a_ij·γ_{i,(lag1,j)}`, `μφ`, `φσ`, `p·N_1`, 
 | 12–13 | structural / reduced × `SV(outliers=True, tails="t")` | 3 | nightly |
 | 14–16 | structural × `SV(rw=True)`; × `SV(sigma2_prior=InvGamma)`; × `SV(h0=B₀)` | 2 | nightly |
 | 17 | `ZeroMean × SV`, `n = 1` | 1 | PR |
-| 18+ | rows 1–16 with `exact=False` | — | nightly, **recorded, not gating** (N06 §8; N01 §12.3(3)) |
+| 18 | reduced × `SV(rw=True)` (the Clark–Ravazzolo primary SV arm) | 3 | PR + nightly |
+| inexact | the SV rows of 1–16 and 18 with `exact=False` (same ids; formerly labelled "18+") | — | nightly, **recorded, not gating** (N06 §8; N01 §12.3(3)) |
 | 201–205 | SOC/SUR dummy rows (WP25): structural Mode I × `Constant("ig")`; Mode II × `Constant("iw")`; reduced × `Constant("ig")`; structural Mode I × `SV`; structural × `Constant("iw_equivalent")` | 2 / 3 (reduced, iw_equivalent 3) | PR + nightly |
 | blocks | the seven block-level configurations of §9.2 | — | PR |
 
 Sizes: G-small `C = 1000`, `M_c = 100`, `M₁ = 2·10⁵`, α = 1e-3; G-full `C = 4000`, `M_c = 500`, `M₁ = 10⁶`,
 α = 1e-2.
+
+**Row 18 (added 2026-10-23, Clark–Ravazzolo acceptance).** The CR replication's primary SV arm,
+`BVAR(mean=Linear(prior=Minnesota("reduced")), vol=SV(rw=True), lags=4)` (`benchmarks/clark_ravazzolo.py`
+`SV(rw)`), had no row of its own: it was validated only through its parts (row 8, reduced × AR SV; row 14,
+structural × RW SV; the CCCM block tests run with `rw=True`). Row 18 (`reduced_sv_rw`) is that composition. Its
+`StaticConfig` equals the CR arm's in every component field (`recursive` structure without contemporaneous
+scaling; `linear_reduced` mean, `coef_scaling="none"`, `const_path="weighted"`, `gram="packed"`,
+`cccm_precompute`; `fixed_diagonal` coefficient prior; SV core with `rw=True`, `sigma2_prior="scaled_chi2"`,
+no transitory scale, `ocsn10`, `exact=True`, `asis=True`, relative offset, uncoupled). What differs is what
+every row changes by construction: the shapes (`n = 3` at both sizes like the other reduced rows, so CCCM's
+middle column `j` is exercised; `p = 1 / 2`, `T_eff = 20 / 50` against CR's `n = 4`, `p = 4` and
+`T_eff = 77` (origin 1985Q1) to `182` (2011Q2) on its expanding windows, measured through `resolve()` on the
+FRED-QD 2026-09 vintage), the inert `nu_grid` (no transitory scale) and the §9.2 test priors (RW
+`h_0 ~ N(0, 1)` against the library default `N(log(ψ_i/ι), 4)`; `B_σ = 0.1` in both, D-13; the tight test
+Minnesota prior against CR's θ = 0.2, `1/l²`). It is tiered like its reduced-form neighbours 7–10 (G-small
+per PR, G-full and S nightly; the inexact variant recorded), and the reduced × SV(rw) fit joins the MCMC
+forecast-contract compositions (`tests/contract`, slow) and the `BVAR.fit → resolve()` compositions of
+`tests/unit/test_fit_mcmc_api.py` (slow). At the default `h_0 ~ N(0, 1)` a `V0` used as a precision (or a
+dropped `m0`) in the RW AWOL step or NC regression is numerically invisible, while CR runs at `V0 = 4` and
+data-centred `m0` (−3.8 to −0.5); so the RW rows also run G-small at `h_0 ~ N(−1, 4)`
+(`test_g_small_rw_h0_prior`: row 18 per PR, row 14 nightly; the row's own prior stays the shared §9.2 one).
+There a `V0`-as-precision mutant of the RW AWOL step fails (max |z| 13.8 at `log p(θ)` for row 18, 11.3 for
+row 14) while production passes (2.33, 1.39; t_crit 4.42, 4.29). The row needs no new reference code:
+`references_for` composes `LinearReducedRef` with `SVRWRef` slot by slot. Its SBC thins with a cap of
+`t_max = 400` (every other row: 200; both deviate from §9.6's 50 by the ESS rule's own remedy, §9.6 erratum,
+documented in `tests/sbc/test_sbc_compositions.py`) at the pre-registered `pilot = 1000`: at 200 the γ test was
+clean but 10 of 997 replications had pilot IATs of 187–319, one more than the 99% rule allows; at 400 the
+rule holds for every pilot IAT observed. **That pass rests on the rule's blind spot** (a pilot that
+underestimates the IAT): at `pilot = 4000` the same run fails the ESS rule alone (16 of 997 replications;
+pilot IAT 99th percentile 530, maximum 1438 against 319), with the γ test (min p 0.019) and the pooled-ESS
+gate (min 98.7) clean. The slow quantities are the reduced-form coefficients, not `σ`: a `Π` element (an
+intercept in 19 of 35) is the pilot-IAT argmax in every replication with IAT > 91, and extending the 20
+slowest chains to 16000 sweeps leaves the IAT estimate growing in 10 of them (up to 4376). About 1–2% of
+prior-drawn `T = 50` datasets therefore mix with IATs in the hundreds to thousands of sweeps under reduced ×
+RW SV; the γ test sees no calibration error. Evidence (2026-10-23, Apple M5 Max): G-small max |z| 1.98,
+G-full 1.90, SBC min p 0.019 (59 quantities), all at stage 1; the inexact variant's G-full max |z| 2.49.
 
 ### 9.6 Tier S: simulation-based calibration (nightly)
 
@@ -1930,6 +1967,10 @@ ESS ≥ 0.8 L for ≥ 99% of replications. **Erratum (orchestrator, 2026-10-22):
 from the pilot IAT (an AR(1) form, `ess_thin`), because L = 99 kept draws cannot certify 0.8 L for one replication;
 that rule cannot see a pilot that underestimates the IAT, so a second gate requires the replication-pooled kept-draw
 ESS (`ess_pooled`, Kish-weighted ECDF-indicator IAT) ≥ 0.8 L for every quantity (iid minimum 0.836 L at n = 40).
+**Erratum (2026-10-23).** `t_max` bounds the work, not the gate (the pass rule is in ESS): the live caps are 200 for
+every other row and 400 for row 18, each raised from 50 by the ESS rule's own remedy, at the pre-registered `pilot = 1000`
+(evidence in `tests/sbc/test_sbc_compositions.py`). Row 18 shows the blind spot above is live: at `pilot = 4000` it
+fails the per-replication rule (98.4%) with both other gates clean (§9.5 row 18 note).
 
 ### 9.7 Tier M: mutation suite (weekly; every mutant must fail some tier; fixes E17)
 
@@ -2023,8 +2064,8 @@ test modules add `filterwarnings = "error:Explicitly requested dtype"` (x64 trun
 
 | Tier | Contents | When | Budget |
 | :--- | :--- | :--- | :--- |
-| PR | U, B, contract (MCMC compositions at `n = 2`, short chains), G-small (compositions 1–5, 7–10, 17 and the block configs), A1, A2, A5 (`n = 3`), A6, stochvol parity (fixture read + our run), runner/plan/recompile/failure tests | every PR | ≈ 10–15 min with the persistent compilation cache |
-| Nightly | G-full (all rows, `exact=False` recorded), S, A3, A4, A5 (`n = 20`), A7, bayesianVARs parity, ordering invariance MC tests | nightly | ≤ 3 h |
+| PR | U, B, contract (MCMC compositions at `n = 2`, short chains), G-small (compositions 1–5, 7–10, 17, 18, 201–205, row 18 at the RW `h_0` prior `N(−1, 4)` and the block configs), A1, A2, A5 (`n = 3`), A6, stochvol parity (fixture read + our run), runner/plan/recompile/failure tests | every PR | ≈ 10–15 min with the persistent compilation cache |
+| Nightly | G-full (all rows, `exact=False` recorded), row 14's G-small at the RW `h_0` prior `N(−1, 4)`, S, A3, A4, A5 (`n = 20`), A7, bayesianVARs parity, ordering invariance MC tests | nightly | ≤ 3 h |
 | Weekly | M, SPEC §10.5 DGP rows relevant to Phase 2 (homoskedastic, SV, SV + outliers), ordering detection power (N08 §B5 item 5) | weekly | — |
 | Pre-release | BENCH-P2 (§10), Clark–Ravazzolo replication (N08 §C5 criteria 1–6) | release | — |
 
@@ -2836,7 +2877,8 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
 - **Tests**: §9.4 (block SBC, one-block invariance), §9.5 (G-small, G-full, `exact=False` recorded), §9.6 (SBC),
   §9.7 (mutants M1–M16 with recorded catch tiers).
 - **Acceptance (exit criterion)**: G-small green per PR for compositions 1–5, 7–10, 17 and the block configs;
-  G-full and S green nightly for every composition; every mutant caught by some tier.
+  G-full and S green nightly for every composition; every mutant caught by some tier. (Row 18, added with the
+  Clark–Ravazzolo acceptance work, joins the PR G-small set, §9.5.)
 
 #### WP20 — Analytic twins at scale
 
