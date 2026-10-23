@@ -136,7 +136,7 @@ re-derived before it goes into the paper).
     below the ulp of the Laplacian's diagonal (2): the assembled matrix is the singular path
     Laplacian, and the level direction's pivot (exactly `≈ σ²(1/V₀ + ΣD)`, of order 1e-15) came
     out 0 (status 2001; the run aborted). Carrying the pivots as their excess over the next edge
-    (`q_t = δ_t + q_{t−1}/(1 + q_{t−1})`, all terms ≥ 0) is the same factorisation without the
+    (`q_t = δ_t + q_{t−1}/(1 + q_{t−1})` on unit edges, all terms ≥ 0) is the same factorisation without the
     cancellation: at ordinary σ it agrees with the old draw to ~1e-13 and every non-RW composition
     stays bitwise unchanged. The trigger is the σ → 0 region where the centred σ² step mixes
     slowly and only the NC move escapes; the fix removes the crash, not the slow mixing.

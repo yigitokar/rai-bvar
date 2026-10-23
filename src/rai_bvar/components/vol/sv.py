@@ -374,16 +374,21 @@ def aux_log_likelihood(
         −½ T_obs log 2π − ½Σ m log v_s − ½Σ m y′²/v_s + ½ log|K̃_x| − ½ log|Q̃| + ½ b̃′ᵀQ̃⁻¹b̃′
 
     where ``log|K̃_x| = log ω₀`` (AR) or ``log(σ²/V₀)`` (RW) is the prior part. Deterministic oracle
-    (T6) and an SBC quantity."""
+    (T6) and an SBC quantity. RW factors ``Q̃`` in the Laplacian form of step (a)
+    (:func:`awol_rw_laplacian`), so it stays exact as ``σ → 0``."""
     sp = _prior(prior_i)
     v_s, m_s = _take(table.v, s), _take(table.m, s)
     level = sp.m0 if rw else mu
     yp = jnp.where(obs > 0, y_star - m_s - level, 0.0)
-    diag, off, _ = awol_system(y_star, s, obs, T_eff, mu, phi, sigma, sp, table, h0=h0, rw=rw)
     D = obs / v_s
     j = jnp.arange(1, y_star.shape[0] + 1)
     b = jnp.concatenate([jnp.zeros((1,), _F64), jnp.where(j <= T_eff, sigma * D * yp, 0.0)])
-    xm, logdet, _ = tridiag_precision_sample(diag, off, b, jnp.zeros_like(b))
+    if rw:
+        delta, w, _ = awol_rw_laplacian(y_star, s, obs, T_eff, sigma, sp, table)
+        xm, logdet, _ = laplacian_precision_sample(delta, w, b, jnp.zeros_like(b))
+    else:
+        diag, off, _ = awol_system(y_star, s, obs, T_eff, mu, phi, sigma, sp, table, h0=h0, rw=rw)
+        xm, logdet, _ = tridiag_precision_sample(diag, off, b, jnp.zeros_like(b))
     if rw:
         log_kx = jnp.log(sigma * sigma / sp.V0)
     elif h0 == "stationary":
