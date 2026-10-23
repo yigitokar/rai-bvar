@@ -1,5 +1,5 @@
-"""Mutation suite M1–M16: the mutants, how each is injected, and the tier checks that catch it
-(DESIGN §9.7, §13 WP19; N06 §9.5).
+"""Mutation suite M1–M18: the mutants, how each is injected, and the tier checks that catch it
+(DESIGN §9.7, §13 WP19; N06 §9.5). M17–M18 are the WP25 mutants of the SOC/SUR dummy rows.
 
 Every mutant is injected through the production seams only (DESIGN §4.9): a named kernel internal
 (``compose(static, overrides={name: fn})`` via ``joint_spec(..., kernel_overrides=...)``), a kernel
@@ -59,6 +59,7 @@ import numpy as np
 from jax import lax, random
 from scipy import stats
 
+from rai_bvar.components.mean.linear_reduced import cccm_core
 from rai_bvar.components.vol import constant as CN
 from rai_bvar.components.vol import mixture as MX
 from rai_bvar.components.vol import sv as SV
@@ -132,6 +133,28 @@ def ccm2019_cccm_core(
         return Pi.at[:, j].set(pi_j), info.merge(info_j)
 
     return lax.fori_loop(0, n, body, (Pi, StepInfo.success()))
+
+
+def m17_linear_conditional(ctx: Any, pm: Any, cm: Any, cache: Any, shared: Any) -> GaussianPrec:
+    """M17 (WP25): Mode I SOC/SUR rows weighted by the *current* ``1/λ_i`` instead of the fixed
+    ``1/σ̄_i²`` — the error N05 §7.7 warns against (the ``λ`` step does not see the rows, so the
+    sampler targets the wrong posterior). Mode I, Constant core: the data weights are ``1/λ_i``."""
+    c = jnp.concatenate([pm.cmask, cm.cmask])
+    on = c > 0
+    mean = jnp.where(on, jnp.concatenate([pm.mean, cm.mean]), 0.0)
+    prec = jnp.where(on, jnp.concatenate([pm.prec, cm.prec]), 1.0)
+    w = ctx.weights
+    F = cache.F
+    G = F.T @ (w[:, None] * F) + w[0] * cache.dummy.G
+    fty = F.T @ (w * ctx.target) + w[0] * jnp.take(cache.dummy.FtY, ctx.i, axis=1)
+    K = c[:, None] * G * c[None, :] + jnp.diag(prec)
+    return GaussianPrec(K=K, b=prec * mean + c * fty)
+
+
+def m18_cccm_core(*args: Any, dummy: Any = None, **kw: Any) -> tuple[Array, StepInfo]:
+    """M18 (WP25): the SOC/SUR rows dropped from the CCCM ``Π`` step (the prior sampler and the
+    reference keep them)."""
+    return cccm_core(*args, **kw)
 
 
 def m4_tau_conditional(log_r2: Array, nu: Array, log_c: Array) -> tuple[Array, Array]:
@@ -328,6 +351,82 @@ def u_cccm(spec: JointSpec, seed: int = SEED_U) -> float:
             sts.append(dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=CCCMGlobal(Pi=jnp.asarray(P)))))  # fmt: skip
         lq = dist.logpdf(x1) - dist.logpdf(x2)
         errs.append(_rel(lq, _lj(spec, sts[0], data) - _lj(spec, sts[1], data)))
+    return max(errs)
+
+
+def _production_cache(spec: JointSpec, data: Any) -> Any:
+    from rai_bvar.validation.joint import production_sweep
+
+    prepare, _ = production_sweep(spec.static, spec.overrides)
+    return prepare(data, spec.prior)
+
+
+def u_cccm_dummies(spec: JointSpec, seed: int = SEED_U) -> float:
+    """M18 (U, density ratio): as :func:`u_cccm`, with the SOC/SUR rows the production step hands
+    the program's ``cccm_core`` (``dummy=(X_dᵀX_d, X_dᵀY_d, w)`` of the fit cache)."""
+    st, data = joint_draw(spec, seed)
+    static, prior = spec.static, spec.prior
+    d = _production_cache(spec, data).dummy
+    core = program_of(spec).global_pre[0].impl("cccm_core")
+    n, k = static.shapes.n, static.shapes.k
+    lv = effective_log_var(st.eq.vol, static)
+    live = data.tmask[None, :] > 0
+    inv_lam = jnp.where(live, jnp.exp(-jnp.where(live, lv, 0.0)), 0.0)
+    c = prior.eq.coef
+
+    def col0(Z: Array) -> np.ndarray:
+        Pi, _ = core(st.glob.mean.Pi, st.eq.struct.a, inv_lam, data.X, data.Y, Empty(), c.mean0,
+                     c.prec0, Z, gram="batched", precompute=True, dummy=(d.G, d.FtY, d.w))  # fmt: skip
+        return np.asarray(Pi[:, 0])
+
+    Z0 = jnp.zeros((n, k))
+    mu = col0(Z0)
+    C = np.stack([col0(Z0.at[0, r].set(1.0)) - mu for r in range(k)], axis=1)
+    dist = stats.multivariate_normal(mu, C @ C.T)
+    r = np.random.default_rng(seed)
+    Pi = np.asarray(st.glob.mean.Pi)
+    errs = []
+    for _ in range(4):
+        x1, x2 = (mu + C @ r.standard_normal(k) for _ in range(2))
+        sts = []
+        for x in (x1, x2):
+            P = Pi.copy()
+            P[:, 0] = x
+            sts.append(dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=CCCMGlobal(Pi=jnp.asarray(P)))))  # fmt: skip
+        lq = dist.logpdf(x1) - dist.logpdf(x2)
+        errs.append(_rel(lq, _lj(spec, sts[0], data) - _lj(spec, sts[1], data)))
+    return max(errs)
+
+
+def u_dummy_equation(spec: JointSpec, seed: int = SEED_U) -> float:
+    """M17 (U, density ratio): the last equation's ``θ_i = [δ_i | a_i]`` conditional of the
+    program's ``linear_conditional`` (context, moments and fit cache built by the production
+    kernels) vs ``log p(θ, y)`` with the SOC/SUR rows (``validation.dummies``)."""
+    st, data = joint_draw(spec, seed)
+    program = program_of(spec)
+    S, M = program.structure, program.mean
+    cache = _production_cache(spec, data)
+    n, k = spec.static.shapes.n, spec.static.shapes.k
+    i = n - 1
+    eq_i, prior_i = _slice(st.eq, i), _slice(spec.prior.eq, i)
+    ytil = S.pre_residual(st.glob, data, M.fitted_reduced(st.glob, data))
+    ctx = S.context(jnp.int32(i), ytil, eq_i, program.vol, data, st.glob.vol)
+    cm = S.contemp_moments(ctx, prior_i)
+    pm = program.coef.moments_eq(eq_i.coef, jnp.int32(i), prior_i, st.glob.coef)
+    cond = M.impl("linear_conditional")(ctx, pm, cm, cache, spec.prior.shared)
+    K, b = np.asarray(cond.K), np.asarray(cond.b)
+    mask = np.asarray(jnp.concatenate([pm.cmask, cm.cmask])) > 0
+    th0 = np.concatenate([np.asarray(st.eq.mean.delta[i]), np.asarray(st.eq.struct.a[i])])
+    r = np.random.default_rng(seed)
+    errs = []
+    for _ in range(4):
+        xs = [np.where(mask, th0 + 0.3 * r.standard_normal(th0.size), 0.0) for _ in range(2)]
+        lq = [-0.5 * x @ K @ x + b @ x for x in xs]
+        lj = []
+        for x in xs:
+            s1 = _set_leaf(st, "eq.mean.delta", st.eq.mean.delta.at[i].set(jnp.asarray(x[:k])))
+            lj.append(_lj(spec, _set_leaf(s1, "eq.struct.a", s1.eq.struct.a.at[i].set(jnp.asarray(x[k:]))), data))  # fmt: skip
+        errs.append(_rel(lq[0] - lq[1], lj[0] - lj[1]))
     return max(errs)
 
 
@@ -717,11 +816,21 @@ _ALL: tuple[Mutant, ...] = (
            "G (defined with exact=False only)", "zero_sv",
            lambda: {"exact": False, "prior_kwargs": {**_M16_PRIOR, "offset_rel": 0.1}},
            lambda: {"exact": False, "prior_kwargs": dict(_M16_PRIOR)}, catchers=("G",)),
+    Mutant("M17", "Mode I SOC/SUR rows weighted by the current 1/λ_i, not the fixed 1/σ̄_i²",
+           "linear_conditional", "WP25 (N05 §7.7): U (density ratio), G",
+           "structural_constant_dummies", _ov(linear_conditional=m17_linear_conditional),
+           u_check=u_dummy_equation, catchers=("U", "G")),
+    Mutant("M18", "SOC/SUR rows dropped from the CCCM Π step", "cccm_core",
+           "WP25 (N04 §3.1): U (density ratio), G", "reduced_constant_dummies",
+           _ov(cccm_core=m18_cccm_core), u_check=u_cccm_dummies, catchers=("U", "G")),
 )  # fmt: skip
 #: Observed on 2026-10-22 (M1 Pro): U errors (mutant / control), G-small max |z| (mutant /
 #: control; t_crit 4.1–4.5), B and S Bonferroni q or min p (mutant / control). Re-run
 #: independently on x86-64 Linux (4 CPUs) the same day: all 33 mutant × tier checks caught, every
-#: control passed, the statistics equal to the digits shown (M2: G 705 / 2.47).
+#: control passed, the statistics equal to the digits shown (M2: G 705 / 2.47). M17–M18 (WP25)
+#: add four checks, recorded on an Apple M5 Max (arm64, macOS 26.6) and reproduced independently
+#: on x86-64 Linux the same day (``-k "M17 or M18"``: 4 passed): M17 U 0.0602 / 2.25e-15, G max |z|
+#: 23.15 / 2.44 (t_crit 4.26); M18 U 0.405 / 2.35e-14, G 99.7 / 2.61 (t_crit 4.40).
 EVIDENCE: dict[str, str] = {
     "M1": "U 1.70 / 1.6e-14; B (π_0 block SBC) loglik p 2.8e-11 / min p 0.10; G 20.8 / 3.03; "
     "one-block invariance of the whole CCCM scan: q 0.29 (not caught)",
@@ -742,6 +851,10 @@ EVIDENCE: dict[str, str] = {
     "M14": "U 14.9 / 9e-15; G 325 / 3.03",
     "M15": "U 0.457 / 6e-17; B q 1.8e-14 / 1.0; G 50.5 / 2.34",
     "M16": "G 264 / 1.99 (λ ≈ 0.01, exact=False; control offset 1e-12)",
+    "M17": "U 0.060 / 2.4e-15; G 23.1 (eq0.mean.delta1^2) / 1.94 (control on the dense eigen "
+    "path, stage 2 after a stage-1 q 0.0012; 2.44 on cholesky_const) (2026-10-23, WP25, Apple M5 "
+    "Max; x86-64 alike)",
+    "M18": "U 0.405 / 2.9e-14; G 99.7 (glob.mean.Pi[1,0]) / 2.61 (2026-10-22, WP25, Apple M5 Max; x86-64 alike)",
 }
 MUTANTS: dict[str, Mutant] = {m.id: dataclasses.replace(m, evidence=EVIDENCE[m.id]) for m in _ALL}
 

@@ -139,3 +139,32 @@ def test_unflagged_non_finite_state_is_located():
     err = info.value
     assert (err.block, err.equation, err.iteration) == ("state", 1, 7)
     assert any("non-finite" in v for v in err.detail["violations"])
+
+
+def test_replay_of_an_equation_failure_after_the_production_cccm_step():
+    """``failure_detail`` re-runs the pre-phase steps eagerly from the host (NumPy) copy of the
+    state. With the production CCCM step its column scan indexes ``Π`` with the traced column, so
+    host arrays must be converted first: before the fix the replay of a reduced-form EQ_VOL
+    failure raised ``TracerArrayConversionError`` (found in the full Clark–Ravazzolo run) and the
+    diagnostics were lost; now it reports the vol step of the failing equation."""
+    from jax import random
+
+    from rai_bvar.engines.mcmc.compose import compose
+    from rai_bvar.engines.mcmc.keys import Block
+    from rai_bvar.engines.mcmc.runner import failure_detail
+    from rai_bvar.validation.joint import joint_spec, production_sweep
+
+    spec = joint_spec("reduced_sv")
+    key = random.key(5, impl="threefry2x32")
+    st = spec.prior_sample(random.fold_in(key, 0))
+    data = spec.simulate(random.fold_in(key, 1), st)
+    cache = production_sweep(spec.static)[0](data, spec.prior)
+    host = [jax_to_numpy(x) for x in (st, data, spec.prior, cache)]
+    detail = failure_detail(compose(spec.static), *host, random.fold_in(key, 2), 7, Block.EQ_VOL, 0)
+    assert detail["step"] == "vol" and "residual_range" in detail
+
+
+def jax_to_numpy(tree):
+    import jax
+
+    return jax.tree.map(np.asarray, tree)

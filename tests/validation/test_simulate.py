@@ -319,6 +319,19 @@ def numpy_test_functions(spec: J.JointSpec, st, data, raw_moments: bool) -> dict
                 out[f"eq{i}.joint.a{j}*gamma_lag1_{j}"] = st.eq.struct.a[i, j] * G[i, nd + j]
             out[f"eq{i}.joint.B_own1"] = B[nd + i, i]
         out["joint.gamma_minus_AM_sq"] = np.sum((G - A @ np.asarray(spec.prior.eq.coef.mean0)) ** 2)
+    if static.mean.n_dummy:  # SOC/SUR rows (WP25): Σ_d (y_d − F_dθ)²
+        Yd = np.asarray(spec.prior.shared.dummies.Y)
+        Xd = np.asarray(spec.prior.shared.dummies.X)
+        if static.mean.kind == "linear_structural":
+            Mc = np.asarray(spec.prior.shared.Mc)
+            for i in range(n):
+                Fd = np.hstack([Xd, Xd @ Mc[:, :i] - Yd[:, :i]])
+                theta = np.concatenate([st.eq.mean.delta[i], st.eq.struct.a[i, :i]])
+                out[f"eq{i}.joint.dummy_ss"] = np.sum((Yd[:, i] - Fd @ theta) ** 2)
+        else:
+            R = Yd - Xd @ np.asarray(st.glob.mean.Pi)
+            for j in range(n):
+                out[f"glob.mean.dummy_ss[{j}]"] = np.sum(R[:, j] ** 2)
     ll = stats.norm.logpdf(E, 0.0, np.exp(0.5 * lv))
     out["loglik"] = np.sum(ll)
     out["log_prior"] = float(
@@ -407,7 +420,7 @@ def test_joint_spec_builds_for_every_name(name, size):
     sh = spec.static.shapes
     assert spec.fixed.T_eff % 32 != 0 and sh.T_pad == 32 * -(-spec.fixed.T_eff // 32)
     assert len(spec.names) == len(set(spec.names)) > 0
-    assert J.composition_id(name) in (*range(1, 18), *range(101, 108))
+    assert J.composition_id(name) in (*range(1, 18), *range(101, 108), *range(201, 206))
 
     def run(keys):  # the JointModel methods, batched over chains (one compile)
         sts = jax.vmap(spec.prior_sample)(keys)
@@ -429,8 +442,20 @@ def test_joint_spec_builds_for_every_name(name, size):
 
 
 def test_composition_table_matches_design():
-    assert len(J.COMPOSITIONS) == 17 and len(J.BLOCK_CONFIGS) == 7
-    assert [J.composition_id(c) for c in J.COMPOSITIONS] == list(range(1, 18))
+    assert len(J.COMPOSITIONS) == 22 and len(J.BLOCK_CONFIGS) == 7
+    assert [J.composition_id(c) for c in J.COMPOSITIONS] == [*range(1, 18), *range(201, 206)]
+    # WP25 dummy rows: (n_dummy small, const_path, coef_scaling)
+    for name, (m, path, cs) in {
+        "structural_constant_dummies": (3, "eigen", "none"),
+        "structural_mode2_constant_dummies": (3, "fixed_factor", "lambda"),
+        "reduced_constant_dummies": (4, "weighted", "none"),
+        "structural_sv_dummies": (3, "weighted", "none"),
+        "structural_iw_equivalent_dummies": (4, "cholesky_const", "none"),
+    }.items():
+        st = J.joint_spec(name).static
+        assert (st.mean.n_dummy, st.mean.const_path, st.mean.coef_scaling) == (m, path, cs), name
+    for name in J.COMPOSITIONS[:17] + J.BLOCK_CONFIGS:
+        assert J.joint_spec(name).static.mean.n_dummy == 0, name
     expect = {
         "structural_constant": ("linear_structural", "constant", "none", "eigen", "none"),
         "structural_mode2_constant": ("linear_structural", "constant", "none", "fixed_factor",
@@ -458,7 +483,8 @@ def test_composition_table_matches_design():
     # the n column of the DESIGN §9.5 table, (small, full), row by row
     n_by_row = {1: (2, 3), 2: (2, 3), 3: (2, 3), 4: (2, 3), 5: (2, 3), 6: (3, 3), 7: (3, 3),
                 8: (3, 3), 9: (3, 3), 10: (3, 3), 11: (3, 3), 12: (3, 3), 13: (3, 3), 14: (2, 2),
-                15: (2, 2), 16: (2, 2), 17: (1, 1)}  # fmt: skip
+                15: (2, 2), 16: (2, 2), 17: (1, 1),
+                201: (2, 3), 202: (2, 3), 203: (3, 3), 204: (2, 3), 205: (3, 3)}  # fmt: skip
     for name in J.COMPOSITIONS:
         ns = tuple(J.joint_spec(name, size).static.shapes.n for size in ("small", "full"))
         assert ns == n_by_row[J.composition_id(name)], name

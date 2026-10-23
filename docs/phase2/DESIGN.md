@@ -64,7 +64,7 @@ numerical oracles only, run offline by `tools/make_r_fixtures.R` (SPEC §2.1, §
 | D-18 | Failures never raise inside JIT and never jitter: per-chain `(code, it)` in the carry; the host replays the failing chunk deterministically to `it − 1` and reports diagnostics recomputed from the failing block's inputs | N07 §8.4; N05 §7.3 | — |
 | D-19 | `Minnesota(form="auto")` and `Constant(prior="auto")` are the new defaults, resolved in `BVAR.__post_init__` (conjugate/`"iw"` for the analytic case, structural/`"ig"` otherwise); resolved values are stored, so Phase 1 specs and hashes are unchanged; `grid()` harmonises `auto` forms across a grid so the SPEC §9.5 vol grid is a one-axis comparison | SPEC D3, §9.5 | — |
 | D-20 | The LPD estimator of SPEC §7 is unchanged. Internal accelerations (leading-block slicing, optional factored `(A, ℓ)` variables) and the opt-in transitory Rao-Blackwellisation never change the contract fields | N03 §5.3 | — |
-| D-21 | Lenza–Primiceri scaling, SOC/SUR dummies and `hierarchy="mh"` are rejected on the MCMC engine in Phase 2 with actionable errors (SOC/SUR is stretch WP25) | N05 §7.7; SPEC §5.6 | — |
+| D-21 | Lenza–Primiceri scaling, SOC/SUR dummies and `hierarchy="mh"` are rejected on the MCMC engine in Phase 2 with actionable errors (SOC/SUR is stretch WP25; **delivered by WP25, 2026-10-22: SOC/SUR now run on the MCMC engine**, §2.10 WP25 amendments) | N05 §7.7; SPEC §5.6 | — |
 | D-22 | Validation code lives in `src/rai_bvar/validation/`; prior samplers, observable simulators and `log_joint` come from a **reference registry** written by work packages that write no kernels | N06 §2, §5.1; N03 §7.2 | — |
 | D-23 | Only shapes and component choices are static; data, priors, `T_eff`, `thin`, hyperparameters are traced. `T_pad` is a deterministic function of `(T_eff, t_bucket)` only (never padded to a backtest maximum). Every choice that changes draws (`gram`, `const_path`, `t_bucket`) is in `MCMCSettings` and hence in the spec hash | N07 §7 | — |
 | D-24 | Diagnostics use the in-repo NumPy `diagnostics.py`, extended with tail ESS, mean ESS, mean and quantile MCSE (Vehtari et al. 2021 §4.3–4.4); ArviZ optional | SPEC §10.6; N06 §10 | — |
@@ -613,7 +613,40 @@ is the plug-in at `λ_i = exp(b_μ)` (RW: `exp(m_0)`) and says so in a `vol_mean
 importance-sampling SV-t oracle (4 observations, max |z| ≈ 1.8): stochvol 3.2.1's Student-t sampler does not
 target the standardized-t SV posterior (`tests/parity/SV_PARAMETRIZATION.md` §3.2), so the `stochvol_v_t5` row
 stays a strict xfail (`raises=OracleDeviation`) until a fixture from stochvol ≥ 3.2.5 (ideally 3.2.9) is built.
-(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it.
+(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it. (3) WP23 review: backtest cache keys of `uses_fit_seed` models carry `"seeding": "fit_seed-v1"` (analytic keys stay the Phase 1 keys), so scores cached before the per-origin fit seeds are never served; `warm_start=True` requires strictly increasing origins (a warm start from a later origin would carry later data into an earlier fit, R9). (4) Known limitation, not changed here: the SPEC §7 RB log predictive density for h > 1 conditions on the simulated path to T + h − 1; for outcomes far in a predictive's tail its weights collapse onto one draw, the estimate is biased low by up to tens of nats and the delta-method MCSE saturates near 1 (Clark–Ravazzolo crisis origins at h ≥ 4). The replication report flags such cells; a path-integrated estimator is an open SPEC-level decision.
+
+**WP25 amendments (2026-10-22; SOC/SUR dummy rows on the MCMC engine, N05 §7.7, N04 §3.1):**
+(1) Contract: `MeanStatic.n_dummy: int = 0` (the row count `m`, shape-defining; `> 0` forbids the
+`zero` mean); `CoefPriorArrays.dummy_w: f64[n] | Empty` (λ-free row weight: `ι/ψ_i` in structural
+Mode I and `iw_equivalent`, 1 in Mode II, `1/ψ_j` reduced); `SharedPrior.dummies: DummyRows(Y:
+f64[m, n], X: f64[m, k]) | Empty` (the Phase 1 rows, shared by every equation, so they cannot live in
+the vmapped `EqPrior`); `FitCache.dummy: DummyCache(F, G, FtY, w) | Empty` (structural `F_d = [X_d |
+X_d M_c − Y_d[:, :n−1]]`, reduced `F_d = X_d`; `G = F_dᵀF_d`; `w` copied from `dummy_w` because the
+mean kernels see an `EqContext`, not `EqPrior`). All four are `Empty`/0 without dummies, so no dummy
+code is traced and pre-WP25 programs are unchanged. `prior_template` emits them from `n_dummy`.
+(2) Kernels: the rows enter the structural `(δ_i, a_i)` Gram and right-hand side with weight `w_i`
+(Mode I, `iw_equivalent`) or `w_i/λ_i` (Mode II), and the CCCM `K_j`, `b_j` with `w_j` (never `A`,
+`U`, `E`, `W`); Mode II's coupling adds `m` to `n_active` and `½w_iΣ_d(y_{d,i} − F_dθ_i)²` to `quad`;
+`cccm_core`/`cccm_conditional_j` take a keyword-only `dummy=(G, FtY, w)`; the monitor's log prior
+adds the rows' factor (up to its constant). The rows are never time steps: not in `EngineData`,
+`tmask`/`T_eff`, the likelihood or the LPD. (3) Path rule (§3.7.2) unchanged by the rows: Mode I ×
+Constant keeps `eigen` on the dense prior precision `P = diag(precθ) + w_d(cθ⊗cθ ⊙ F_dᵀF_d)`
+(`linalg.eigen_prepare_dense`: `G̃ = L_P⁻¹GL_P⁻ᵀ` by the graded decomposition, the cache stores
+`L_P⁻ᵀQ` with `d_half = 1`, so `eigen_draw` is unchanged; N05 §7.7), equal to `cholesky_const`
+within the §9.3 path-vs-path envelope and 0.46 vs 1.53 ms/sweep at `n = 20, p = 4, T = 300`
+(Apple M5 Max); Mode II keeps `fixed_factor`. (4) EB
+(§6.5): the conjugate twin keeps `soc`, `sur`, `soc_scope`, so their EB values are plugged into the
+rows; `hierarchy="mh"` stays `NotImplementedError`. (5) Validation: the reference conditions the base
+prior on the rows (Bayes' rule, covariance form; Matheron draws; Mode II integrates θ for
+`λ | d ~ IG(c + m/2, ·)`; `iw_equivalent`, where `λ | d` is not IG, draws it by exact rejection from
+`IG(c, C)` with acceptance `(|S₀|/|S(λ)|)^{½}exp(−½(q(λ) − q∞))`, and its log prior is exact up to a
+constant). Geweke rows 201–205 (§9.5), A1 extension (§9.8), mutants M17–M18 (§9.7).
+(6) Numerics (queue item 6): `Recursive.contemp_core` draws `a_i` by Householder QR of the
+whitened rows instead of the Jacobi-scaled Cholesky of the formed `K_a` (§3.7.1). The
+`test_g_full[reduced_sv]` chain that reached `h ≈ 31–37` had `cond(K_a) = 1.3e16` (exact
+eigenvalues 14.8 and 1.9e17) and a zero pivot; the QR draw matches the exact conditional there to
+1.6e-8 sd and agrees with the Cholesky draw to ≤ 3e-14 (sd units and relative) on ordinary states.
+The test prior's `h` tail is unchanged.
 
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 
@@ -792,7 +825,10 @@ log-likelihoods without knowing the batching.
 - `contemp_conditional` (N04 §6.2 with its minus sign; N05 §5.4): with `Z = cols ⊙ cmask`,
   `K_a = diag(prec) + Zᵀ diag(w) Z`, `b_a = prec ⊙ mean + Zᵀ(w ⊙ (target − g_i))`. Since `cols = −ỹ_{<}`, this
   is the regression of `ỹ_i − g_i` on `−ỹ_{<i}`.
-- `contemp_step`: `precision_draw(K_a, b_a, z)`, then `a ⊙ cmask`; `Coupling(n_active = Σ cmask,
+- `contemp_step`: the draw of `N(K_a⁻¹b_a, K_a⁻¹)` as `linalg.lstsq_draw` on the whitened rows
+  `[diag(√prec); √w ⊙ Z]` (QR, `diag(R) > 0`: the same function of `z` as `precision_draw(K_a, b_a, z)`
+  to rounding, without forming `ZᵀWZ`; WP25 queue item 6), `precision_draw(K_a, b_a, z)` when
+  `contemp_conditional` is overridden; then `a ⊙ cmask`; `Coupling(n_active = Σ cmask,
   quad = ½ Σ cmask·prec0·(a − mean0)²)` when scaled, zeros otherwise.
 - `chol`, `mean_map`, `reduced_form`: `solve_triangular(A, ·, lower=True, unit_diagonal=True)`; no inverses
   (N05 §8). `chol` is lower triangular with diagonal `exp(½ log λ) > 0`.
@@ -897,10 +933,21 @@ y*_t   = where(m_t, logaddexp(log_e2c_t, log_c), 0)                             
 - **RW path** (`rw=True`, N02 §8.1): centred AWOL entries of N02 §8.1 (`Q_00 = 1/V₀ + 1/σ²`, …); C-step `σ²`
   independence MH with `IG((T_eff−1)/2, S/2)` proposal (requires `T_eff ≥ 2`, asserted on the host) or exact IG;
   NC regression on `(h_0, σ)` with prior `N((m₀, 0), diag(V₀, B_σ))`, same exact-mode rule and fold.
+  Step (a) draws in the scaled form `Q̃ = σ²Q`, `h = σx̃`, and factors `Q̃` as a path-graph Laplacian (unit
+  edges on the live transitions) plus `diag(σ²/V₀, σ²D)` (`awol_rw_laplacian` →
+  `linalg.laplacian_precision_sample`): the pivots are carried as their excess over the next edge,
+  `q_0 = δ_0`, `q_t = δ_t + q_{t−1}/(1 + q_{t−1})` on a unit edge (`q_t = δ_t` after a padded one), which
+  never cancels; `p_t = q_t + w_t`. Assembling `Q̃`
+  first rounds `σ²D` away once it is below the ulp of 2 (`σ ≲ 1e-8`, positive prior density under `B_σχ²₁`),
+  and the level direction's pivot `≈ σ²(1/V₀ + ΣD)` is then rounding noise (status 2001, pivot 0; the
+  Clark–Ravazzolo ordering-stage crash, WP25 queue item 7). Same function of `z` as
+  `tridiag_precision_sample` on the assembled system to rounding; `aux_log_likelihood` (RW) uses the same
+  factorisation; the AR path is unchanged.
 - Cost of the exact mode: two extra `(T_pad, J)` `logsumexp`s per equation and sweep (at `h′` and at the NC
   proposal), because `log g(y* − h_cur)` comes from the indicator step (performance §3.7.4).
 - `ahead`: `h_{T+j} = μ + φ(h_{T+j−1} − μ) + ση_j` (RW: no μ), from `h[T_eff]`; `transition` is one such step.
-- Exposed for tests: `indicator_logits`, `awol_system` (`diag, off, b̃`), `w_weight`, `h_log_accept`,
+- Exposed for tests: `indicator_logits`, `awol_system` (`diag, off, b̃`), `awol_rw_laplacian` (`δ, w, b̃`),
+  `w_weight`, `h_log_accept`,
   `c_step_log_ratios`, `nc_regression`, `nc_log_accept`, `nc_fold`.
 
 #### 3.7.5 `ConstantCore` (`components/vol/constant.py`; N05 §5.2; N03 §4.5)
@@ -1804,6 +1851,7 @@ within-block cross-products (`a_ij·γ_{i,(lag1,j)}`, `μφ`, `φσ`, `p·N_1`, 
 | 14–16 | structural × `SV(rw=True)`; × `SV(sigma2_prior=InvGamma)`; × `SV(h0=B₀)` | 2 | nightly |
 | 17 | `ZeroMean × SV`, `n = 1` | 1 | PR |
 | 18+ | rows 1–16 with `exact=False` | — | nightly, **recorded, not gating** (N06 §8; N01 §12.3(3)) |
+| 201–205 | SOC/SUR dummy rows (WP25): structural Mode I × `Constant("ig")`; Mode II × `Constant("iw")`; reduced × `Constant("ig")`; structural Mode I × `SV`; structural × `Constant("iw_equivalent")` | 2 / 3 (reduced, iw_equivalent 3) | PR + nightly |
 | blocks | the seven block-level configurations of §9.2 | — | PR |
 
 Sizes: G-small `C = 1000`, `M_c = 100`, `M₁ = 2·10⁵`, α = 1e-3; G-full `C = 4000`, `M_c = 500`, `M₁ = 10⁶`,
@@ -1844,6 +1892,8 @@ ESS (`ess_pooled`, Kish-weighted ECDF-indicator IAT) ≥ 0.8 L for every quantit
 | M14 A-row regression with `+u_{<j}` | `contemp_conditional` | U (N04 §9.4), G |
 | M15 ASIS map without the `h̃` rescale | `nc_step` | B (one-block invariance), G |
 | M16 offset `c = 0.1` at `λ ≈ 0.01`, **`exact=False`** (μ prior `N(log 0.01, 0.5²)`) | `SV(offset=0.1, exact=False)` config | G. Under `exact=True` this is not a bug (exact for any `c`, N01 §10.2), so the mutant is defined only with `exact=False` |
+| M17 Mode I SOC/SUR rows weighted by the current `1/λ_i` instead of `1/σ̄_i²` (WP25) | `linear_conditional` | U (density ratio), G |
+| M18 SOC/SUR rows dropped from the CCCM `Π` step (WP25) | `cccm_core` | U (density ratio), G |
 
 The suite records which tier caught each mutant; a mutant caught by none blocks the release.
 
@@ -1851,7 +1901,7 @@ The suite records which tier caught each mutant; a mutant caught by none blocks 
 
 | Test | Oracle | Cadence |
 | :--- | :--- | :--- |
-| A1 | `structural_nig` log ML = Phase 1 `AnalyticFit.log_ml()` (Mode II, `κ_c = κ_a = 1`, `d = n + 2`), with and without SOC/SUR in the analytic engine, to 1e-10; EB λ from `structural_nig` = Phase 1 EB λ at `cross = 1` (1e-6) | PR |
+| A1 | `structural_nig` log ML = Phase 1 `AnalyticFit.log_ml()` (Mode II, `κ_c = κ_a = 1`, `d = n + 2`), with and without SOC/SUR in the analytic engine, to 1e-10; EB λ from `structural_nig` = Phase 1 EB λ at `cross = 1` (1e-6). **WP25 extension:** MCMC Mode II × `Constant("iw")` with SOC/SUR rows vs the Phase 1 NIW posterior with the same rows (A2 comparison, 4 quantile-MCSE; EB λ, μ, δ equal to the Phase 1 modes), with a negative control without the rows | PR (`n = 3`); other paths and `n = 20` nightly |
 | A2 | MCMC structural Mode II × `Constant("iw")` vs the Phase 1 NIW posterior: quantiles of `B`, `Σ`, `A` within 4 quantile-MCSE (Holm); `n = 3, p = 2, T = 60` | PR |
 | A3 | as A2 at `n = 20, p = 4, T = 300` (SPEC §10.3 realistic-size oracle) | nightly |
 | A4 | MCMC Mode II with `κ_c = 0.5` vs Chan closed-form iid draws | nightly |
@@ -2218,7 +2268,7 @@ class MCMCFit:
 | Q2 | Exact performance-target definition (kept vs total draws, compile included, devices) | §10.1 |
 | Q3 | SV level prior: data-centred `N(log(ψ_ι/ι), 10)` vs stochvol `N(0, 100²)` | data-centred (scale-equivariant, R9, consistent with Mode I); stochvol priors for parity runs |
 | Q4 | `Constant()` and `Minnesota()` defaulting to `"auto"` plus grid harmonisation | yes |
-| Q5 | SOC/SUR on the MCMC engine in Phase 2 (stretch WP25) | Phase 3 unless WP25 is free |
+| Q5 | SOC/SUR on the MCMC engine in Phase 2 (stretch WP25) | Phase 3 unless WP25 is free — **resolved: delivered by WP25 (2026-10-22)** |
 | Q6 | Warm starts as the backtest default | opt-in in Phase 2; revisit after WP23 shows warm/cold score equality and the speed gain |
 | Q7 | Transitory Rao-Blackwellisation in the LPD as the default for outlier/t models | opt-in in Phase 2; contract unchanged |
 | Q8 | Continuous ν prior (stochvol `ShiftedExponential`, RW-MH on `log(ν−2)` adapted in warm-up only) | Phase 3; Phase 2 parity uses a fixed ν |
@@ -2776,7 +2826,9 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
 Dummy rows in structural form (fixed weights `1/σ̄_i²` in Mode I, `1/λ_i` in Mode II; N05 §7.7) and reduced form
 (fixed variance `ψ_j`; N04 §3.1), with their own Geweke configurations and an A1 extension. Done jointly by the
 owners of WP6, WP10 and WP11 after Phase 2 exits (it touches their files), behind a new `FitCache`/`CoefPriorArrays`
-field added by the WP1 owner.
+field added by the WP1 owner. **Delivered** (2026-10-22): contract and decisions in the WP25 amendments of §2.10;
+builders `priors/dummies.py`; reference `validation/dummies.py`; tests `tests/mcmc/blocks/test_dummies.py`,
+`tests/validation/test_reference_dummies.py`, Geweke rows 201–205, `test_a1_dummies_*`, mutants M17–M18.
 
 ### Exit-criteria map (SPEC §13 Phase 2)
 

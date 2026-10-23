@@ -34,7 +34,15 @@ import jax.numpy as jnp
 
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (float64 before any computation)
 from rai_bvar.engines.mcmc.config import StaticConfig
-from rai_bvar.engines.mcmc.state import ChainState, EngineData, EqPrior, EqState, PriorArrays
+from rai_bvar.engines.mcmc.state import (
+    ChainState,
+    EngineData,
+    EqPrior,
+    EqState,
+    PriorArrays,
+    SharedPrior,
+)
+from rai_bvar.validation.dummies import has_dummies, structural_dummy_log_factor_eq
 from rai_bvar.validation.reference import (
     LOG_2PI,
     coupling_log_scale,
@@ -50,23 +58,47 @@ Array = jax.Array
 _F64 = jnp.float64
 
 
-def log_prior_eq(eq_i: EqState, prior_i: EqPrior, static: StaticConfig, tmask: Array) -> Array:
-    """``log p`` of one equation's parameters and latents (all parts)."""
+def log_prior_eq(
+    eq_i: EqState,
+    prior_i: EqPrior,
+    static: StaticConfig,
+    tmask: Array,
+    *,
+    shared: SharedPrior | None = None,
+    i: Array | int | None = None,
+) -> Array:
+    """``log p`` of one equation's parameters and latents (all parts). With SOC/SUR dummy rows
+    (structural, WP25) the rows' factor ``log p(d | θ_i, λ_i) − log p(d)`` is added (Bayes' rule,
+    ``validation.dummies``); it needs ``shared`` and the equation index ``i``."""
     refs = references_for(static)
     scale = coupling_log_scale(eq_i.vol.core, static)
-    return (
+    out = (
         refs.core.log_prior_eq(eq_i.vol.core, prior_i, static, tmask)
         + refs.trans.log_prior_eq(eq_i.vol.trans, prior_i, static, tmask)
         + refs.structure.log_prior_eq(eq_i.struct, prior_i, static, tmask, log_scale=scale)
         + refs.mean.log_prior_eq(eq_i.mean, prior_i, static, tmask, log_scale=scale)
         + refs.coef.log_prior_eq(eq_i.coef, prior_i, static, tmask, log_scale=scale)
     )
+    if has_dummies(static) and static.mean.kind == "linear_structural":
+        if shared is None or i is None:
+            raise ValueError("log_prior_eq with dummy rows needs shared= and i=")
+        out = out + structural_dummy_log_factor_eq(
+            jnp.asarray(i, jnp.int32), eq_i.mean.delta, eq_i.struct.a, scale, prior_i, shared,
+            static,
+        )  # fmt: skip
+    return out
 
 
 def log_prior(st: ChainState, prior: PriorArrays, static: StaticConfig, tmask: Array) -> Array:
     """``log p(θ)``: every equation's parts plus the global parts (reduced-form ``Π``)."""
     refs = references_for(static)
-    per_eq = jax.vmap(lambda e, p: log_prior_eq(e, p, static, tmask))(st.eq, prior.eq)
+    if has_dummies(static):
+        n = static.shapes.n
+        per_eq = jax.vmap(
+            lambda i, e, p: log_prior_eq(e, p, static, tmask, shared=prior.shared, i=i)
+        )(jnp.arange(n, dtype=jnp.int32), st.eq, prior.eq)
+    else:
+        per_eq = jax.vmap(lambda e, p: log_prior_eq(e, p, static, tmask))(st.eq, prior.eq)
     glob = (
         refs.mean.log_prior_global(st.glob.mean, prior, static)
         + refs.coef.log_prior_global(st.glob.coef, prior, static)

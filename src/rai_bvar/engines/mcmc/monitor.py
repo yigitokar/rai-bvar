@@ -274,6 +274,10 @@ def monitor_values(
         log p = Σ_i [mean.log_prior_eq(δ_i, a_i | pm, cm) (+ log N(a_i; cm) for a non-fusing mean)
                      + coef.log_prior_eq + vol.log_prior_eq] + Σ_g global_step.log_prior,
 
+    plus, with SOC/SUR dummy rows (WP25), their factor ``Σ_d log N(y_d; F_dθ_i, 1/w_d)`` per
+    structural equation (``LinearStructural.dummy_log_density_eq``; reduced form: inside the
+    CCCM step's ``log_prior``), i.e. ``log p`` up to the rows' normalising constant,
+
     with ``cm = structure.contemp_moments`` (λ-scaled where static) and ``pm =
     coef.moments_eq`` divided by ``λ_i`` when ``coef_scaling == "lambda"`` (Mode II): a
     ``GaussianDiag`` carries its scaling (DESIGN §2.9), and ``coef.log_prior_eq`` is the density
@@ -310,6 +314,8 @@ def monitor_values(
         if scale_coef:
             pm = dataclasses.replace(pm, prec=pm.prec * jnp.exp(-ctx.log_scale))
         log_prior = mean.log_prior_eq(eq_i.mean, a, pm, cm if fuses else None, shared)
+        if structural and mean.static.n_dummy:  # SOC/SUR prior rows (WP25)
+            log_prior = log_prior + mean.dummy_log_density_eq(eq_i.mean, a, ctx, cache, shared)
         if not fuses:
             log_prior = log_prior + gaussian_diag_logpdf(a, cm)
         coefs = mean.coefficients_eq(eq_i.mean, a, shared)

@@ -16,7 +16,11 @@ cross lag s.d. ``0.05/ℓ`` (explosive mass ≤ 2e-4); Constant ``λ ~ IG(5, 4)`
 ``μ ~ N(0, 0.5²)``, ``(φ+1)/2 ~ Beta(10, 2)``, ``B_σ = 0.1`` (``InvGamma``: ``IG(5, 0.4)``; fixed
 ``B₀ = 2``); RW ``h_0 ~ N(0, 1)``; outliers ``p ~ Beta(2, 18)``, ``K = 20``; t on the static grid
 ``ν ∈ {5..12}`` uniform, standardized ``τ``; offset ``c = 1e-12`` (ψ ≡ 1, R9 recomputation off).
-Sizes: ``"small"`` (PR) ``n = 2`` structural / ``3`` reduced, ``p = 1``, intercept, ``T_eff = 20``,
+SOC/SUR dummy rows (WP25; compositions ``*_dummies``, ids 201–205): the Phase 1 rows
+(``priors.dummies.dummy_rows``) of a fixed ``ȳ₀ = (1.5, −1.0, 0.8)`` (the PR presample is zero),
+SOC rows for every variable and the SUR row, ``μ = δ = 0.5`` (rows of size ~2–3, enough to move the
+intercept and contemporaneous priors), weight 1 (``= 1/E[λ]`` under ``IG(5, 4)``; Mode II: the
+λ-free 1). Sizes: ``"small"`` (PR) ``n = 2`` structural / ``3`` reduced, ``p = 1``, intercept, ``T_eff = 20``,
 ``y_{1−p:0} = 0``; ``"full"`` (nightly) ``n = 3``, ``p = 2``, ``T_eff = 50``, a fixed stored
 presample. The §9.5 table's ``n`` column overrides both sizes where it gives one value (rows 6–13:
 3; rows 14–16: 2; row 17: 1). ``T_eff`` is never a multiple of 32, so the padding masks are always
@@ -34,6 +38,7 @@ held by an identity override of its named internal instead (``contemp_only``: ``
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import math
 from collections.abc import Callable, Mapping
@@ -61,6 +66,7 @@ from rai_bvar.engines.mcmc.state import (
     CoefPriorArrays,
     ConstantPrior,
     ContempPriorArrays,
+    DummyRows,
     Empty,
     EngineData,
     EqPrior,
@@ -73,6 +79,7 @@ from rai_bvar.engines.mcmc.state import (
     prior_template,
     state_template,
 )
+from rai_bvar.priors.dummies import dummy_rows
 from rai_bvar.validation import testfns
 from rai_bvar.validation.log_joint import log_joint
 from rai_bvar.validation.reference import PriorTails, prior_tails
@@ -83,6 +90,7 @@ _F64 = jnp.float64
 ALL: frozenset[str] = frozenset({"all"})
 T_BUCKET = 32
 TEST_NU_GRID: tuple[int, ...] = tuple(range(5, 13))
+TEST_YBAR0: tuple[float, ...] = (1.5, -1.0, 0.8)  # ȳ₀ of the test SOC/SUR rows (WP25)
 # Fixed presample of the "full" size (p = 2 rows, up to 3 variables; stored, not drawn).
 FULL_PRESAMPLE = np.array([[0.31, -0.42, 0.18], [-0.12, 0.27, -0.35]], dtype=np.float64)
 
@@ -149,9 +157,15 @@ def reference_prior(
     offset_rel: float = 1e-12,
     a_p: float = 2.0,
     b_p: float = 18.0,
+    dummy_ybar0: tuple[float, ...] = TEST_YBAR0,
+    dummy_soc: float = 0.5,
+    dummy_sur: float = 0.5,
+    dummy_weight: float = 1.0,
 ) -> PriorArrays:
     """The validation test prior (N06 §9.1 corrected values; module docstring) as
-    :class:`PriorArrays` for ``static`` (ψ ≡ 1, so the relative offset is absolute)."""
+    :class:`PriorArrays` for ``static`` (ψ ≡ 1, so the relative offset is absolute). With
+    ``static.mean.n_dummy > 0`` (WP25): the Phase 1 SOC rows of every variable and the SUR row of
+    ``dummy_ybar0`` (``n + 1`` rows), each equation's weight ``dummy_weight``."""
     s, vol = static.shapes, static.vol
     n, p, nd, k = s.n, s.lags, s.n_det, s.k
     has_mean = static.mean.kind != "zero"
@@ -194,9 +208,20 @@ def reference_prior(
         else TransitoryPrior(a_p=a_p * one, b_p=b_p * one, log_nu_w=np.full((n, G), -math.log(G)))
     )
     Mc = M[:, : n - 1] if static.mean.kind == "linear_structural" else np.zeros((k, n - 1))
+    shared = SharedPrior(Mc=Mc)
+    if static.mean.n_dummy:  # SOC/SUR rows of the test ȳ₀ (WP25)
+        ybar0 = np.asarray(dummy_ybar0, dtype=np.float64)[:n]
+        Yd, Xd = dummy_rows(ybar0, np.arange(n), dummy_soc, dummy_sur, lags=p, n_det=nd)
+        if Yd.shape[0] != static.mean.n_dummy:
+            raise ValueError(
+                f"the test dummy rows are n + 1 = {Yd.shape[0]}, but MeanStatic.n_dummy = "
+                f"{static.mean.n_dummy}"
+            )
+        coef = dataclasses.replace(coef, dummy_w=np.full(n, float(dummy_weight)))
+        shared = SharedPrior(Mc=Mc, dummies=DummyRows(Y=Yd, X=Xd))
     tree = PriorArrays(
         eq=EqPrior(coef=coef, contemp=contemp, vol_core=core, transitory=trans),
-        shared=SharedPrior(Mc=Mc),
+        shared=shared,
     )
     return jax.tree.map(jnp.asarray, tree)
 
@@ -420,6 +445,7 @@ class _Def:
     exact: bool = True
     zero_offset: bool = False
     identity: tuple[str, ...] = ()  # internals held fixed by IDENTITY_INTERNALS
+    dummies: bool = False  # SOC/SUR dummy rows of the coefficient prior (WP25)
 
 
 _S, _R, _Z = "linear_structural", "linear_reduced", "zero"
@@ -443,6 +469,14 @@ _COMPOSITIONS: dict[str, _Def] = {
     "structural_sv_invgamma": _Def(15, _S, sigma2_prior="inv_gamma", n=(2, 2)),
     "structural_sv_fixed_b0": _Def(16, _S, h0="fixed_b0", n=(2, 2)),
     "zero_sv": _Def(17, _Z, n=(1, 1)),
+    # WP25 (DESIGN §13): rows with SOC/SUR dummy rows in the coefficient prior (ids 201+)
+    "structural_constant_dummies": _Def(201, _S, "constant", dummies=True),
+    "structural_mode2_constant_dummies": _Def(202, _S, "constant", mode="II", dummies=True),
+    "reduced_constant_dummies": _Def(203, _R, "constant", n=(3, 3), dummies=True),
+    "structural_sv_dummies": _Def(204, _S, dummies=True),
+    "structural_iw_equivalent_dummies": _Def(
+        205, _S, "constant", mode="iw_equivalent", n=(3, 3), dummies=True
+    ),
 }
 
 # DESIGN §9.2 block-level configurations.
@@ -465,7 +499,8 @@ BLOCK_CONFIGS: tuple[str, ...] = tuple(_BLOCKS)
 
 
 def composition_id(name: str) -> int:
-    """Stable id for ``keys.validation_key``: the DESIGN §9.5 row (1–17) or 101–107 (blocks)."""
+    """Stable id for ``keys.validation_key``: the DESIGN §9.5 row (1–17), 101–107 (blocks) or
+    201–205 (SOC/SUR dummy rows, WP25)."""
     return _definition(name).number
 
 
@@ -482,7 +517,7 @@ _VOL_FIELDS = frozenset(
     {"exact", "asis", "mixture", "t_scale", "outlier_K", "nu_grid", "zero_offset", "rw", "h0",
      "sigma2_prior", "transitory"}
 )  # fmt: skip
-_MEAN_FIELDS = frozenset({"const_path", "gram", "gram_tile", "cccm_precompute"})
+_MEAN_FIELDS = frozenset({"const_path", "gram", "gram_tile", "cccm_precompute"})  # not n_dummy
 _DESIGN_FIELDS = frozenset({"n", "lags", "T_eff", "presample", "t0"})
 _SPEC_FIELDS = frozenset({"live", "obs", "fresh_latents", "raw_moments"})
 _PRIOR_FIELDS = frozenset(
@@ -494,7 +529,7 @@ OVERRIDE_KEYS: frozenset[str] = (
 
 
 def _const_path(mean: str, vol: VolStatic, mode: str) -> str:
-    """The resolve rule of DESIGN §3.7.2 (``const_path="auto"``)."""
+    """The resolve rule of DESIGN §3.7.2 (``const_path="auto"``; with dummy rows too, WP25)."""
     if mean != "linear_structural" or not vol.constant_weights:
         return "weighted"
     return {"I": "eigen", "II": "fixed_factor", "iw_equivalent": "cholesky_const"}[mode]
@@ -542,6 +577,7 @@ def joint_spec(name: str, size: Literal["small", "full"] = "small", **overrides:
         "kind": d.mean,
         "coef_scaling": "lambda" if d.mode == "II" else "none",
         "const_path": _const_path(d.mean, vol, d.mode),
+        "n_dummy": n + 1 if d.dummies else 0,  # SOC rows of every variable + the SUR row
     }
     mean_kw.update({k: v for k, v in overrides.items() if k in _MEAN_FIELDS})
     static = StaticConfig(
@@ -588,6 +624,7 @@ __all__ = [
     "IDENTITY_INTERNALS",
     "OVERRIDE_KEYS",
     "TEST_NU_GRID",
+    "TEST_YBAR0",
     "FixedDesign",
     "JointSpec",
     "composition_id",

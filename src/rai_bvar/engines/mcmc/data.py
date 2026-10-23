@@ -20,6 +20,7 @@ Per-fit design cache (:func:`base_cache`; DESIGN §2.3, §2.5, D-25, D-26; N05 �
                                                  (weighted path only: its one consumer, §3.7.2)
     XX      = the same for X                     (T_pad × P_x) reduced form (CCCM)
     G_const = Fᵀ D_m F,   FtY = Fᵀ D_m Y          Constant-volatility paths (N07 §2.2)
+    dummy   = (F_d, F_dᵀF_d, F_dᵀY_d, w)         SOC/SUR prior rows (WP25; ``n_dummy > 0`` only)
 
 The packed order is column-major (pairs ``(r, s)``, ``r ≤ s``, sorted by ``s`` then ``r``; pilot
 09 §10): the leading ``q'(q'+1)/2`` columns cover the leading ``q' × q'`` block, so ``FF[:, :P_x]``
@@ -43,7 +44,7 @@ from jax import lax
 from rai_bvar.data.design import lagged_design, n_deterministic
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before any computation)
 from rai_bvar.engines.mcmc.config import StaticConfig, bucket
-from rai_bvar.engines.mcmc.state import EngineData, FitCache
+from rai_bvar.engines.mcmc.state import DummyCache, DummyRows, Empty, EngineData, FitCache
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 Array = jax.Array
 
 _HIGHEST = lax.Precision.HIGHEST  # full float64 products on every backend (CPU ignores it)
+_NONE = Empty()  # no SOC/SUR dummy rows (the default of base_cache; Empty instances are all equal)
 
 
 # --------------------------------------------------------------------------- packed products
@@ -271,7 +273,61 @@ def _gram_masked(F: Array, tmask: Array) -> Array:
     return jnp.where(upper, G, G.T)
 
 
-def base_cache(data: EngineData, Mc: Array | None, static: StaticConfig) -> FitCache:
+def dummy_cache(
+    dummies: DummyRows | Empty, dummy_w: Array | Empty, Mc: Array | None, static: StaticConfig
+) -> DummyCache | Empty:
+    """Per-fit products of the SOC/SUR dummy rows (WP25; ``Empty()`` when ``static.mean.n_dummy``
+    is 0, so no dummy code is traced then).
+
+    Structural mean: ``F_d = [X_d | X_d M_c − Y_d[:, :n−1]]``, the rows transformed like the data
+    into the δ-coordinates of every equation (N05 §7.7: target ``y_{d,i}``, regressors
+    ``[x_d'M_{<i} − y_{d,<i}', x_d']``); reduced mean: ``F_d = X_d`` (N04 §3.1). ``G = F_dᵀF_d``
+    (mirrored, exactly symmetric), ``FtY = F_dᵀY_d`` and the weights ``w``. No ``tmask``: the rows
+    are prior rows, not time steps.
+    """
+    m = static.mean.n_dummy
+    if not m:
+        if not (isinstance(dummies, Empty) and isinstance(dummy_w, Empty)):
+            raise ValueError("dummy rows given but StaticConfig.mean.n_dummy is 0")
+        return Empty()
+    if isinstance(dummies, Empty) or isinstance(dummy_w, Empty):
+        raise ValueError(f"StaticConfig.mean.n_dummy = {m} needs the dummy rows and their weights")
+    s = static.shapes
+    Yd = jnp.asarray(dummies.Y, dtype=jnp.float64)
+    Xd = jnp.asarray(dummies.X, dtype=jnp.float64)
+    w = jnp.asarray(dummy_w, dtype=jnp.float64)
+    if Yd.shape != (m, s.n) or Xd.shape != (m, s.k) or w.shape != (s.n,):
+        raise ValueError(
+            f"dummy rows must have shapes Y {(m, s.n)}, X {(m, s.k)} and weights {(s.n,)}; got "
+            f"{Yd.shape}, {Xd.shape}, {w.shape}"
+        )
+    if static.mean.kind == "linear_structural":
+        if Mc is None:
+            raise ValueError("the structural dummy design needs the D3 centring columns Mc")
+        Mc = jnp.asarray(Mc, dtype=jnp.float64)
+        Fd = jnp.concatenate(
+            [Xd, jnp.matmul(Xd, Mc, precision=_HIGHEST) - Yd[:, : s.n - 1]], axis=1
+        )
+    else:
+        Fd = Xd
+    G = jnp.matmul(Fd.T, Fd, precision=_HIGHEST)
+    upper = np.triu(np.ones(G.shape, dtype=bool))  # NumPy constant (static shape)
+    return DummyCache(
+        F=Fd,
+        G=jnp.where(upper, G, G.T),
+        FtY=jnp.matmul(Fd.T, Yd, precision=_HIGHEST),
+        w=w,
+    )
+
+
+def base_cache(
+    data: EngineData,
+    Mc: Array | None,
+    static: StaticConfig,
+    *,
+    dummies: DummyRows | Empty = _NONE,
+    dummy_w: Array | Empty = _NONE,
+) -> FitCache:
     """The mean-independent part of :class:`FitCache` (DESIGN §2.5); ``eq`` stays ``Empty()``.
 
     Which leaves exist is a function of ``static.mean`` alone (the tree structure is static):
@@ -281,6 +337,8 @@ def base_cache(data: EngineData, Mc: Array | None, static: StaticConfig) -> FitC
     ``FF``                     ``linear_structural``, ``gram="packed"``, ``const_path="weighted"``
     ``XX``                     ``linear_reduced`` and ``gram="packed"``: packed products of X
     ``G_const``, ``FtY``       ``const_path ≠ "weighted"``: ``Fᵀ D_m F`` (exactly symmetric), ``Fᵀ D_m Y``
+    ``dummy``                  ``n_dummy > 0``: :func:`dummy_cache` of ``dummies`` and ``dummy_w``
+                               (``prior.shared.dummies``, ``prior.eq.coef.dummy_w``; WP25)
     =========================  =================================================================
 
     ``FF`` has one consumer, the ``weighted`` path's ``G = weighted_gram(w, FF)`` (§3.7.2); the
@@ -314,4 +372,8 @@ def base_cache(data: EngineData, Mc: Array | None, static: StaticConfig) -> FitC
             )
     elif mean.kind == "linear_reduced" and mean.gram == "packed":
         cache = dataclasses.replace(cache, XX=packed_products(data.X))
+    if mean.n_dummy:
+        cache = dataclasses.replace(cache, dummy=dummy_cache(dummies, dummy_w, Mc, static))
+    elif not (isinstance(dummies, Empty) and isinstance(dummy_w, Empty)):
+        raise ValueError("dummy rows given but StaticConfig.mean.n_dummy is 0")
     return cache

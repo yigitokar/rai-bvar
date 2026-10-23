@@ -15,12 +15,13 @@ fresh run with ``C`` and ``M₁`` four times larger instead of a red build (fami
 =========================  =================================================  ==================
 Test                       Sizes                                              Tier
 =========================  =================================================  ==================
-``test_g_small``           rows 1–5, 7–10, 17; ``size="small"``;              PR
+``test_g_small``           rows 1–5, 7–10, 17 and the SOC/SUR dummy rows       PR
+                           201–205 (WP25); ``size="small"``;
                            ``C = 1000, M_c = 100, M₁ = 2·10⁵, α = 1e-3``
 ``test_g_small_block``     the seven block configurations of §9.2 through     nightly (``slow``)
                            ``JointSpec.step`` (their PR-tier G-small runs
                            live with the kernel owners, see below)
-``test_g_full``            rows 1–17; ``size="full"``;                        nightly (``slow``)
+``test_g_full``            rows 1–17, 201–205; ``size="full"``;               nightly (``slow``)
                            ``C = 4000, M_c = 500, M₁ = 10⁶, α = 1e-2``
 ``test_g_full_inexact``    rows 18+: the SV rows of 1–16 with                 nightly (``slow``),
                            ``exact=False``, G-full sizes                       recorded, not gating
@@ -49,9 +50,11 @@ Known nightly finding (2026-10-22): ``test_g_full[reduced_sv]`` failed on one SC
 (sweep 194), which had reached the prior's extreme tail (``h₀ ≈ 30–36``, ``φ ≈ 0.999``,
 ``σ ≈ 0.9``; ``P(max h > 25) ≈ 1e-6`` per prior draw) where ``|y| ≈ 10⁸`` makes the
 contemporaneous precision of equation 2 singular in float64 (Cholesky pivot 0; status code 1003,
-``EQ_CONTEMP``, equation 2). The engine reports the failure as designed (D-18, no jitter) and the
-test counts it; the remedy belongs to the kernel (a QR form of the A-row draw) or to the test
-prior's ``h`` tail, not to this harness.
+``EQ_CONTEMP``, equation 2). The engine reported the failure as designed (D-18, no jitter).
+**Resolved** (WP25 queue item 6, 2026-10-23) in the kernel, not the harness or the test prior: the
+``a``-row draw is now the QR form of the whitened rows (``linalg.lstsq_draw``), which never forms
+the Gram (``cond(K_a) = 1.3e16`` at that state, exact eigenvalues 14.8 and 1.9e17); the replay of
+that chain is ``tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed``.
 
 Seeds are fixed (one per tier); the Geweke keys fold the CRC-32 of the composition name
 (``validation_key(seed, Tier.G, crc32(name), chain)``), so compositions use disjoint streams.
@@ -86,8 +89,13 @@ SEED_FULL = 20261023
 SEED_INEXACT = 20261024
 SEED_BLOCK = 20261025
 
-#: DESIGN §9.5 and the WP19 acceptance: rows 1–5, 7–10 and 17 at G-small on every PR
-PR_ROWS = frozenset({1, 2, 3, 4, 5, 7, 8, 9, 10, 17})
+#: WP25: SOC/SUR dummy rows — structural Mode I × Constant (eigen, dense prior precision) and × SV
+#: (weighted), Mode II × Constant("iw") (fixed_factor, coupled λ), reduced × Constant (CCCM) and
+#: structural × Constant("iw_equivalent") (cholesky_const, λ-scaled a; rejection reference for λ | d)
+DUMMY_ROWS = frozenset({201, 202, 203, 204, 205})
+#: DESIGN §9.5 and the WP19 acceptance: rows 1–5, 7–10 and 17 at G-small on every PR, plus the
+#: WP25 dummy rows (3–6 s each)
+PR_ROWS = frozenset({1, 2, 3, 4, 5, 7, 8, 9, 10, 17}) | DUMMY_ROWS
 PR_COMPOSITIONS = tuple(n for n in COMPOSITIONS if composition_id(n) in PR_ROWS)
 #: rows 18+: rows 1–16 with exact=False; only the SV rows differ from their exact versions
 INEXACT_ROWS = frozenset({2, 3, 4, 8, 9, 10, 12, 13, 14, 15, 16})
@@ -143,13 +151,17 @@ def run_geweke(name: str, size: str, sizes: dict[str, Any], seed: int, **overrid
 
 def test_pr_rows_are_the_design_rows():
     """The PR G-small set is rows 1–5, 7–10 and 17 of DESIGN §9.5, resolved by row to the
-    compositions the table names."""
+    compositions the table names, plus the WP25 dummy rows 201–205."""
     assert {composition_id(n) for n in PR_COMPOSITIONS} == PR_ROWS
     by_row = {composition_id(n): n for n in COMPOSITIONS}
     assert [by_row[r] for r in (7, 8, 9, 10, 17)] == [
         "reduced_constant", "reduced_sv", "reduced_sv_outliers", "reduced_sv_t", "zero_sv"
     ]  # fmt: skip
-    assert {composition_id(n) for n in COMPOSITIONS} == set(range(1, 18))
+    assert {composition_id(n) for n in COMPOSITIONS} == set(range(1, 18)) | DUMMY_ROWS
+    for r in DUMMY_ROWS:
+        assert by_row[r].endswith("_dummies") and joint_spec(by_row[r]).static.mean.n_dummy > 0
+    for r in range(1, 18):
+        assert joint_spec(by_row[r]).static.mean.n_dummy == 0
     assert len(BLOCK_CONFIGS) == 7
     for name in COMPOSITIONS:  # rows 18+ are exactly the SV rows among 1–16
         sv = joint_spec(name).static.vol.persistent == "sv"

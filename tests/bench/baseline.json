@@ -1,0 +1,275 @@
+{
+ "benchmark": "BENCH-P2",
+ "reference": true,
+ "label": "Apple M5 Max (18 cores, 64 GB), macOS, plugged in, desktop apps open (load ~2), reference",
+ "note": "Reference-machine baseline (DESIGN \u00a710.1): the 120 s target is asserted here.",
+ "tolerance": {
+  "time": 0.2,
+  "ess_per_s": 0.3
+ },
+ "settings": {
+  "n": 20,
+  "lags": 4,
+  "T": 300,
+  "chains": 4,
+  "burn": 1000,
+  "draws": 10000,
+  "thin": 1,
+  "devices": 1,
+  "data_seed": 0,
+  "sweep_block": 1000,
+  "sweep_reps": 3
+ },
+ "machine": {
+  "date": "2026-10-22T21:33:01",
+  "cpu": "Apple M5 Max",
+  "physical_cores": "18",
+  "perf_cores": "6",
+  "logical_cpus": 18,
+  "mem_bytes": null,
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.13",
+  "numpy": "2.5.4",
+  "xla_flags": "",
+  "loadavg": [
+   6.259765625,
+   4.66162109375,
+   3.55615234375
+  ],
+  "commit": "deb3929",
+  "jax": "0.12.0.1",
+  "jaxlib": "0.12.0.1"
+ },
+ "summary": {
+  "repeats": 3,
+  "compile_cold_s": 3.4626247882843018,
+  "compile_warm_s": 0.9978816509246826,
+  "wall_cold_s": 52.276139084016904,
+  "wall_warm_s": 49.57344016712159,
+  "run_s": 48.74471024854574,
+  "post_runner_s": 4.01774304243736,
+  "runner_ms_per_sweep": 4.072379494190682,
+  "sweep_ms_min3x1000": 3.8953950834693387,
+  "peak_rss_mb": 3043.4140625,
+  "loadavg_1min": [
+   2.36181640625,
+   5.3837890625,
+   6.1181640625,
+   4.6513671875,
+   5.07958984375,
+   4.66455078125
+  ],
+  "converged": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false
+  ],
+  "ess": {
+   "loglik": {
+    "ess_min": 1561.9927032911717,
+    "ess_per_s_min": 31.508660646212856,
+    "ess_per_s_median": 31.508660646212856
+   },
+   "h_T": {
+    "ess_min": 1870.0660813321615,
+    "ess_per_s_min": 37.72314519685964,
+    "ess_per_s_median": 134.60623130504277
+   },
+   "mu": {
+    "ess_min": 3834.777273010354,
+    "ess_per_s_min": 77.35548027497352,
+    "ess_per_s_median": 165.866611997871
+   },
+   "sigma": {
+    "ess_min": 504.31544567665367,
+    "ess_per_s_min": 10.173097609859422,
+    "ess_per_s_median": 13.70558931634547
+   },
+   "phi": {
+    "ess_min": 554.0734536320554,
+    "ess_per_s_min": 11.176820728280452,
+    "ess_per_s_median": 17.273915417726275
+   },
+   "B_own1": {
+    "ess_min": 19997.18426677724,
+    "ess_per_s_min": 403.3850424615054,
+    "ess_per_s_median": 494.4719064313379
+   },
+   "primary": {
+    "ess_min": 504.31544567665367,
+    "ess_per_s_min": 10.173097609859422,
+    "ess_per_s_median": 115.24021159170337
+   },
+   "cross_lag": {
+    "quantity": "B[y1.L1, y0]",
+    "ess": 8968.065191080399,
+    "ess_per_s": 180.90463685488294
+   }
+  },
+  "pass_120s_cold": true,
+  "pass_120s_warm": true
+ },
+ "kernels": {
+  "gram_packed": {
+   "ms_min": 0.46683289110660553,
+   "ms_median": 0.4882081411778927,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.018581208074465394,
+   "cost": {
+    "flops": 258560000.0,
+    "bytes accessed": 26036800.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 204800,
+    "output_size_in_bytes": 6400000,
+    "temp_size_in_bytes": 3232000
+   }
+  },
+  "gram_batched": {
+   "ms_min": 1.0496671311557293,
+   "ms_median": 1.1682501062750816,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.016921332804486156,
+   "cost": {
+    "flops": 516980096.0,
+    "bytes accessed": 60876800.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 204800,
+    "output_size_in_bytes": 6400000,
+    "temp_size_in_bytes": 26880000
+   }
+  },
+  "precision_draw": {
+   "ms_min": 1.167207956314087,
+   "ms_median": 1.1933750938624144,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.05281283403746784,
+   "cost": {
+    "flops": 4928577.0,
+    "transcendentals": 8000.0,
+    "bytes accessed": 39525052.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 6528000,
+    "output_size_in_bytes": 64744,
+    "temp_size_in_bytes": 12928848
+   }
+  },
+  "sv_indicators": {
+   "ms_min": 0.2697499003261328,
+   "ms_median": 0.2952499780803919,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.0321512499358505,
+   "cost": {
+    "flops": 6016000.0,
+    "transcendentals": 281600.0,
+    "bytes accessed": 14643696.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 615040,
+    "output_size_in_bytes": 307216,
+    "temp_size_in_bytes": 4096000
+   }
+  },
+  "sv_awol": {
+   "ms_min": 0.14091702178120613,
+   "ms_median": 0.14862511307001114,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.07915587490424514,
+   "cost": {
+    "flops": 515446.0,
+    "transcendentals": 80.0,
+    "bytes accessed": 8218754.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 514560,
+    "output_size_in_bytes": 205440,
+    "temp_size_in_bytes": 1435144
+   }
+  },
+  "sv_exact": {
+   "ms_min": 0.3630418796092272,
+   "ms_median": 0.38370792753994465,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.027844083961099386,
+   "cost": {
+    "flops": 2303920.0,
+    "transcendentals": 332800.0,
+    "bytes accessed": 11139480.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 615680,
+    "output_size_in_bytes": 640,
+    "temp_size_in_bytes": 2867840
+   }
+  },
+  "sv_core": {
+   "ms_min": 1.8018749542534351,
+   "ms_median": 1.8877079710364342,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.5202152908314019,
+   "cost": {
+    "flops": 26167360.0,
+    "transcendentals": 1028640.0,
+    "bytes accessed": 63804892.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 828800,
+    "output_size_in_bytes": 623480,
+    "temp_size_in_bytes": 6156232
+   }
+  },
+  "sweep": {
+   "ms_min": 3.8666195853147656,
+   "ms_median": 3.8772050000261515,
+   "reps": 5,
+   "per_call_units": 200,
+   "compile_s": 0.8441961670760065,
+   "cost": {
+    "flops": 307481568.0,
+    "transcendentals": 1103840.0,
+    "bytes accessed": 145901120.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 687456,
+    "output_size_in_bytes": 687584,
+    "temp_size_in_bytes": 17526472
+   }
+  }
+ },
+ "kernel_machine": {
+  "date": "2026-10-22T21:33:12",
+  "cpu": "Apple M5 Max",
+  "physical_cores": "18",
+  "perf_cores": "6",
+  "logical_cpus": 18,
+  "mem_bytes": null,
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.13",
+  "numpy": "2.5.4",
+  "xla_flags": "",
+  "loadavg": [
+   5.77099609375,
+   4.60693359375,
+   3.54931640625
+  ],
+  "commit": "deb3929",
+  "jax": "0.12.0.1",
+  "jaxlib": "0.12.0.1",
+  "backend": "cpu",
+  "devices": 1
+ }
+}

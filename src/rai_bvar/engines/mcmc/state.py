@@ -92,6 +92,22 @@ class FixedFactorCache:
 
 
 @_pytree
+class DummyCache:
+    """SOC/SUR dummy rows of the coefficient prior, per fit (WP25; N05 §7.7, N04 §3.1).
+
+    Structural mean: ``F = [X_d | X_d M_c − Y_d[:, :n−1]]`` (``m × q``, the δ-design of the rows);
+    reduced mean: ``F = X_d`` (``m × k``). ``G = FᵀF`` (exactly symmetric), ``FtY = FᵀY_d``, and
+    ``w`` the λ-free row weights of every equation (a copy of ``CoefPriorArrays.dummy_w`` for the
+    kernels, which see one equation's ``EqContext`` and not its prior arrays). The rows are prior
+    rows: they never enter ``EngineData``, ``tmask``/``T_eff``, the likelihood or the LPD."""
+
+    F: Array  # f64[m, q] (structural) | f64[m, k] (reduced)
+    G: Array  # f64[q, q] | f64[k, k]
+    FtY: Array  # f64[q, n] | f64[k, n]
+    w: Array  # f64[n]
+
+
+@_pytree
 class FitCache:
     """Computed once per fit by the jitted ``prepare()`` (per Geweke iteration in validation)."""
 
@@ -103,10 +119,11 @@ class FitCache:
     G_const: Array | Empty  # f64[q, q]: Fᵀ D_m F (Constant paths)
     FtY: Array | Empty  # f64[q, n]: Fᵀ D_m Y (Constant paths)
     eq: EigenCache | FixedFactorCache | Empty  # per-equation leaves (leading n)
+    dummy: DummyCache | Empty = Empty()  # SOC/SUR dummy rows (MeanStatic.n_dummy > 0; WP25)
 
     @classmethod
     def empty(cls) -> FitCache:
-        return cls(Empty(), Empty(), Empty(), Empty(), Empty(), Empty())
+        return cls(Empty(), Empty(), Empty(), Empty(), Empty(), Empty(), Empty())
 
 
 # --------------------------------------------------------------------------- prior arrays (§2.6)
@@ -114,11 +131,17 @@ class FitCache:
 
 @_pytree
 class CoefPriorArrays:
-    """δ_i (structural) or π_j (reduced) prior; λ-free precisions."""
+    """δ_i (structural) or π_j (reduced) prior; λ-free precisions.
+
+    ``dummy_w`` (WP25; ``MeanStatic.n_dummy > 0``, else ``Empty``): the λ-free weight of equation
+    ``i``'s SOC/SUR dummy rows (``SharedPrior.dummies``): ``1/σ̄_i² = ι/ψ_i`` in structural Mode I
+    and ``iw_equivalent`` (fixed weights, N05 §7.7), ``1`` in Mode II (the kernel divides by
+    ``λ_i``), ``1/ψ_j`` in reduced form (fixed variance ``ψ_j``, N04 §3.1)."""
 
     mean0: Array  # f64[n, k]
     prec0: Array  # f64[n, k]
     group: Array  # i32[n, k]: 0 deterministic, 1 own lag, 2 cross lag
+    dummy_w: Array | Empty = Empty()  # f64[n]: λ-free dummy-row weight (WP25)
 
 
 @_pytree
@@ -175,10 +198,21 @@ class EqPrior:
 
 
 @_pytree
+class DummyRows:
+    """SOC/SUR dummy observations ``(y_d', x_d')`` in the reduced-form layout of Phase 1
+    (``ConjugateProblem.dummies``; ``x_d`` in the ``data/design.py`` regressor order). Shared by
+    every equation; their weights are per equation (``CoefPriorArrays.dummy_w``). WP25."""
+
+    Y: Array  # f64[m, n]
+    X: Array  # f64[m, k]
+
+
+@_pytree
 class SharedPrior:
     """Broadcast prior quantities (``in_axes=None``)."""
 
     Mc: Array  # f64[k, n−1]: D3 centring columns; zeros for reduced and zero means
+    dummies: DummyRows | Empty = Empty()  # SOC/SUR rows (MeanStatic.n_dummy > 0; WP25)
 
 
 @_pytree
@@ -563,13 +597,17 @@ def prior_template(static: StaticConfig) -> PriorArrays:
         if vol.transitory == "none"
         else TransitoryPrior(a_p=_f(n), b_p=_f(n), log_nu_w=_f(n, len(vol.nu_grid)))
     )
+    m = static.mean.n_dummy
     eq = EqPrior(
-        coef=CoefPriorArrays(mean0=_f(n, k), prec0=_f(n, k), group=_i(n, k)),
+        coef=CoefPriorArrays(
+            mean0=_f(n, k), prec0=_f(n, k), group=_i(n, k), dummy_w=_f(n) if m else Empty()
+        ),
         contemp=ContempPriorArrays(mean0=_f(n, n - 1), prec0=_f(n, n - 1), cmask=_f(n, n - 1)),
         vol_core=core,
         transitory=trans,
     )
-    return PriorArrays(eq=eq, shared=SharedPrior(Mc=_f(k, n - 1)))
+    dummies = DummyRows(Y=_f(m, n), X=_f(m, k)) if m else Empty()
+    return PriorArrays(eq=eq, shared=SharedPrior(Mc=_f(k, n - 1), dummies=dummies))
 
 
 def draw_template(static: StaticConfig) -> ParamDraw:

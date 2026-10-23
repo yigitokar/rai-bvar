@@ -399,7 +399,7 @@ class MCMCFit:
         def table(x: np.ndarray, rows: list[str], cols: list[str]) -> dict[str, dict[str, float]]:
             return {c: {r: float(x[a, b]) for a, r in enumerate(rows)} for b, c in enumerate(cols)}
 
-        return {
+        out = {
             "method": im.method,
             "vol_mean": self.vol_mean_label(),
             "mean": table(im.mean, regs, var),
@@ -407,6 +407,12 @@ class MCMCFit:
             "sigma_mean": table(im.sigma_mean, var, var),
             "shares": table(im.shares, var, var),
         }
+        if self.static.mean.n_dummy:  # WP25: the closed form covers the Minnesota part only
+            out["dummies"] = (
+                f"the {self.static.mean.n_dummy} SOC/SUR dummy rows are not included in these "
+                "implied moments (Minnesota part of the prior only)"
+            )
+        return out
 
     def summary(self) -> pd.DataFrame:
         """Primary diagnostics (one row per gating quantity), DESIGN §8.4. ``attrs`` hold the

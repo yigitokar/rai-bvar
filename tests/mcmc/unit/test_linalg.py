@@ -620,9 +620,14 @@ def test_tridiag_sampler_matches_dense(m, m_eff):
     ref = dense_draw(Q, b, z)
     sd = np.sqrt(np.diag(np.linalg.inv(Q)))
     assert np.max(np.abs(np.asarray(x) - ref) / (np.abs(ref) + sd)) <= 1e-12
-    sign, ld = np.linalg.slogdet(Q)
-    assert sign == 1.0 and abs(float(logdet) - ld) <= 1e-12 * max(1.0, abs(ld))
-    piv = np.diag(np.linalg.cholesky(Q)) ** 2
+    # Oracle log|Q| from the dense Cholesky factor (Q is SPD: the factorisation succeeding is the
+    # positive-definiteness check). Not np.linalg.slogdet/det: their LU (getrf) in Apple
+    # Accelerate raises a spurious divide-by-zero flag on these matrices (NumPy 2.5, arm64), which
+    # the suite's error::RuntimeWarning filter turns into a failure of the oracle itself.
+    L = np.linalg.cholesky(Q)
+    ld = 2.0 * float(np.sum(np.log(np.diag(L))))
+    assert abs(float(logdet) - ld) <= 1e-12 * max(1.0, abs(ld))
+    piv = np.diag(L) ** 2
     np.testing.assert_allclose(float(minpiv), piv.min(), rtol=1e-13)
     if m_eff < m:  # decoupled padded states return their noise and add nothing to log|Q|
         x = np.asarray(x)

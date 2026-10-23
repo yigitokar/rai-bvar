@@ -559,3 +559,84 @@ def test_a4_chan_asymmetric_prior(data3, n, lags, T):
     posts = structural_posteriors(data, model.mean.prior, plug_in(fit), lags, DET)
     n_iid = 200_000 if n == 3 else 8_000
     compare_nig(fit, posts, n_iid=n_iid, seed=5).check()
+
+
+# --------------------------------------------------------------------------- WP25: SOC/SUR dummies
+
+
+DUMMIES = {"soc": 1.0, "sur": 1.0}  # starting values; λ, soc and sur are EB-free (hyper "auto")
+
+
+def dummy_twin_model(settings: rb.MCMCSettings, lags: int = LAGS) -> rb.BVAR:
+    """Mode II × ``Constant("iw")`` with the SOC/SUR rows (N05 §7.7: weight ``1/λ_i``)."""
+    return rb.BVAR(
+        mean=rb.Linear(prior=rb.Minnesota(form="structural", **DUMMIES)),
+        vol=rb.Constant("iw"),
+        lags=lags,
+        deterministic=DET,
+        mcmc=settings,
+    )
+
+
+def phase1_dummy_fit(data: rb.VARData, lags: int):
+    """The Phase 1 conjugate fit with the same SOC/SUR dummies and the default EB hierarchy."""
+    model = rb.BVAR(mean=rb.Linear(prior=rb.Minnesota(**DUMMIES)), lags=lags, deterministic=DET)
+    assert model.engine == "analytic"
+    return model.fit(data)
+
+
+def check_a1_dummies(fit, data: rb.VARData, lags: int, *, n_iid: int, seed: int) -> None:
+    """The MCMC posterior with the rows against the Phase 1 NIW posterior with the same rows, at
+    the fit's hyperparameters; the EB plug-in (λ, soc, sur) is the Phase 1 EB mode."""
+    assert fit.metadata["prior_mode"] == "II"
+    assert fit.hyper["n_dummy"] == data.n_vars + 1  # SOC rows (every level) and the SUR row
+    assert fit.converged, fit.warnings
+    phase1 = phase1_dummy_fit(data, lags)
+    for key in ("lambda", "soc", "sur"):
+        np.testing.assert_allclose(fit.hyper[key], phase1.hyper[key], rtol=1e-8)
+    np.testing.assert_allclose(fit.hyper["psi"], phase1.hyper["psi"], rtol=1e-12)
+    hyper = {key: fit.hyper[key] for key in ("lambda", "alpha", "psi", "soc", "sur")}
+    compare_niw(fit, phase1.posterior(hyper), n_iid=n_iid, seed=seed).check()
+
+
+@pytest.fixture(scope="module")
+def a1_dummy_fit(data3):
+    """The PR-tier fit: Mode II × ``Constant("iw")`` with SOC/SUR rows, EB, ``n = 3, p = 2, T = 60``."""
+    return run_fit(dummy_twin_model(PR_SETTINGS), data3)
+
+
+def test_a1_dummies_mode2_iw_matches_the_phase1_posterior_with_dummies(data3, a1_dummy_fit):
+    """A1 extension (WP25, PR): with SOC/SUR dummy rows weighted ``1/λ_i`` and counted by the
+    coupled ``λ_i`` step, MCMC structural Mode II × ``Constant("iw")`` on its ``fixed_factor``
+    path matches the Phase 1 NIW posterior with the same rows: quantiles of ``B``, ``Σ``, ``A``,
+    ``Λ`` within 4 quantile-MCSE (the A2 comparison), and the EB modes of λ, μ, δ agree."""
+    assert a1_dummy_fit.metadata["const_path"] == "fixed_factor"
+    check_a1_dummies(a1_dummy_fit, data3, LAGS, n_iid=200_000, seed=6)
+
+
+def test_a1_dummies_comparison_sees_the_rows(data3, a1_dummy_fit):
+    """Negative control (power): the same draws against the Phase 1 posterior *without* the rows
+    (same λ, α, ψ) fail the comparison."""
+    phase1 = phase1_fit(data3, LAGS)
+    post = phase1.posterior(plug_in(a1_dummy_fit))
+    with pytest.raises(AssertionError, match="quantiles outside"):
+        compare_niw(a1_dummy_fit, post, n_iid=200_000, seed=6).check()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("const_path", ["weighted", "cholesky_const"])
+def test_a1_dummies_other_constant_weight_paths(data3, const_path):
+    """A1 extension (nightly) on the general weighted-Gram path and the Cholesky path."""
+    fit = run_fit(dummy_twin_model(PR_SETTINGS), data3, const_path)
+    assert fit.metadata["const_path"] == const_path
+    check_a1_dummies(fit, data3, LAGS, n_iid=200_000, seed=7)
+
+
+@pytest.mark.slow
+def test_a1_dummies_realistic_size():
+    """A1 extension (nightly) at ``n = 20, p = 4, T = 300`` (the A3 size)."""
+    lags = 4
+    data = var_data(20, 300 + lags, seed=2031)
+    fit = run_fit(dummy_twin_model(NIGHTLY_SETTINGS, lags=lags), data)
+    assert fit.metadata["const_path"] == "fixed_factor"
+    check_a1_dummies(fit, data, lags, n_iid=40_000, seed=8)

@@ -21,6 +21,8 @@ reads a key (the noise ``z`` is injected, D-17), forms an explicit inverse, or a
   λ-free, so ``θ = θ̂ + √λ · s ⊙ Lc⁻ᵀz`` with one factorisation per fit.
 * **Tridiagonal precision sampler** (N07 §8.3 S4; N02 §5.5): bidiagonal Cholesky fused with the
   forward solve in one ``lax.scan``, back substitution in a reverse scan; ``log|Q|`` for free.
+  For a path-graph Laplacian plus a diagonal (the RW AWOL system) the pivots are carried as
+  their excess over the next edge, which never cancels (:func:`laplacian_precision_sample`).
 * **Stable AR(1) regression** (N02 §6.1): ``b_T`` and ``chol(B_T)`` of the 2×2 auxiliary posterior
   from **centred** cross-products (the uncentred form loses up to 5 digits; N02 cross-check 1).
 
@@ -38,6 +40,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
+from jax.scipy.linalg import solve_triangular
 
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before any computation)
 from rai_bvar.engines.mcmc.state import EigenCache, FixedFactorCache, StepInfo
@@ -51,9 +54,12 @@ _EIG_NEG_TOL = 1e-10  # eigen path: eigenvalues ≥ −1e-10·max|eigenvalue| (D
 __all__ = [
     "eigen_draw",
     "eigen_prepare",
+    "eigen_prepare_dense",
     "fixed_factor_draw",
     "fixed_factor_prepare",
     "gram_from_packed",
+    "laplacian_precision_sample",
+    "lstsq_draw",
     "precision_draw",
     "precision_draw_factored",
     "precision_factor",
@@ -191,6 +197,29 @@ def precision_draw(K: Array, b: Array, z: Array) -> tuple[Array, StepInfo]:
     return theta, StepInfo(info.ok & jnp.all(jnp.isfinite(theta)), info.min_pivot)
 
 
+def lstsq_draw(A: Array, rhs: Array, z: Array) -> tuple[Array, StepInfo]:
+    """``θ ~ N(K⁻¹b, K⁻¹)`` with ``K = AᵀA`` and ``b = Aᵀrhs`` **without forming K** (whitened
+    regression rows ``A``, e.g. ``[diag(√prec); √w ⊙ Z]``), for injected ``z ~ N(0, I)``.
+
+    Householder QR ``A = QR`` with ``diag(R) > 0`` makes ``R`` the upper Cholesky factor of ``K``,
+    so ``θ = R⁻¹(Qᵀrhs + z)`` is the same function of ``z`` as :func:`precision_draw` ``(K, b, z)``
+    (``= K⁻¹b + R⁻¹z``) up to rounding, but the condition number of ``A`` (``√cond(K)``) is never
+    squared: :func:`precision_draw` loses ``K``'s small eigenvalues once ``cond(K) ≳ 1/ε``
+    (the contemporaneous Gram of a ~1e8-scale regressor next to an O(1) one), this does not.
+    ``min_pivot = min_j (R_jj/‖A_·j‖)²``: the pivots of the Jacobi-scaled ``K`` (as
+    :func:`precision_factor` reports them). ``ok`` iff ``diag(R) > 0`` and ``θ`` is finite.
+    Padding is exact as in :func:`precision_draw` (unit prior rows, zero data columns)."""
+    Q, R = jnp.linalg.qr(A, mode="reduced")
+    sign = jnp.where(jnp.diagonal(R) < 0.0, -1.0, 1.0)
+    R = sign[:, None] * R
+    c = sign * jnp.matmul(Q.T, rhs, precision=lax.Precision.HIGHEST)
+    theta = solve_triangular(R, c + z, lower=False)
+    dR = jnp.diagonal(R)
+    norms = jnp.sqrt(jnp.sum(A * A, axis=0))
+    ok = jnp.all(jnp.isfinite(dR) & (dR > 0.0)) & jnp.all(jnp.isfinite(theta))
+    return theta, StepInfo(ok, _min_pivot((dR / norms) ** 2))
+
+
 def precision_moments(K: Array, b: Array) -> tuple[Array, Array]:
     """Mean ``K⁻¹b`` and covariance ``K⁻¹ = s L⁻ᵀL⁻¹ s`` (exactly symmetric) through the same
     factor (tests, failure replay)."""
@@ -258,6 +287,42 @@ def eigen_prepare(G: Array, d: Array, mean0: Array, fty: Array, cmask: Array) ->
     """
     d_half = jnp.sqrt(d)
     Gt = (cmask[:, None] * G * cmask[None, :]) / (d_half[:, None] * d_half[None, :])
+    Q, g = _graded_eigh(Gt)
+    u1 = Q.T @ (d_half * mean0)
+    u2 = Q.T @ (cmask * fty / d_half)
+    return EigenCache(Q=Q, g=g, d_half=d_half, u1=u1, u2=u2)
+
+
+def eigen_prepare_dense(G: Array, P: Array, b0: Array, fty: Array, cmask: Array) -> EigenCache:
+    """:func:`eigen_prepare` for a **dense** λ-free prior precision (Mode I × Constant with SOC/SUR
+    dummy rows; WP25, N05 §7.7: "the eigen trick then needs a dense ``P₀^{−½}``").
+
+    Inputs: ``G = Fᵀ D_m F`` (unmasked), ``P`` the dense λ-free prior precision (``diag(precθ) +
+    w_d(cmask⊗cmask ⊙ F_dᵀF_d)``; 1 on the diagonal of inactive slots), ``b0 = P μ`` its linear
+    term (``precθ ⊙ meanθ + w_d cmask ⊙ F_dᵀy_d``), ``fty = Fᵀ D_m y_i``, ``cmask = cmaskθ``. With
+    ``P = L_P L_Pᵀ`` and ``G̃ = L_P⁻¹(cmask⊗cmask ⊙ G)L_P⁻ᵀ = Q diag(g) Qᵀ`` (the graded
+    decomposition of :func:`eigen_prepare`): ``K = L_P(I + G̃/λ)L_Pᵀ``, so
+    ``θ = L_P⁻ᵀQ(v ⊙ u1 + u2/(λ + g) + √v ⊙ z)`` with ``u1 = QᵀL_P⁻¹b0``, ``u2 = QᵀL_P⁻¹(cmask ⊙ fty)``.
+    The cache stores ``L_P⁻ᵀQ`` as ``Q`` and ``d_half = 1``, so :func:`eigen_draw` is unchanged
+    (``O(q²)`` per sweep). A failed Cholesky of ``P`` leaves NaN in ``g`` (``ok = False``).
+    """
+    q = P.shape[0]
+    L = lax.linalg.cholesky(0.5 * (P + P.T), symmetrize_input=False)
+    Gm = cmask[:, None] * G * cmask[None, :]
+    W = solve_triangular(L, Gm, lower=True)  # L⁻¹ Gm
+    Gt = solve_triangular(L, W.T, lower=True)  # L⁻¹ Gm L⁻ᵀ (Gm symmetric)
+    Gt = 0.5 * (Gt + Gt.T)
+    Q, g = _graded_eigh(Gt)
+    g = jnp.where(jnp.all(jnp.isfinite(L)), g, jnp.nan)
+    u1 = Q.T @ solve_triangular(L, b0, lower=True)
+    u2 = Q.T @ solve_triangular(L, cmask * fty, lower=True)
+    Qc = solve_triangular(L.T, Q, lower=False)  # L⁻ᵀ Q
+    return EigenCache(Q=Qc, g=g, d_half=jnp.ones((q,), Qc.dtype), u1=u1, u2=u2)
+
+
+def _graded_eigh(Gt: Array) -> tuple[Array, Array]:
+    """``Gt = Q diag(g) Qᵀ`` by the graded factorisation of :func:`eigen_prepare` (``g`` NaN when
+    ``Gt`` is not PSD)."""
     delta = jnp.sqrt(jnp.diagonal(Gt))
     live = delta > 0.0
     dpos = jnp.where(live, delta, 1.0)
@@ -273,9 +338,7 @@ def eigen_prepare(G: Array, d: Array, mean0: Array, fty: Array, cmask: Array) ->
     U, sv, _ = lax.linalg.svd(R.T, full_matrices=False, algorithm=lax.linalg.SvdAlgorithm.QR)
     Q = jnp.zeros_like(U).at[order].set(U)
     g = jnp.where(psd, sv * sv, jnp.nan)
-    u1 = Q.T @ (d_half * mean0)
-    u2 = Q.T @ (cmask * fty / d_half)
-    return EigenCache(Q=Q, g=g, d_half=d_half, u1=u1, u2=u2)
+    return Q, g
 
 
 def eigen_draw(c: EigenCache, lam: Array, z: Array) -> tuple[Array, StepInfo]:
@@ -357,6 +420,64 @@ def tridiag_precision_sample(
     _, xs = lax.scan(bwd, x_last, (w[:-1], ell[:-1], cs), reverse=True)
     x = jnp.concatenate([xs, x_last[None]])
     return x, jnp.sum(jnp.log(piv)), _min_pivot(piv)
+
+
+def laplacian_precision_sample(
+    delta: Array, w: Array, b: Array, z: Array
+) -> tuple[Array, Array, Array]:
+    """``x = Q⁻¹b + L⁻ᵀz ~ N(Q⁻¹b, Q⁻¹)`` for ``Q = Lap_w + diag(δ)``: the path-graph Laplacian
+    with edge weights ``w[t−1] ≥ 0`` on ``(t−1, t)`` (``Q[t, t−1] = −w[t−1]``,
+    ``Q[t, t] = δ_t + w[t−1] + w[t]``) plus ``δ ≥ 0`` (the RW AWOL system, DESIGN §3.7.4, where
+    ``w ∈ {0, 1}``; the series term is not guarded against overflow, so weights far outside the
+    scale of ``δ`` and ``q`` are out of scope).
+
+    The pivots are those of :func:`tridiag_precision_sample` on the assembled ``Q``, but computed
+    without cancellation: with ``q_t = p_t − w[t]`` (the pivot less the next edge),
+    ``q_0 = δ_0`` and ``q_t = δ_t + w[t−1]q_{t−1}/(w[t−1] + q_{t−1})`` (a series conductance), so
+    every term is non-negative. Assembling ``Q`` first rounds ``δ`` away when it is below the ulp
+    of the degrees (``σ²D ≪ ε``), and the pivot of the near-null level direction, ``≈ Σδ``, is
+    then rounding noise; here it keeps its relative accuracy. After an edge of weight 0 (a
+    padded state) ``q_t = δ_t``. ``log|Q| = Σ log p_t`` (``log w + log1p(q/w)`` on edges).
+    Same returns as :func:`tridiag_precision_sample`; ``δ_t = 1``, ``w = 0`` is a decoupled
+    padded state. The masked branches use safe denominators, so no NaN is ever formed.
+    """
+    w_next = jnp.concatenate([w, jnp.zeros((1,), w.dtype)])
+
+    def piv_scan(q_prev, inp):
+        d_t, w_t = inp
+        edge = w_t > 0.0
+        series = jnp.where(edge, w_t * q_prev / jnp.where(edge, w_t + q_prev, 1.0), 0.0)
+        q_t = d_t + series
+        return q_t, q_t
+
+    q0 = delta[0]
+    _, qs = lax.scan(piv_scan, q0, (delta[1:], w))
+    q = jnp.concatenate([q0[None], qs])
+    piv = q + w_next
+    edge_next = w_next > 0.0
+    w_safe = jnp.where(edge_next, w_next, 1.0)
+    log_piv = jnp.where(edge_next, jnp.log(w_safe) + jnp.log1p(q / w_safe), jnp.log(q))
+    ell = jnp.sqrt(piv)
+    c = -w / ell[:-1]  # L[t, t−1]
+    v0 = b[0] / ell[0]
+
+    def fwd(v_prev, inp):
+        b_t, c_t, l_t = inp
+        v_t = (b_t - c_t * v_prev) / l_t
+        return v_t, v_t
+
+    _, vs = lax.scan(fwd, v0, (b[1:], c, ell[1:]))
+    wv = jnp.concatenate([v0[None], vs]) + z
+    x_last = wv[-1] / ell[-1]
+
+    def bwd(x_next, inp):
+        w_t, l_t, c_next = inp
+        x_t = (w_t - c_next * x_next) / l_t
+        return x_t, x_t
+
+    _, xs = lax.scan(bwd, x_last, (wv[:-1], ell[:-1], c), reverse=True)
+    x = jnp.concatenate([xs, x_last[None]])
+    return x, jnp.sum(log_piv), _min_pivot(piv)
 
 
 def stable_ar1_regression(

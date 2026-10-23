@@ -30,8 +30,8 @@ from rai_bvar.engines.analytic import _ar_residual_variances
 from rai_bvar.priors.minnesota import Minnesota
 
 # Keys of a Phase 1 hyperparameter dict (AnalyticFit.hyper). Only lambda and alpha enter the
-# coefficient arrays; psi enters through WindowScales; the SOC/SUR dummy rows and the COVID scales
-# are not part of the diagonal prior arrays (D-21; N05 §7.7).
+# coefficient arrays; psi enters through WindowScales; the SOC/SUR dummy rows are built by
+# priors.dummies (WP25; N05 §7.7) and the COVID scales are not available on the MCMC engine (D-21).
 _HYPER_KEYS = frozenset({"lambda", "alpha", "psi", "soc", "sur", "covid"})
 
 

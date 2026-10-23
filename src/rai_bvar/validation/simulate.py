@@ -46,6 +46,7 @@ from rai_bvar.engines.mcmc.state import (
     Status,
     VolEq,
 )
+from rai_bvar.validation.dummies import has_dummies, structural_dummy_prior_sample_eq
 from rai_bvar.validation.reference import (
     coupling_log_scale,
     effective_log_var,
@@ -58,7 +59,7 @@ _F64 = jnp.float64
 
 # fold_in tags of the prior sampler (validation stream; independent of keys.Sub)
 _EQ, _GLOB = 0, 1
-_CORE, _TRANS, _STRUCT, _MEAN, _COEF = 0, 1, 2, 3, 4
+_CORE, _TRANS, _STRUCT, _MEAN, _COEF, _DUMMY = 0, 1, 2, 3, 4, 5
 
 
 class Design(Protocol):
@@ -83,23 +84,34 @@ def prior_sample(
     transitory scale, ``a_i`` (structure), the mean's ``δ_i``, the coefficient prior's own state;
     then the global parts (reduced form ``Π``). Accumulators are zero and ``status`` is
     :meth:`Status.initial`. Works under ``jit``/``vmap`` with a traced ``T_eff``.
+
+    With SOC/SUR dummy rows (``MeanStatic.n_dummy > 0``; WP25) a structural equation's
+    ``(a_i, δ_i)`` — and ``λ_i`` in Mode II — come jointly from the prior conditioned on the rows
+    (``validation.dummies``); the reduced-form ``Π`` reference conditions each ``π_j`` likewise.
     """
     refs = references_for(static)
     n, T_pad = static.shapes.n, static.shapes.T_pad
     tmask = tmask_of(T_eff, T_pad)
     T_eff = jnp.asarray(T_eff, jnp.int32)
     k_eq, k_glob = random.fold_in(key, _EQ), random.fold_in(key, _GLOB)
+    dummies = has_dummies(static) and static.mean.kind == "linear_structural"
 
     def one(i: Array, prior_i: EqPrior) -> EqState:
         k = random.fold_in(k_eq, i.astype(jnp.uint32))
         args = (prior_i, static, tmask, T_eff)
         core = refs.core.prior_sample_eq(random.fold_in(k, _CORE), i, *args)
         trans = refs.trans.prior_sample_eq(random.fold_in(k, _TRANS), i, *args)
-        scale = coupling_log_scale(core, static)
-        struct = refs.structure.prior_sample_eq(
-            random.fold_in(k, _STRUCT), i, *args, log_scale=scale
-        )
-        mean = refs.mean.prior_sample_eq(random.fold_in(k, _MEAN), i, *args, log_scale=scale)
+        if dummies:  # (λ_i in Mode II,) a_i and δ_i jointly given the rows (WP25)
+            core, struct, mean = structural_dummy_prior_sample_eq(
+                random.fold_in(k, _DUMMY), i, prior_i, prior.shared, static, core
+            )
+            scale = coupling_log_scale(core, static)
+        else:
+            scale = coupling_log_scale(core, static)
+            struct = refs.structure.prior_sample_eq(
+                random.fold_in(k, _STRUCT), i, *args, log_scale=scale
+            )
+            mean = refs.mean.prior_sample_eq(random.fold_in(k, _MEAN), i, *args, log_scale=scale)
         coef = refs.coef.prior_sample_eq(random.fold_in(k, _COEF), i, *args, log_scale=scale)
         return EqState(struct=struct, mean=mean, coef=coef, vol=VolEq(core=core, trans=trans))
 

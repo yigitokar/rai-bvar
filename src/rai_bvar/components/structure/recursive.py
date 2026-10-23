@@ -35,7 +35,7 @@ from jax import lax, random
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before any computation)
 from rai_bvar.engines.mcmc.config import StaticConfig, StructStatic
 from rai_bvar.engines.mcmc.keys import Key, Sub, sub_key
-from rai_bvar.engines.mcmc.linalg import precision_draw, solve_unit_lower
+from rai_bvar.engines.mcmc.linalg import lstsq_draw, precision_draw, solve_unit_lower
 from rai_bvar.engines.mcmc.protocols import KernelBase, VolBlock
 from rai_bvar.engines.mcmc.state import (
     Coupling,
@@ -194,11 +194,36 @@ class Recursive(KernelBase):
     def contemp_core(
         self, z: Array, ctx: EqContext, g_i: Array, cm: GaussianDiag
     ) -> tuple[RecursiveEq, Coupling, StepInfo]:
-        """:meth:`contemp_step` for injected noise ``z ~ N(0, I_{n−1})`` (D-17)."""
-        cond = self.impl("contemp_conditional")(ctx, g_i, cm)
-        a, info = precision_draw(cond.K, cond.b, z)
+        """:meth:`contemp_step` for injected noise ``z ~ N(0, I_{n−1})`` (D-17).
+
+        The draw is the whitened least-squares form of :meth:`contemp_conditional`
+        (``linalg.lstsq_draw`` on ``A = [diag(√prec); √w ⊙ Z]``, ``rhs = [√prec ⊙ mean;
+        √w ⊙ (target − g_i)]``, so ``AᵀA = K_a`` and ``Aᵀrhs = b_a``): the same function of ``z``
+        as ``precision_draw(K_a, b_a, z)`` up to rounding, but ``Zᵀdiag(w)Z`` is never formed, so
+        a regressor ~1e8 times the others (an SV state ``h ≈ 35`` next to ``h ≈ 0``) no longer
+        makes ``K_a`` singular in float64 (the ``test_g_full[reduced_sv]`` finding). An overridden
+        ``contemp_conditional`` (mutant M14, tests) is drawn from its ``(K, b)`` as before."""
+        if self._overridden("contemp_conditional"):
+            cond = self.impl("contemp_conditional")(ctx, g_i, cm)
+            a, info = precision_draw(cond.K, cond.b, z)
+        else:
+            a, info = self.contemp_lstsq_draw(z, ctx, g_i, cm)
         a = jnp.where(cm.cmask > 0, a, 0.0)
         return RecursiveEq(a=a), self.coupling(a, ctx, cm), info
+
+    def contemp_lstsq_draw(
+        self, z: Array, ctx: EqContext, g_i: Array, cm: GaussianDiag
+    ) -> tuple[Array, StepInfo]:
+        """``a_i`` (unmasked) from the whitened rows of the conditional (:meth:`contemp_core`)."""
+        Z = ctx.cols * cm.cmask[None, :]
+        sw = jnp.sqrt(ctx.weights)  # weights m_t·exp(−log λ) ≥ 0: padded rows are zero rows
+        sp = jnp.sqrt(cm.prec)
+        A = jnp.concatenate([jnp.diag(sp), sw[:, None] * Z], axis=0)
+        rhs = jnp.concatenate([sp * cm.mean, sw * (ctx.target - g_i)])
+        return lstsq_draw(A, rhs, z)
+
+    def _overridden(self, name: str) -> bool:
+        return any(key == name for key, _ in self.overrides)
 
     def coupling(self, a_i: Array, ctx: EqContext, cm: GaussianDiag) -> Coupling:
         """Coupling of the ``a_i`` block (DESIGN §4.7): zeros unless λ-scaled."""

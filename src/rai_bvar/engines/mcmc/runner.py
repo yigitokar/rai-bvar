@@ -65,7 +65,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import lax, random
 
-from rai_bvar.engines.mcmc import _jax, keys
+from rai_bvar.engines.mcmc import _blas, _jax, keys
 from rai_bvar.engines.mcmc import data as data_mod
 from rai_bvar.engines.mcmc import monitor as monitor_mod
 from rai_bvar.engines.mcmc.compose import Program, compose
@@ -380,7 +380,12 @@ def _prepare_fn(program: Program) -> Callable[..., FitCache]:
 
     def prepare_one(data: EngineData, prior: PriorArrays) -> FitCache:
         Mc = prior.shared.Mc if static.mean.kind == "linear_structural" else None
-        base = data_mod.base_cache(data, Mc, static)
+        if static.mean.n_dummy:  # SOC/SUR dummy rows (WP25); closed path otherwise
+            base = data_mod.base_cache(
+                data, Mc, static, dummies=prior.shared.dummies, dummy_w=prior.eq.coef.dummy_w
+            )
+        else:
+            base = data_mod.base_cache(data, Mc, static)
         return program.mean.prepare(data, prior, base)
 
     return prepare_one
@@ -930,7 +935,9 @@ def run_chains(
     the stored draws exceed the memory budget.
     """
     t_start = time.perf_counter()
-    with _jax.x64(), _CompileTimer() as ct:
+    # one OpenBLAS thread for jaxlib's LAPACK calls while the chains run: oversubscription
+    # removed; results unchanged below a 128 × 128 factor (engines.mcmc._blas; WP24)
+    with _jax.x64(), _blas.single_thread(), _CompileTimer() as ct:
         if fns.program is None or fns.chain is None:
             raise TypeError("fns must come from make_runner")
         if static != fns.program.static:
@@ -1198,8 +1205,11 @@ def failure_detail(
     for an equation step ``conditional_eq`` / ``contemp_conditional`` of equation ``eq``; for a
     global step its ``conditional_j`` for every ``j`` (:func:`_global_detail`, which also locates
     the failing equation: global steps record equation 0). Reported: the diagonal-ratio bound on
-    ``cond₂``, Cholesky status, the weight range, the prior precision range."""
+    ``cond₂``, Cholesky status, the weight range, the prior precision range. ``st`` and the fit
+    inputs may be host (NumPy) copies: they are converted to device arrays first, because the
+    re-run steps index them with traced loop variables (the CCCM column scan)."""
     with _jax.x64():
+        st, data, prior, cache = jax.tree.map(jnp.asarray, (st, data, prior, cache))
         it_u = _u32(it)
         plan = build_plan(program)
         ctx_g = SweepCtx(data, prior, cache, Empty())
@@ -1259,6 +1269,9 @@ def _equation_detail(
                     g = program.mean.fitted_eq(
                         eq_i.mean, a0, mean_context(ctx, a0), cache, prior.shared
                     )
+                # the conditioning of the formed K_a; the step itself draws by QR of the whitened
+                # rows (Recursive.contemp_core), which fails only on an exactly rank-deficient or
+                # non-finite design, so a large cond(K_a) alone no longer explains a failure here
                 gp = program.structure.contemp_conditional(ctx, g, cm)
                 out.update(_gaussian_detail(gp.K))
             elif step.name == "vol":
