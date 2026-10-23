@@ -21,6 +21,8 @@ reads a key (the noise ``z`` is injected, D-17), forms an explicit inverse, or a
   λ-free, so ``θ = θ̂ + √λ · s ⊙ Lc⁻ᵀz`` with one factorisation per fit.
 * **Tridiagonal precision sampler** (N07 §8.3 S4; N02 §5.5): bidiagonal Cholesky fused with the
   forward solve in one ``lax.scan``, back substitution in a reverse scan; ``log|Q|`` for free.
+  For a path-graph Laplacian plus a diagonal (the RW AWOL system) the pivots are carried as
+  their excess over the next edge, which never cancels (:func:`laplacian_precision_sample`).
 * **Stable AR(1) regression** (N02 §6.1): ``b_T`` and ``chol(B_T)`` of the 2×2 auxiliary posterior
   from **centred** cross-products (the uncentred form loses up to 5 digits; N02 cross-check 1).
 
@@ -56,6 +58,7 @@ __all__ = [
     "fixed_factor_draw",
     "fixed_factor_prepare",
     "gram_from_packed",
+    "laplacian_precision_sample",
     "lstsq_draw",
     "precision_draw",
     "precision_draw_factored",
@@ -417,6 +420,58 @@ def tridiag_precision_sample(
     _, xs = lax.scan(bwd, x_last, (w[:-1], ell[:-1], cs), reverse=True)
     x = jnp.concatenate([xs, x_last[None]])
     return x, jnp.sum(jnp.log(piv)), _min_pivot(piv)
+
+
+def laplacian_precision_sample(
+    delta: Array, w: Array, b: Array, z: Array
+) -> tuple[Array, Array, Array]:
+    """``x = Q⁻¹b + L⁻ᵀz ~ N(Q⁻¹b, Q⁻¹)`` for ``Q = Lap_w + diag(δ)``: the path-graph Laplacian
+    with edge weights ``w[t−1] ≥ 0`` on ``(t−1, t)`` (``Q[t, t−1] = −w[t−1]``,
+    ``Q[t, t] = δ_t + w[t−1] + w[t]``) plus ``δ ≥ 0`` (the RW AWOL system, DESIGN §3.7.4).
+
+    The pivots are those of :func:`tridiag_precision_sample` on the assembled ``Q``, but computed
+    without cancellation: with ``q_t = p_t − w[t]`` (the pivot less the next edge),
+    ``q_0 = δ_0`` and ``q_t = δ_t + w[t−1]q_{t−1}/(w[t−1] + q_{t−1})`` (a series conductance), so
+    every term is non-negative. Assembling ``Q`` first rounds ``δ`` away when it is below the ulp
+    of the degrees (``σ²D ≪ ε``), and the pivot of the near-null level direction, ``≈ Σδ``, is
+    then rounding noise; here it keeps its relative accuracy. ``log|Q| = Σ log p_t`` (``log1p``
+    on unit edges). Same returns as :func:`tridiag_precision_sample`; ``δ_t = 1``, ``w = 0`` is a
+    decoupled padded state.
+    """
+    w_next = jnp.concatenate([w, jnp.zeros((1,), w.dtype)])
+
+    def piv_scan(q_prev, inp):
+        d_t, w_t = inp
+        series = jnp.where(w_t > 0.0, w_t * q_prev / (w_t + q_prev), 0.0)
+        q_t = d_t + series
+        return q_t, q_t
+
+    q0 = delta[0]
+    _, qs = lax.scan(piv_scan, q0, (delta[1:], w))
+    q = jnp.concatenate([q0[None], qs])
+    piv = q + w_next
+    log_piv = jnp.where(w_next > 0.0, jnp.log(w_next) + jnp.log1p(q / w_next), jnp.log(q))
+    ell = jnp.sqrt(piv)
+    c = -w / ell[:-1]  # L[t, t−1]
+    v0 = b[0] / ell[0]
+
+    def fwd(v_prev, inp):
+        b_t, c_t, l_t = inp
+        v_t = (b_t - c_t * v_prev) / l_t
+        return v_t, v_t
+
+    _, vs = lax.scan(fwd, v0, (b[1:], c, ell[1:]))
+    wv = jnp.concatenate([v0[None], vs]) + z
+    x_last = wv[-1] / ell[-1]
+
+    def bwd(x_next, inp):
+        w_t, l_t, c_next = inp
+        x_t = (w_t - c_next * x_next) / l_t
+        return x_t, x_t
+
+    _, xs = lax.scan(bwd, x_last, (wv[:-1], ell[:-1], c), reverse=True)
+    x = jnp.concatenate([xs, x_last[None]])
+    return x, jnp.sum(log_piv), _min_pivot(piv)
 
 
 def stable_ar1_regression(

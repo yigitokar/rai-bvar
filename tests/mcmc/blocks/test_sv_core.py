@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from decimal import Decimal, localcontext
 from fractions import Fraction
 
 import jax
@@ -46,7 +47,11 @@ from rai_bvar.engines.mcmc.config import (
     VolStatic,
 )
 from rai_bvar.engines.mcmc.keys import Block, Sub
-from rai_bvar.engines.mcmc.linalg import stable_ar1_regression, tridiag_precision_sample
+from rai_bvar.engines.mcmc.linalg import (
+    laplacian_precision_sample,
+    stable_ar1_regression,
+    tridiag_precision_sample,
+)
 from rai_bvar.engines.mcmc.protocols import KernelBase, PersistentCore
 from rai_bvar.engines.mcmc.random import TINY, loggamma
 from rai_bvar.engines.mcmc.state import (
@@ -223,6 +228,101 @@ def test_awol_system_matches_dense(kind):
         np.testing.assert_allclose(np.asarray(x)[m:], z[m:], rtol=0, atol=0)
         assert float(logdet) == pytest.approx(np.linalg.slogdet(Qt)[1], rel=1e-12)
         assert float(piv) > 0
+
+
+def lap(P, sp, table=MX.OCSN10):
+    return SV.awol_rw_laplacian(
+        jnp.asarray(P["ys"]), jnp.asarray(P["s"]), jnp.asarray(P["obs"]), jnp.int32(P["T_eff"]),
+        jnp.asarray(P["sigma"]), sp, table,
+    )  # fmt: skip
+
+
+def test_awol_rw_laplacian_is_the_rw_system():
+    """``Lap_w + diag(δ)`` and ``b̃`` of :func:`SV.awol_rw_laplacian` are :func:`SV.awol_system`'s
+    RW system, and the cancellation-free factorisation draws the same ``x`` from the same noise as
+    :func:`tridiag_precision_sample` on the assembled system (to rounding), padded states
+    included."""
+    sp = prior()
+    for seed in range(3):
+        P = problem(seed, rw=True)
+        m = P["T_eff"] + 1
+        diag, off, b = (np.asarray(a) for a in awol(P, sp, "rw"))
+        delta, w, b2 = (np.asarray(a) for a in lap(P, sp))
+        np.testing.assert_array_equal(b2, b)
+        np.testing.assert_array_equal(-w, off)
+        np.testing.assert_allclose(delta + np.r_[0.0, w] + np.r_[w, 0.0], diag, rtol=4e-16)
+        z = rng(100 + seed).normal(size=diag.size)
+        x0, ld0, p0 = tridiag_precision_sample(*(jnp.asarray(a) for a in (diag, off, b, z)))
+        x1, ld1, p1 = laplacian_precision_sample(*(jnp.asarray(a) for a in (delta, w, b, z)))
+        np.testing.assert_allclose(np.asarray(x1), np.asarray(x0), rtol=1e-13, atol=1e-13)
+        np.testing.assert_array_equal(np.asarray(x1)[m:], z[m:])
+        assert float(ld1) == pytest.approx(float(ld0), rel=1e-13)
+        assert float(p1) == pytest.approx(float(p0), rel=1e-12)
+
+
+def _decimal_laplacian_sample(delta, w, b, z):
+    """60-digit reference of the factorisation on the assembled ``Q = Lap_w + diag(δ)`` (plain
+    recursion ``p_t = Q_tt − w²/p_{t−1}``, exact in this precision): ``(x, log|Q|, pivots)``."""
+    with localcontext() as ctx:
+        ctx.prec = 60
+        D = [Decimal(float(v)) for v in delta]
+        W = [Decimal(float(v)) for v in w]
+        B = [Decimal(float(v)) for v in b]
+        Z = [Decimal(float(v)) for v in z]
+        m = len(D)
+        Wp, Wn = [Decimal(0), *W], [*W, Decimal(0)]
+        piv, ell, c, v = [], [], [Decimal(0)], []
+        for t in range(m):
+            p = D[t] + Wp[t] + Wn[t] - (Wp[t] ** 2 / piv[t - 1] if t else 0)
+            piv.append(p)
+            ell.append(p.sqrt())
+            if t:
+                c.append(-Wp[t] / ell[t - 1])
+            v.append((B[t] - (c[t] * v[t - 1] if t else 0)) / ell[t])
+        x = [Decimal(0)] * m
+        x[-1] = (v[-1] + Z[-1]) / ell[-1]
+        for t in range(m - 2, -1, -1):
+            x[t] = (v[t] + Z[t] - c[t + 1] * x[t + 1]) / ell[t]
+        logdet = sum(p.ln() for p in piv)
+        return np.array([float(a) for a in x]), float(logdet), np.array([float(p) for p in piv])
+
+
+def test_rw_awol_at_a_tiny_sigma():
+    """``σ = 5e-9`` (the Clark–Ravazzolo ordering-stage state: equation 0, ``σ = 4.98e-9`` under
+    the ``B_σχ²₁`` prior, whose density is positive at 0): ``σ²D ≈ 1e-17`` is below the ulp of
+    the assembled diagonal, so there the level direction's pivot ``≈ σ²(1/V₀ + ΣD)`` is rounding
+    noise. The Laplacian form keeps it, ``log|Q̃|`` and the draw ``h = σx`` to relative rounding
+    (60-digit reference of the same factorisation; the level ``σx ≈ h_0`` is O(1) although
+    ``x ≈ 1e8``)."""
+    sp = prior()
+    P = problem(4, T_eff=88, T_pad=96, rw=True, sigma=5e-9)
+    delta, w, b = (np.asarray(a) for a in lap(P, sp))
+    z = rng(41).normal(size=delta.size)
+    x, logdet, piv = laplacian_precision_sample(*(jnp.asarray(a) for a in (delta, w, b, z)))
+    x_ref, ld_ref, piv_ref = _decimal_laplacian_sample(delta, w, b, z)
+    live = P["T_eff"] + 1
+    assert piv_ref[live - 1] < 1e-14  # the level direction (exact)
+    assert float(piv) == pytest.approx(piv_ref.min(), rel=1e-12)
+    assert float(logdet) == pytest.approx(ld_ref, rel=1e-13)
+    sigma = P["sigma"]
+    np.testing.assert_allclose(sigma * np.asarray(x), sigma * x_ref, rtol=1e-12, atol=1e-15)
+    h = sigma * np.asarray(x)[:live]
+    assert np.ptp(h) < 1e-6 and -5.0 < h[0] < 5.0
+
+
+def test_rw_step_at_a_tiny_sigma_is_ok():
+    """The whole RW update at ``σ = 5e-9`` with a flat ``h`` (the CR state; the AWOL draw used to
+    report pivot 0 there): ``ok``, every value finite."""
+    k, cs, le2, tmask, Te, sp = setup(seed=3, rw=True)
+    h_flat = jnp.where(jnp.arange(cs.h.shape[0]) <= Te, -0.37, 0.0) + 1e-9 * jnp.asarray(
+        rng(5).normal(size=cs.h.shape[0])
+    )
+    cs = dataclasses.replace(cs, h=h_flat, sigma=jnp.asarray(5e-9))
+    for rep in range(5):
+        noise = k.draw_noise(random.fold_in(KEY, 300 + rep), int(k.T_pad), Te, sp)
+        new, info = k.sample_core(noise, cs, le2, tmask, Te, sp)
+        assert bool(info.ok) and float(info.min_pivot) > 0.0, rep
+        assert all(bool(jnp.all(jnp.isfinite(a))) for a in jax.tree.leaves(new))
 
 
 def test_awol_nc_identity_stationary():
