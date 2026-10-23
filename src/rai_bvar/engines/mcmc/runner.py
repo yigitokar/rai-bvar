@@ -1205,8 +1205,11 @@ def failure_detail(
     for an equation step ``conditional_eq`` / ``contemp_conditional`` of equation ``eq``; for a
     global step its ``conditional_j`` for every ``j`` (:func:`_global_detail`, which also locates
     the failing equation: global steps record equation 0). Reported: the diagonal-ratio bound on
-    ``cond₂``, Cholesky status, the weight range, the prior precision range."""
+    ``cond₂``, Cholesky status, the weight range, the prior precision range. ``st`` and the fit
+    inputs may be host (NumPy) copies: they are converted to device arrays first, because the
+    re-run steps index them with traced loop variables (the CCCM column scan)."""
     with _jax.x64():
+        st, data, prior, cache = jax.tree.map(jnp.asarray, (st, data, prior, cache))
         it_u = _u32(it)
         plan = build_plan(program)
         ctx_g = SweepCtx(data, prior, cache, Empty())
@@ -1266,6 +1269,9 @@ def _equation_detail(
                     g = program.mean.fitted_eq(
                         eq_i.mean, a0, mean_context(ctx, a0), cache, prior.shared
                     )
+                # the conditioning of the formed K_a; the step itself draws by QR of the whitened
+                # rows (Recursive.contemp_core), which fails only on an exactly rank-deficient or
+                # non-finite design, so a large cond(K_a) alone no longer explains a failure here
                 gp = program.structure.contemp_conditional(ctx, g, cm)
                 out.update(_gaussian_detail(gp.K))
             elif step.name == "vol":

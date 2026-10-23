@@ -184,7 +184,9 @@ def test_iw_equivalent_rejection_sampler():
         Fd = np.hstack([Xd, Xd @ Mc[:, :i] - Yd[:, :i]])
         vd = 1.0 / np.asarray(prior.eq.coef.prec0)[i]
         va = 1.0 / np.asarray(prior.eq.contemp.prec0)[i, :i]
-        mu0 = np.concatenate([np.asarray(prior.eq.coef.mean0)[i], np.zeros(i)])
+        mu0 = np.concatenate(
+            [np.asarray(prior.eq.coef.mean0)[i], np.asarray(prior.eq.contemp.mean0)[i, :i]]
+        )
         r = Yd[:, i] - Fd @ mu0
         m = Fd.shape[0]
 

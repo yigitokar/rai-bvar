@@ -220,6 +220,7 @@ def structural_dummy_prior_sample_eq(
 
 
 _REJECT_BATCH = 64  # rejection proposals per while-loop iteration (iw_equivalent λ | d)
+_REJECT_MAX_ITER = 10_000  # batches before giving up (NaN): bad inputs never hang a vmap batch
 
 
 def _iweq_log_lambda(key: Array, base: dict[str, Array], prior_i: EqPrior, k: int) -> Array:
@@ -246,20 +247,22 @@ def _iweq_log_lambda(key: Array, base: dict[str, Array], prior_i: EqPrior, k: in
 
     cp = prior_i.vol_core
 
-    def body(carry: tuple[Array, Array, Array]) -> tuple[Array, Array, Array]:
-        key, log_lam, done = carry
+    def body(carry: tuple[Array, Array, Array, Array]) -> tuple[Array, Array, Array, Array]:
+        key, log_lam, done, it = carry
         key, k1, k2 = random.split(key, 3)
         props = jnp.log(cp.scale) - random.loggamma(k1, cp.shape, (_REJECT_BATCH,), dtype=_F64)
         log_u = jnp.log(random.uniform(k2, (_REJECT_BATCH,), dtype=_F64, minval=1e-300))
         acc = log_u < jax.vmap(lambda lp: log_accept(jnp.exp(lp)))(props)
         hit = jnp.any(acc)
         log_lam = jnp.where(done | ~hit, log_lam, props[jnp.argmax(acc)])
-        return key, log_lam, done | hit
+        return key, log_lam, done | hit, it + 1
 
-    _, log_lam, _ = jax.lax.while_loop(
-        lambda c: ~c[2], body, (key, jnp.zeros((), _F64), jnp.zeros((), bool))
-    )
-    return log_lam
+    def more(c: tuple[Array, Array, Array, Array]) -> Array:
+        return ~c[2] & (c[3] < _REJECT_MAX_ITER)
+
+    init = (key, jnp.zeros((), _F64), jnp.zeros((), bool), jnp.zeros((), jnp.int32))
+    _, log_lam, done, _ = jax.lax.while_loop(more, body, init)
+    return jnp.where(done, log_lam, jnp.nan)  # NaN inputs never accept: reported, not hung
 
 
 def structural_dummy_log_factor_eq(
