@@ -22,9 +22,9 @@ SOC rows for every variable and the SUR row, ``μ = δ = 0.5`` (rows of size ~2�
 intercept and contemporaneous priors), weight 1 (``= 1/E[λ]`` under ``IG(5, 4)``; Mode II: the
 λ-free 1). Sizes: ``"small"`` (PR) ``n = 2`` structural / ``3`` reduced, ``p = 1``, intercept, ``T_eff = 20``,
 ``y_{1−p:0} = 0``; ``"full"`` (nightly) ``n = 3``, ``p = 2``, ``T_eff = 50``, a fixed stored
-presample. The §9.5 table's ``n`` column overrides both sizes where it gives one value (rows 6–13:
-3; rows 14–16: 2; row 17: 1). ``T_eff`` is never a multiple of 32, so the padding masks are always
-exercised.
+presample. The §9.5 table's ``n`` column overrides both sizes where it gives one value (rows 6–13
+and 18: 3; rows 14–16: 2; row 17: 1). ``T_eff`` is never a multiple of 32, so the padding masks are
+always exercised.
 
 Block-level configurations (one block live; DESIGN §9.2 table) hold the other blocks at their
 prior draws. Mechanism (a documented deviation from "identity kernels through ``_overrides``",
@@ -450,7 +450,8 @@ class _Def:
 
 _S, _R, _Z = "linear_structural", "linear_reduced", "zero"
 
-# DESIGN §9.5 rows 1–17 (rows 18+ are these with exact=False: joint_spec(name, exact=False)).
+# DESIGN §9.5 rows 1–18 (their inexact variants are the SV rows with exact=False:
+# joint_spec(name, exact=False); they keep the row's id).
 _COMPOSITIONS: dict[str, _Def] = {
     "structural_constant": _Def(1, _S, "constant"),
     "structural_sv": _Def(2, _S),
@@ -469,6 +470,8 @@ _COMPOSITIONS: dict[str, _Def] = {
     "structural_sv_invgamma": _Def(15, _S, sigma2_prior="inv_gamma", n=(2, 2)),
     "structural_sv_fixed_b0": _Def(16, _S, h0="fixed_b0", n=(2, 2)),
     "zero_sv": _Def(17, _Z, n=(1, 1)),
+    # the Clark–Ravazzolo primary SV arm's composition (reduced-form CCCM × random-walk SV)
+    "reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3)),
     # WP25 (DESIGN §13): rows with SOC/SUR dummy rows in the coefficient prior (ids 201+)
     "structural_constant_dummies": _Def(201, _S, "constant", dummies=True),
     "structural_mode2_constant_dummies": _Def(202, _S, "constant", mode="II", dummies=True),
@@ -499,7 +502,7 @@ BLOCK_CONFIGS: tuple[str, ...] = tuple(_BLOCKS)
 
 
 def composition_id(name: str) -> int:
-    """Stable id for ``keys.validation_key``: the DESIGN §9.5 row (1–17), 101–107 (blocks) or
+    """Stable id for ``keys.validation_key``: the DESIGN §9.5 row (1–18), 101–107 (blocks) or
     201–205 (SOC/SUR dummy rows, WP25)."""
     return _definition(name).number
 

@@ -31,6 +31,10 @@ Vehtari et al. 2021 §4.3–4.4; ``sd`` by the delta method ``MCSE(s²)/(2s)``; 
 maximum is the conservative choice: noise is never understated (ARRS's 30-chain check, Fig. 3).
 Backtest scores carry no MCSE, so ``mode="backtest"`` needs ``noise_reps ≥ 1`` (otherwise no
 signal-to-noise ratio exists and "not material" would mean "undetermined").
+``lpd_method`` (forecast and backtest modes) selects the estimator of every LPD statistic (DESIGN
+§7.3, D-34): the default is the SPEC §7 estimator, ``"integrated"`` the path-integrated one (MCMC
+models at ``h > 1``). The pooled forecast carries no ``lag_coefs``, so the integrated estimator
+raises for it at ``h > 1``.
 
 **Metrics** (per variable × horizon, joint where defined; over orderings; heuristic thresholds
 of N08 §B4 in :data:`THRESHOLDS`):
@@ -91,7 +95,7 @@ import xarray as xr
 from rai_bvar._version import __version__
 from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import regressor_names
-from rai_bvar.forecast.result import ForecastResult
+from rai_bvar.forecast.result import LPD_METHODS, ForecastResult
 from rai_bvar.models.base import Model, spec_hash
 
 __all__ = [
@@ -517,9 +521,11 @@ def _forecast_stats(
     realized: np.ndarray | None,
     *,
     with_mcse: bool,
+    lpd_method: str = "conditioned",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]:
     """``(values (V, H, S), joint (H, 1), mcse (V, H, S), mcse_joint (H, 1))`` of one forecast,
-    un-permuted to ``variables``; ``realized (H_max, V)`` is in the order ``variables``."""
+    un-permuted to ``variables``; ``realized (H_max, V)`` is in the order ``variables``; the LPDs
+    use the estimator ``lpd_method`` (``ForecastResult.log_pred_density``)."""
     import scoringrules as sr
 
     if list(fc.variables) != list(order):
@@ -543,11 +549,13 @@ def _forecast_stats(
             for v, name in enumerate(variables):
                 if np.isfinite(obs[a, v]):
                     lpd[a, v], lpd_mcse[a, v] = fc.log_pred_density(
-                        obs[a, v : v + 1], int(h), [name], return_mcse=True
+                        obs[a, v : v + 1], int(h), [name], return_mcse=True, lpd_method=lpd_method
                     )
             if np.isfinite(obs[a]).all():
                 y_fc = obs[a][_index(variables, fc.variables)]  # into the forecast's ordering
-                joint[a, 0], joint_mcse[a, 0] = fc.log_pred_density(y_fc, int(h), return_mcse=True)
+                joint[a, 0], joint_mcse[a, 0] = fc.log_pred_density(
+                    y_fc, int(h), return_mcse=True, lpd_method=lpd_method
+                )
         ok = np.isfinite(obs)
         if ok.any():
             ens = np.moveaxis(x, 0, -1)  # (Hs, V, S)
@@ -1118,6 +1126,7 @@ def ordering_sensitivity(
     window: Any = None,
     cache: Any = None,
     n_jobs: int = 1,
+    lpd_method: Literal["conditioned", "integrated"] = "conditioned",
 ) -> OrderingSensitivityResult:
     """Refit ``model`` under ``n_perm`` orderings of ``data`` and measure the dispersion of its
     results against a Monte Carlo noise floor (SPEC §6.6; N08 §B4; module docstring).
@@ -1141,6 +1150,9 @@ def ordering_sensitivity(
     stay distinct per ordering and noise replicate because each run has its own backtest seed
     (``_derive(seed, "backtest", j)`` / ``"noise-backtest"``, in ``backtest_seeds``). Analytic
     ``hierarchy="mh"`` models are fit as ``fit(sample)``, so for them ``fit_seeds`` is the MH seed.
+    ``lpd_method`` (forecast and backtest modes; recorded in attrs) is the LPD estimator of every
+    LPD statistic, passed to ``log_pred_density`` and :func:`~rai_bvar.evaluation.backtest`
+    (DESIGN §7.3, D-34).
     """
     if not isinstance(data, VARData):
         raise TypeError(f"data must be a VARData, got {type(data).__name__}")
@@ -1162,6 +1174,10 @@ def ordering_sensitivity(
             raise ValueError("batch=True batches MCMC fits; this model is not on the MCMC engine")
     if mode != "backtest" and (window is not None or cache is not None or n_jobs != 1):
         raise ValueError("window, cache and n_jobs apply to mode='backtest' only")
+    if lpd_method not in LPD_METHODS:
+        raise ValueError(f"lpd_method must be one of {LPD_METHODS}, got {lpd_method!r}")
+    if mode == "prior" and lpd_method != "conditioned":
+        raise ValueError("lpd_method applies to mode='forecast' and mode='backtest' only")
     if mode == "backtest" and noise_reps < 1:
         raise ValueError(
             "mode='backtest' needs noise_reps >= 1: backtest scores carry no MCSE, so the "
@@ -1177,8 +1193,8 @@ def ordering_sensitivity(
     if mode == "prior":
         return _prior_mode(ctx, draws)
     if mode == "forecast":
-        return _forecast_mode(ctx, origins, draws, pool, batch)
-    return _backtest_mode(ctx, origins, draws, window, cache, n_jobs)
+        return _forecast_mode(ctx, origins, draws, pool, batch, lpd_method)
+    return _backtest_mode(ctx, origins, draws, window, cache, n_jobs, lpd_method)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1300,7 +1316,12 @@ def _prior_mode(ctx: _Context, draws: int | None) -> OrderingSensitivityResult:
 
 
 def _forecast_mode(
-    ctx: _Context, origins: Any, draws: int | None, pool: bool, batch: bool
+    ctx: _Context,
+    origins: Any,
+    draws: int | None,
+    pool: bool,
+    batch: bool,
+    lpd_method: str = "conditioned",
 ) -> OrderingSensitivityResult:
     draws = FORECAST_DRAWS if draws is None else _positive_int(draws, "draws")
     data = ctx.data
@@ -1343,7 +1364,7 @@ def _forecast_mode(
         log.record(labels[j], caught)
         v, jt, mc, mcj = _forecast_stats(
             fc, run_orders[j], ctx.variables, ctx.horizons, ctx.quantiles, realized,
-            with_mcse=j == 0,
+            with_mcse=j == 0, lpd_method=lpd_method,
         )  # fmt: skip
         values.append(v)
         joints.append(jt)
@@ -1405,6 +1426,7 @@ def _forecast_mode(
             realized=int(realized is not None),
             draws=draws,
             batch=int(batch),
+            lpd_method=lpd_method,
             fit_seeds=fit_seeds,
             forecast_seeds=fc_seeds,
             fit_warnings=log.by_message,
@@ -1443,7 +1465,13 @@ def _forecast_origin(origins: Any, data: VARData) -> pd.Period:
 
 
 def _backtest_mode(
-    ctx: _Context, origins: Any, draws: int | None, window: Any, cache: Any, n_jobs: int
+    ctx: _Context,
+    origins: Any,
+    draws: int | None,
+    window: Any,
+    cache: Any,
+    n_jobs: int,
+    lpd_method: str = "conditioned",
 ) -> OrderingSensitivityResult:
     from scipy import stats as sps
 
@@ -1484,7 +1512,7 @@ def _backtest_mode(
             warnings.simplefilter("always")
             bt = backtest(
                 m, data.select(order), origins=origin_list, window=window, horizon=H,
-                draws=draws, seed=s, cache=cache, n_jobs=n_jobs,
+                draws=draws, seed=s, cache=cache, n_jobs=n_jobs, lpd_method=lpd_method,
             )  # fmt: skip
         log.record(label, caught)
         sc = bt.scores.sel(horizon=list(ctx.horizons))
@@ -1559,6 +1587,7 @@ def _backtest_mode(
         attrs=ctx.attrs(
             draws=draws,
             window=window.describe() if hasattr(window, "describe") else str(window),
+            lpd_method=lpd_method,
             fit_seeds=fit_seeds,
             backtest_seeds=[s for *_, s in runs],
             mcs_alpha=0.10,

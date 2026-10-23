@@ -420,7 +420,7 @@ def test_joint_spec_builds_for_every_name(name, size):
     sh = spec.static.shapes
     assert spec.fixed.T_eff % 32 != 0 and sh.T_pad == 32 * -(-spec.fixed.T_eff // 32)
     assert len(spec.names) == len(set(spec.names)) > 0
-    assert J.composition_id(name) in (*range(1, 18), *range(101, 108), *range(201, 206))
+    assert J.composition_id(name) in (*range(1, 19), *range(101, 108), *range(201, 206))
 
     def run(keys):  # the JointModel methods, batched over chains (one compile)
         sts = jax.vmap(spec.prior_sample)(keys)
@@ -442,8 +442,8 @@ def test_joint_spec_builds_for_every_name(name, size):
 
 
 def test_composition_table_matches_design():
-    assert len(J.COMPOSITIONS) == 22 and len(J.BLOCK_CONFIGS) == 7
-    assert [J.composition_id(c) for c in J.COMPOSITIONS] == [*range(1, 18), *range(201, 206)]
+    assert len(J.COMPOSITIONS) == 23 and len(J.BLOCK_CONFIGS) == 7
+    assert [J.composition_id(c) for c in J.COMPOSITIONS] == [*range(1, 19), *range(201, 206)]
     # WP25 dummy rows: (n_dummy small, const_path, coef_scaling)
     for name, (m, path, cs) in {
         "structural_constant_dummies": (3, "eigen", "none"),
@@ -454,7 +454,7 @@ def test_composition_table_matches_design():
     }.items():
         st = J.joint_spec(name).static
         assert (st.mean.n_dummy, st.mean.const_path, st.mean.coef_scaling) == (m, path, cs), name
-    for name in J.COMPOSITIONS[:17] + J.BLOCK_CONFIGS:
+    for name in J.COMPOSITIONS[:18] + J.BLOCK_CONFIGS:
         assert J.joint_spec(name).static.mean.n_dummy == 0, name
     expect = {
         "structural_constant": ("linear_structural", "constant", "none", "eigen", "none"),
@@ -463,6 +463,7 @@ def test_composition_table_matches_design():
         "structural_iw_equivalent": ("linear_structural", "constant", "none", "cholesky_const",
                                      "none"),
         "reduced_sv_outliers_t": ("linear_reduced", "sv", "outlier_t", "weighted", "none"),
+        "reduced_sv_rw": ("linear_reduced", "sv", "none", "weighted", "none"),
         "zero_sv": ("zero", "sv", "none", "weighted", "none"),
     }  # fmt: skip
     for name, (mean, core, trans, path, coef_scaling) in expect.items():
@@ -472,6 +473,7 @@ def test_composition_table_matches_design():
     assert J.joint_spec("structural_mode2_constant").static.struct.contemp_scaling == "lambda"
     assert J.joint_spec("reduced_iw_equivalent").static.vol.coupled
     assert J.joint_spec("structural_sv_rw").static.vol.rw
+    assert J.joint_spec("reduced_sv_rw").static.vol.rw  # row 18: the CR primary SV arm
     assert J.joint_spec("structural_sv_invgamma").static.vol.sigma2_prior == "inv_gamma"
     assert J.joint_spec("structural_sv_fixed_b0").static.vol.h0 == "fixed_b0"
     small, full = J.joint_spec("structural_sv"), J.joint_spec("structural_sv", "full")
@@ -479,11 +481,11 @@ def test_composition_table_matches_design():
     assert (full.static.shapes.n, full.static.shapes.lags, full.fixed.T_eff) == (3, 2, 50)
     assert np.all(small.fixed.presample == 0) and np.any(full.fixed.presample != 0)
     assert J.joint_spec("reduced_sv").static.shapes.n == 3  # middle j of CCCM exercised
-    assert J.joint_spec("structural_sv", exact=False).static.vol.exact is False  # rows 18+
+    assert J.joint_spec("structural_sv", exact=False).static.vol.exact is False  # inexact variant
     # the n column of the DESIGN §9.5 table, (small, full), row by row
     n_by_row = {1: (2, 3), 2: (2, 3), 3: (2, 3), 4: (2, 3), 5: (2, 3), 6: (3, 3), 7: (3, 3),
                 8: (3, 3), 9: (3, 3), 10: (3, 3), 11: (3, 3), 12: (3, 3), 13: (3, 3), 14: (2, 2),
-                15: (2, 2), 16: (2, 2), 17: (1, 1),
+                15: (2, 2), 16: (2, 2), 17: (1, 1), 18: (3, 3),
                 201: (2, 3), 202: (2, 3), 203: (3, 3), 204: (2, 3), 205: (3, 3)}  # fmt: skip
     for name in J.COMPOSITIONS:
         ns = tuple(J.joint_spec(name, size).static.shapes.n for size in ("small", "full"))

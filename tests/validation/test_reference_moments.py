@@ -371,7 +371,7 @@ def test_equations_are_independent(name, size, expected):
 
 @pytest.mark.parametrize(
     "name",
-    ["structural_sv_outliers_t", "reduced_sv_outliers_t", "structural_sv_rw",
+    ["structural_sv_outliers_t", "reduced_sv_outliers_t", "structural_sv_rw", "reduced_sv_rw",
      "structural_mode2_constant", "zero_sv", "contemp_only"],
 )  # fmt: skip
 def test_prior_draws_satisfy_state_invariants(name):

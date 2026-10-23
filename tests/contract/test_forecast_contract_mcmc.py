@@ -2,7 +2,7 @@
 
 The Phase 1 file ``test_forecast_contract.py`` is untouched; this one fits every Phase 2 MCMC
 composition (structural Mode I / Mode II / IW-equivalent × Constant, structural × SV variants,
-reduced × Constant / SV) and checks the same invariants: structure, coordinates and attrs,
+reduced × Constant / SV / SV(rw)) and checks the same invariants: structure, coordinates and attrs,
 simulation consistency (``L⁻¹(paths − cond_mean)`` iid N(0, 1), conditional on the drawn
 transitory scales), stacking, seed reproducibility, the pathwise level inverse, joint paths
 (``cond_mean`` is the VAR mean of the simulated path) and the factorisation ``cond_chol =

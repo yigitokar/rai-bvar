@@ -625,6 +625,7 @@ COMPOSITIONS = [
     ("reduced", rb.Constant("ig")),
     ("reduced", rb.Constant("iw_equivalent")),
     ("reduced", rb.SV()),
+    ("reduced", rb.SV(rw=True)),  # the Clark–Ravazzolo primary SV arm (DESIGN §9.5 row 18)
     ("reduced", rb.SV(outliers=True, tails="t")),
 ]
 

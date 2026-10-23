@@ -43,6 +43,16 @@ re-derived before it goes into the paper).
 6. **SBC thinning cap.** With `t_max = 50` the ESS rule failed on slow-mixing datasets (outlier/t
    rows) while the γ test was clean; `t_max = 200` covers every replication observed. Evidence:
    `tests/sbc/test_sbc_compositions.py` docstring. Status: recorded.
+   **Row 18 (reduced × RW SV, the Clark–Ravazzolo primary SV arm; added 2026-10-23)** failed the
+   same rule at 200 by one replication (987 of 997 at ≥ 0.8 L; pilot IATs up to 319, γ clean, min
+   p 0.019 over 59 quantities) and passes at a per-row cap of 400 (ESS rule 100%, same min p).
+   That pass rests on the rule's blind spot: with a 4000-draw pilot the same run fails the ESS rule
+   alone (98.4%; pilot IATs up to 1438, γ and pooled-ESS gates clean). The slow quantities are the
+   reduced-form coefficients (intercepts most often), not σ, and in half of the 20 slowest chains
+   the IAT estimate still grows at 16000 sweeps (up to 4376): about 1–2% of prior-drawn T = 50
+   datasets mix very slowly under reduced × RW SV. The pre-registered pilot (1000) is kept.
+   Evidence: the same docstring; DESIGN §9.5 row 18 note and §9.6 erratum. Status: recorded (one
+   run each, Apple M5 Max under load); the paper should state the row's SBC pass with this caveat.
 7. **Geweke "error 2" (simulator draws fresh latents)** is caught by Geweke tests (M3, max |z|
    23.5 vs control 2.59). Status: verified.
 8. **Every mutant must be caught by some tier** (DESIGN §9.7): the table of mutant × catching tier
@@ -53,12 +63,48 @@ re-derived before it goes into the paper).
 8b. **The path-conditioned RB log score breaks down in the tails at h > 1.** SPEC §7's estimator
    averages p(y_{T+h} | θ_s, simulated path_s up to T+h−1). For outcomes far in the predictive's tail
    (US unemployment 2008–10 at h = 8) one draw carries all the weight: Constant's UR h = 8 score at
-   2008Q2 was −93.6 (1000 draws), −46 to −63 (8000), −36 (64,000) against −19.1 for the exact
-   path-integrated mixture, while the delta-method MCSE stayed at ≈ 1. It inflated the quick
+   2008Q2 was −93.6 (1000 draws), −46 to −63 (8000), −36 (64,000) against −19.1 for the
+   path-integrated mixture over the same 1000 draws (exact given those draws; itself a Monte Carlo
+   estimate, see the residual error below), while the delta-method MCSE stayed at ≈ 1. It inflated the quick
    Clark–Ravazzolo UR h = 8 ΔLPS about 8× (+1.92 vs ≈ +0.23 converged). A methods point worth a
    section: integrate the path out (Gaussian given θ and the volatility path) instead of conditioning
    on it. Evidence: WP23 review (2026-10-23), `benchmarks/clark_ravazzolo.py` RELIABILITY_NOTE.
    Status: recorded (review computations; re-run with the library fix before publishing).
+   **Library fix (D-34, 2026-10-23):** `log_pred_density(…, lpd_method="integrated")` (opt-in; the
+   SPEC §7 default is unchanged) conditions each draw on its parameters and drawn volatility path
+   only: `y_{T+h} | θ_s, λ_s ~ N(m_h, M_h M_hᵀ)` with `m_h` the zero-shock mean (recovered from the
+   contract fields as `cond_mean_h − Σ_{k<h} Φ_{h−k} u_k`) and `M_h = [Φ_{h−1}L_1 | … | Φ_0 L_h]`,
+   factored by QR. What it fixes: the weights no longer depend on where a draw's simulated path went,
+   so the tail estimate is no longer carried by one path. Exactness: with one parameter draw and a
+   constant volatility it is the exact predictive density (1e-10 against a companion-form oracle at
+   h = 2..8, 6-s.d. tails, zero MCSE); under SV it is exact given each drawn volatility path; on
+   MCMC fits each draw's density matches the moments from `jax.jacfwd` of the
+   forecast core to 1e-10 (1e-13 against exact rational arithmetic in a one-off check). A
+   synthetic persistent VAR reproduces the pathology: at h = 8 and 6 s.d. the conditioned
+   estimator gives −35.2 with MCSE 1.0 against the exact −22.3
+   (`tests/unit/test_lpd_integrated.py`). Scope: MCMC forecasts of linear or zero means (they carry
+   the new `lag_coefs` variable); analytic, benchmark and ordering-pooled forecasts raise at h > 1;
+   no closed form with the transitory Rao-Blackwellisation at h > 1. Residual Monte Carlo error:
+   it uses no extra random numbers but is still an average over the forecast's parameter and
+   volatility-path draws, whose weights still concentrate in the tails. At the acceptance budget
+   (4 × 20,000) and 2008Q2, UR h = 8, with 1000 forecast draws: Constant's weight ESS is 2–6 draws
+   and its estimate −19.0 against −17.8 with 8000 (fit seed 1); over thinning offsets the
+   1000-draw estimate has sd ≈ 0.75–1.06 and a downward log-of-mean bias of ≈ 0.3–0.6 nats
+   (SV(rw): ≈ 0.4–0.7), and SV(rw)'s spread over forecast seeds (sd 1.4) exceeds its delta-method
+   MCSE (0.45–0.94). The heaviest weights sit on consecutive draws of one chain, so more forecast
+   draws remove the thinning error, not the MCMC error (80,000-draw values still differ by
+   ≈ 1.3 nats across fit seeds). Evidence: D-34 review (2026-10-23, finding math-2). The
+   pre-registered CR acceptance config therefore uses 8000 forecast draws (thinning error sd
+   0.09–0.19 nats, bias ≈ 0 in the same review). Status: estimator verified
+   (tests). **Acceptance run (`65dd212`, pre-registered at `c823d20`):** UR h8 ΔLPS +0.273 with the
+   integrated estimator against +1.309 with the conditioned one on the same forecasts (h1 +0.160
+   for both); the largest UR h8 origin contributions fall from about +41 nats to +7.6. Criterion 4
+   still fails (+0.273 > +0.160), as the pre-registration allowed; criteria 1, 2, 3, 5, 6 are met. Plumbing:
+   `score_forecast`, `backtest`, `compare` and `ordering_sensitivity` take `lpd_method`; integrated
+   backtest scores also carry the conditioned estimator on the same forecast (so the paper can show
+   both from one run) and have their own cache keys. The pre-registered CR `acceptance` config
+   (`benchmarks/clark_ravazzolo.py --config acceptance`, 4 × 20,000 draws) scores with it in every
+   stage and reports the conditioned ΔLPS for the criterion-4 cells as a secondary number.
 
 ## C. Engineering lessons
 

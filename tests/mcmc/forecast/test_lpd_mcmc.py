@@ -6,7 +6,8 @@ blocks; leading-block slicing ``L[:j, :j]`` equals ``marginal_chol`` (1e-12; MCM
 forecasts); the ESS-adjusted MCSE is at least the iid MCSE on autocorrelated draws; the opt-in
 transitory Rao-Blackwellisation (``f`` equal to the kernels' ``TransitoryScale.log_density``)
 matches Monte Carlo over drawn ``(o, τ)`` (the N03 §5.3 cross-check) and falls back with a
-warning where it does not apply; the accelerator variables are not contract fields.
+warning where it does not apply; the accelerator variables are not contract fields. The
+path-integrated estimator and ``lag_coefs`` are tested in ``test_lpd_integrated_mcmc.py``.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from rai_bvar.linalg import marginal_chol, mvn_logpdf_chol
 
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
-EXTRAS = ("cond_A", "cond_scale", "cond_scale_persistent", "log_p", "log1m_p", "nu")
+EXTRAS = ("cond_A", "cond_scale", "cond_scale_persistent", "log_p", "log1m_p", "nu", "lag_coefs")
 
 
 @pytest.fixture(scope="module")
@@ -78,6 +79,9 @@ def test_mcmc_forecasts_carry_the_accelerator_variables(fr):
     np.testing.assert_allclose(o, np.rint(o), rtol=1e-12, atol=0)
     o = np.rint(o)
     assert o.min() == 1 and o.max() <= ds.attrs["outlier_K"] and np.any(o > 1)
+    # lag matrices A_l of each slot's draw for lpd_method="integrated" (D-34; lags = 1 here)
+    assert ds["lag_coefs"].dims == ("chain", "draw", "lag", "variable", "variable_")
+    assert ds.sizes["lag"] == 1
     check_structure(fr)  # extras are ignored by the contract checks
 
 

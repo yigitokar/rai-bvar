@@ -1,0 +1,23 @@
+2026-10-23T16:10:56Z
+[       0s] config acceptance: lpd_method=integrated, MCMC 4 × 20000 (burn 1000), 8000 forecast draws, seed 0, cache /Users/yigitokar/.cache/rai-bvar-cr-c823d20; commit c823d207e0525aed98f427f437d687f7f131c92c
+[       6s] data VARData(variables=['GDP', 'INFL', 'UR', 'TBILL'], T=246, 1965Q1..2026Q2, freq='Q-DEC', vintage='fred-qd:2026-09')
+[       6s] data checks passed
+[      88s] Constant: 82s (0 cached), converged 100%
+[     305s] SV(rw): 216s (0 cached), converged 100%
+[     543s] SV: 239s (0 cached), converged 100%
+[     943s] SV(rw,t10): 399s (0 cached), converged 100%
+[    1193s] AR-SV(0.9): 250s (0 cached), converged 100%
+[    1228s] Constant [structural]: 35s (0 cached)
+[    1484s] SV(rw) [structural]: 256s (0 cached)
+[    1484s] main stage written to benchmarks/reports/clark_ravazzolo_acceptance.md
+[    3779s] ordering stage Constant: 2294s, material=False
+[   12893s] ordering stage SV(rw): 9114s, material=True
+[   12905s] done: benchmarks/reports/clark_ravazzolo_acceptance.md
+[   12905s] criterion 1: True — 16 of 16 cells positive; joint h=1: full +0.819 nats/quarter (p=0.000), pre +0.791 nats/quarter (p=0.000)
+[   12905s] criterion 2: True — 8 of 8 cells < 1; pre-crisis: all 8 < 1
+[   12905s] criterion 3: True — GDP/h1 0.908, GDP/h2 0.901, INFL/h1 0.899, INFL/h2 0.848, UR/h1 0.969, UR/h2 0.946, TBILL/h1 0.935, TBILL/h2 0.945
+[   12905s] criterion 4: False — full UR: h1 +0.160 → h8 +0.273; full TBILL: h1 +0.377 → h8 -0.195; pre-crisis GDP h8 +0.105; pre-crisis INFL h8 +0.307. Secondary (not part of the rule): full UR h8: median +0.140 (largest origins: 2007Q4 +7.6, 2008Q1 +6.6, 2008Q2 +6.5), Gaussian-approx h1 +0.122 → h8 -0.526; full TBILL h8: median -0.059 (largest origins: 2000Q4 -2.3, 2000Q2 -2.2, 2000Q3 -2.1), Gaussian-approx h1 +0.315 → h8 -0.230; pre-crisis GDP h8 Gaussian-approx -0.001; pre-crisis INFL h8 Gaussian-approx +0.354; path-conditioned (SPEC §7) estimator ΔLPS: full UR: h1 +0.160 → h8 +1.309; full TBILL: h1 +0.377 → h8 -0.193; pre-crisis GDP h8 +0.105; pre-crisis INFL h8 +0.307
+[   12905s] criterion 5: True — SV(rw,t10): significantly better than both SV(rw) and SV at 0/4 joint horizons and 0/16 marginal cells; AR-SV(0.9): significantly better than both SV(rw) and SV at 0/4 joint horizons and 0/16 marginal cells
+[   12905s] criterion 6: True — verdict 'better' (convergence gate on, as compare() returns it) in 24/24 orderings; with the gate off in 24/24; DM GDP and TBILL < 0.10 in 24/24
+exit 0
+2026-10-23T19:46:21Z

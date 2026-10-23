@@ -74,7 +74,7 @@ from rai_bvar.validation.log_joint import log_joint, residuals
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
 KEY = random.key(20261025, impl="threefry2x32")
-PRE_WP25 = tuple(n for n in COMPOSITIONS if composition_id(n) < 200)  # DESIGN §9.5 rows 1–17
+PRE_WP25 = tuple(n for n in COMPOSITIONS if composition_id(n) < 200)  # DESIGN §9.5 rows 1–18
 DUMMY_SPECS = (
     "structural_constant_dummies",
     "structural_mode2_constant_dummies",
