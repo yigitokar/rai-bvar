@@ -1671,7 +1671,8 @@ moments reproduces the same `o_{T+h}`, `τ_{T+h}` and `ε` (N03 §5.3 requiremen
   repeated variable makes the subset covariance singular; the estimators returned NaN or finite nonsense, and an
   empty subset an `IndexError`); valid subsets are unchanged. (3) The residual Monte Carlo error of the integrated
   estimator at tail origins is stated in its docstring, NOTES 8b, the CR reliability note and the
-  pre-registration; the CR acceptance config keeps 1000 forecast draws (raising them is an owner decision).
+  pre-registration; the CR acceptance config uses 8000 forecast draws for this reason (decided in the
+  pre-registration, `c823d20`, before any acceptance score existed).
 
 ### 7.4 Parameters and IRFs
 

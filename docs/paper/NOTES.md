@@ -84,7 +84,8 @@ re-derived before it goes into the paper).
    MCSE (0.45–0.94). The heaviest weights sit on consecutive draws of one chain, so more forecast
    draws remove the thinning error, not the MCMC error (80,000-draw values still differ by
    ≈ 1.3 nats across fit seeds). Evidence: D-34 review (2026-10-23, finding math-2). The
-   pre-registered CR acceptance config keeps 1000 forecast draws. Status: estimator verified
+   pre-registered CR acceptance config therefore uses 8000 forecast draws (thinning error sd
+   0.09–0.19 nats, bias ≈ 0 in the same review). Status: estimator verified
    (tests); the Clark–Ravazzolo numbers above still to be re-run with it. Plumbing:
    `score_forecast`, `backtest`, `compare` and `ordering_sensitivity` take `lpd_method`; integrated
    backtest scores also carry the conditioned estimator on the same forecast (so the paper can show
