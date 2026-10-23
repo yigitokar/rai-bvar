@@ -1,13 +1,33 @@
 """Clark & Ravazzolo (2015) replication on FRED-QD (DESIGN §13 WP23; N08 §C1–C6, §B4).
 
+**The acceptance run** (WP23: all models, both samples, all 24 orderings), from the repository
+root, as one command::
+
+    uv run python benchmarks/clark_ravazzolo.py benchmarks/reports/clark_ravazzolo \\
+        --config full --n-jobs 4
+
+It writes ``benchmarks/reports/clark_ravazzolo.md`` and ``.json``. **Estimated runtime:** about
+12 hours with ``--n-jobs 1``, extrapolated from fits measured on a 4-core x86-64 VM (5000-draw
+SV fits took 6–12 s each, Constant fits about 3.5 s, for 742 main-stage fits and 2 × 25 × 106 =
+5300 ordering-stage fits). On a 10-core machine ``--n-jobs 4`` should bring that to roughly 4–6
+hours, an *estimate*, not a measurement. Every origin is cached as it finishes
+(``--cache``, default ``~/.cache/rai-bvar-cr``), so rerunning the same command after an
+interruption resumes where it stopped. The report of the main stage is written before the
+24-ordering stage starts.
+
 Usage::
 
-    python benchmarks/clark_ravazzolo.py OUT [--config quick|full] [--cache DIR]
-        [--qd-url URL] [--md-url URL] [--skip-orderings] [--seed 0]
+    python benchmarks/clark_ravazzolo.py OUT [--config full|quick|smoke] [--cache DIR]
+        [--n-jobs N] [--qd-url URL] [--md-url URL] [--skip-orderings] [--skip-structural]
+        [--only-ordering MODEL] [--seed 0]
 
-writes ``OUT.md`` (the report) and ``OUT.json`` (every number in it). ``--qd-url`` /
-``--md-url`` point the loader at a mirror or a ``file://`` copy of the pinned vintage files (the
-SHA-256 checksum of the registry is still verified).
+writes ``OUT.md`` (the report) and ``OUT.json`` (every number in it). ``--n-jobs N`` fits N
+origins at a time in ``spawn``-started worker processes (DESIGN §11.6; each worker's XLA is
+multi-threaded too, so use about a third of the cores). Results do not depend on it: the per-origin
+seeds and cache keys are the same. ``--qd-url`` / ``--md-url`` point the loader at a mirror or a
+``file://`` copy of the pinned vintage files (the SHA-256 checksum of the registry is still
+verified; the St. Louis Fed server has rejected the library's User-Agent through some proxies,
+in which case ``curl`` the two CSVs and pass ``file://`` URLs).
 
 What it does (N08 §C):
 
@@ -42,8 +62,9 @@ What it does (N08 §C):
 The six acceptance criteria of N08 §C5 are evaluated with the operational definitions printed in
 the report. ``--config full`` uses 4 chains × 5000 kept draws (burn 1000); ``--config quick``
 the library's default ``MCMCSettings()`` (4 × 2000, burn 1000); both use every origin and 1000
-forecast draws. ``--config smoke`` only checks that the script runs (tiny chains, every 8th
-origin; its numbers mean nothing). Everything is cached (``--cache``), so an interrupted run
+forecast draws. ``benchmarks/reports/clark_ravazzolo_quick.md`` is a ``quick`` main-stage report
+(no ordering stage), labelled as not the acceptance run. ``--config smoke`` only checks that the
+script runs (tiny chains, every 8th origin; its numbers mean nothing). Everything is cached (``--cache``), so an interrupted run
 resumes, and ``--only-ordering MODEL`` fills the cache for one model's 24-ordering stage from a
 parallel process.
 
@@ -66,6 +87,7 @@ import json
 import math
 import os
 import platform
+import re
 import sys
 import time
 import warnings
@@ -695,6 +717,7 @@ def ordering_stage(
     seed: int,
     cache: Cache,
     log,
+    n_jobs: int = 1,
 ) -> dict[str, Any]:
     """All 24 orderings for the primary SV model and the baseline (N08 §B4, §C5 criterion 6)."""
     out: dict[str, Any] = {"origins": origins, "results": {}}
@@ -715,6 +738,7 @@ def ordering_stage(
                 draws=cfg.draws,
                 seed=seed,
                 cache=cache,
+                n_jobs=n_jobs,
             )
         sens[name] = res
         log(f"ordering stage {name}: {time.time() - t0:.0f}s, material={res.material}")
@@ -746,6 +770,7 @@ def ordering_stage(
                     draws=cfg.draws,
                     seed=seeds[j],
                     cache=cache,
+                    n_jobs=1,  # every origin is cached by now: no worker pool
                     name=name,
                 )
             if bt.cached != len(origins):
@@ -798,11 +823,28 @@ def markdown(rep: dict[str, Any]) -> str:
     cfg = rep["config"]
     L: list[str] = []
     add = L.append
-    add("# Clark–Ravazzolo (2015) replication on FRED-QD (WP23)\n")
+    title = "# Clark–Ravazzolo (2015) replication on FRED-QD (WP23)"
+    if cfg["name"] != "full":
+        title += f" — {cfg['name']}, NOT the acceptance run"
+    add(title + "\n")
+    if cfg["name"] != "full":
+        add(
+            f"> **Config `{cfg['name']}`: this is not the acceptance run.** The acceptance run is "
+            "`--config full` (4 chains × 5000 draws, all 24 orderings); see the module docstring "
+            "of `benchmarks/clark_ravazzolo.py` for the command. "
+            + (
+                "This report has no 24-ordering stage, so criterion 6 is not evaluated. "
+                if not rep.get("orderings")
+                else ""
+            )
+            + "".join(f"{note} " for note in rep.get("notes", []))
+            + "\n"
+        )
     add(
         f"Generated {rep['generated']} by `benchmarks/clark_ravazzolo.py` (config "
         f"`{cfg['name']}`, rai-bvar {rep['versions']['rai_bvar']}, jax {rep['versions']['jax']}, "
-        f"{rep['versions']['platform']}). Total run time {rep['seconds'] / 3600:.2f} h.\n"
+        f"{rep['versions']['platform']}). Run time of this invocation {rep['seconds'] / 3600:.2f} h "
+        "(cached origins are read, not refitted).\n"
     )
     add("## Acceptance criteria (N08 §C5)\n")
     add("| # | Met | Operational rule | Result |")
@@ -980,14 +1022,35 @@ def markdown(rep: dict[str, Any]) -> str:
         add(f"* {d}")
     add("")
     add("## Warnings raised during the run (aggregated)\n")
-    for name, msgs in rep["warnings"].items():
-        for msg, n in msgs.items():
-            add(f"* `{name}` at {n} origins: {msg[:300]}")
+    add(
+        "Messages that differ only in numbers or variable lists are grouped; one example is shown.\n"
+    )
+    for name, groups in rep["warnings"].items():
+        for g in groups.values():
+            add(
+                f"* `{name}`, {g['origin_messages']} origin-messages ({g['variants']} variants), "
+                f"e.g.: {g['example'][:300]}"
+            )
     add("")
     return "\n".join(L)
 
 
+def group_warnings(by_message: dict[str, list[str]]) -> dict[str, dict[str, Any]]:
+    """Backtest warnings (message → origins) grouped by the message with numbers stripped."""
+    groups: dict[str, dict[str, Any]] = {}
+    for msg, origins in by_message.items():
+        key = re.sub(r"[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?", "#", msg)
+        key = re.sub(r"\[[^\]]*\]", "[…]", key).split(":")[0]
+        g = groups.setdefault(key, {"origin_messages": 0, "variants": 0, "example": msg})
+        g["origin_messages"] += len(origins)
+        g["variants"] += 1
+    return groups
+
+
 DEVIATIONS = [
+    "Not a deviation from CR, but from the library default: every own-lag prior mean is 0, as in "
+    "CR (WP App. 6.1), including the UR and TBILL levels; the library warns that this contradicts "
+    "their level transformation codes (it would centre them on 1).",
     "Pseudo real time on the final FRED-QD 2026-09 vintage instead of CR's RTDSM real-time "
     "vintages and second-release actuals (D4; §C2). Score levels differ; rankings are expected to "
     "be robust (§C6).",
@@ -1020,7 +1083,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--qd-url", default=None)
     p.add_argument("--md-url", default=None)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="origins fitted at a time in spawn-started worker processes (DESIGN §11.6)",
+    )
     p.add_argument("--skip-orderings", action="store_true")
+    p.add_argument("--note", action="append", default=[], help="a sentence added to the report")
     p.add_argument("--skip-structural", action="store_true")
     p.add_argument(
         "--only-ordering",
@@ -1036,10 +1106,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     def log(msg: str) -> None:
         print(f"[{time.time() - t_start:8.0f}s] {msg}", flush=True)
 
+    if args.n_jobs == 0 or args.n_jobs < -1:
+        p.error("--n-jobs must be a positive int or -1 (all cores)")
+    if not os.environ.get("JAX_COMPILATION_CACHE_DIR"):
+        # set before JAX is imported, so spawned workers (which inherit the environment) share
+        # the persistent compilation cache with this process
+        os.environ["JAX_COMPILATION_CACHE_DIR"] = str(args.cache / "xla")
+        os.environ.setdefault("JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS", "0")
+        rb.enable_compilation_cache(args.cache / "xla", min_compile_secs=0)
     import jax
 
-    if not os.environ.get("JAX_COMPILATION_CACHE_DIR"):
-        rb.enable_compilation_cache(args.cache / "xla")
+    n_jobs = args.n_jobs
     data, aggregation = load_data(args.qd_url, args.md_url)
     log(f"data {data}")
     all_origins = [str(o) for o in Origins(*FULL).resolve(data.index)][:: cfg.origin_step]
@@ -1062,6 +1139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 draws=cfg.draws,
                 seed=args.seed,
                 cache=cache,
+                n_jobs=n_jobs,
             )
         log(f"ordering backtests of {args.only_ordering} cached")
         return 0
@@ -1071,7 +1149,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     results: dict[str, BacktestResult] = {}
     probes: dict[str, MomentsProbe] = {}
-    warn_counts: dict[str, dict[str, int]] = {}
+    warn_counts: dict[str, dict[str, dict[str, Any]]] = {}
     for name, model in mods.items():
         probe = MomentsProbe(model, store, args.seed, cfg.draws)
         probes[name] = probe
@@ -1086,10 +1164,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 draws=cfg.draws,
                 seed=args.seed,
                 cache=cache,
+                n_jobs=n_jobs,
                 name=name,
             )
         results[name] = res
-        warn_counts[name] = {k: len(v) for k, v in res.warnings.items()}
+        warn_counts[name] = group_warnings(res.warnings)
         log(
             f"{name}: {time.time() - t0:.0f}s ({res.cached} cached), "
             f"converged {converged_share(res, all_origins):.0%}"
@@ -1105,6 +1184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "ordering_step": cfg.ordering_step,
             "noise_reps": cfg.noise_reps,
             "seed": args.seed,
+            "n_jobs": n_jobs,
         },
         "versions": {
             "rai_bvar": rb.__version__,
@@ -1123,6 +1203,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "variants": {},
         "fit_seed_example": {o: fit_seed(args.seed, o) for o in all_origins[:2]},
         "deviations": list(DEVIATIONS),
+        "notes": list(args.note),
         "warnings": warn_counts,
     }
     sv_names = [n for n in mods if n != BASELINE]
@@ -1151,6 +1232,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     draws=cfg.draws,
                     seed=args.seed,
                     cache=cache,
+                    n_jobs=n_jobs,
                     name=name,
                 )
             log(f"{name}: {time.time() - t0:.0f}s")
@@ -1169,7 +1251,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"Config '{cfg.name}': the 24-ordering stage uses every {cfg.ordering_step}-th "
                 f"origin ({len(ord_origins)} of {len(all_origins)})."
             )
-        rep["orderings"] = ordering_stage(mods, data, ord_origins, cfg, args.seed, cache, log)
+        rep["orderings"] = ordering_stage(
+            mods, data, ord_origins, cfg, args.seed, cache, log, n_jobs
+        )
     rep["criteria"] = criteria(rep)
     rep["seconds"] = time.time() - t_start
     write_report(rep, args.out)
