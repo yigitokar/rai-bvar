@@ -11,3 +11,5 @@ main.lot
 # Python byte code (the scripts run with PYTHONDONTWRITEBYTECODE=1, this is a guard)
 __pycache__/
 *.pyc
+# arXiv package (make arxiv)
+arxiv.tar.gz

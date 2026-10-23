@@ -12,7 +12,8 @@
 #   * "Missing character" (XeTeX drops glyphs the font lacks, e.g. Greek pasted into text): error;
 #   * undefined citations: error; undefined references, multiply-defined labels: error if STRICT=1;
 #   * overfull boxes wider than 10pt (listed);
-#   * the number of \acc{} and \todo{} marks still in the sources (information).
+#   * the number of \acc{} marks still in the sources and generated tables (figures/tables/), and
+#     of \todo{} marks in the sources (information).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -63,10 +64,10 @@ grep -o 'Overfull \\hbox ([0-9.]*pt too wide).*' main.log \
 
 # comments are stripped first (an escaped \% is not a comment); main.tex's own \string\todo{} is
 # not a mark
-acc=$(cat sections/*.tex | sed -e 's/\\%//g' -e 's/%.*$//' | grep -o '\\acc{' | wc -l | tr -d ' ')
+acc=$(cat sections/*.tex figures/tables/*.tex 2>/dev/null | sed -e 's/\\%//g' -e 's/%.*$//' | grep -o '\\acc{' | wc -l | tr -d ' ')
 todo=$(cat sections/*.tex main.tex | sed -e 's/\\%//g' -e 's/%.*$//' -e 's/\\string\\todo{//g' -e 's/\\todo{abstract not written yet//' \
   | grep -o '\\todo{' | wc -l | tr -d ' ')
-echo "== draft marks in the sources: ${acc} \\acc{}, ${todo} \\todo{}"
+echo "== draft marks in the sources: ${acc} \\acc{} (sections and figures/tables), ${todo} \\todo{}"
 
 pages=$(grep -o 'Output written on main.xdv ([0-9]* pages' main.log | grep -o '[0-9]* pages' || true)
 echo "== main.pdf: ${pages:-? pages}"

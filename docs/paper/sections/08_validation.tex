@@ -1,158 +1,83 @@
-\section{Validating the samplers}\label{sec:validation}
+\section{Validating the samplers}\label{sec:validation}\label{sec:validation-principle}
 % Sources: OUTLINE.md §8; dossier 04 (§1-§14, §17); dossier 01 §5; NOTES B.3-B.8, D.12-D.15.
 % "Reproduced at 62d15f6" = re-run by dossier 04 and its fact-check on one Apple M5 Max (cold XLA
 % cache, other jobs running). All such numbers are re-recorded on the release commit with
 % RAI_BVAR_VALIDATION_RECORD=docs/paper/data/release [REL].
+% Row 18 (reduced_sv_rw) and its results: main repo commit 7f410dc (branch phase-2-cr-acceptance),
+% which changes no sampler code (its only src/ change is validation/joint.py; git show 7f410dc --stat).
+% Page-budget pass (2026-10-23): detail moved to Appendix D (merged in the integration pass) (fragments D1-D6, for
+% App. D); the former subsections Principle, Tiers and Cost open the section and Tier B is a
+% paragraph of the SBC subsection. Labels sec:validation-principle, -tiers, -block, -cost are kept.
 
-\subsection{Principle}\label{sec:validation-principle}
+The specification of \pkg{rai-bvar} lets no sampler into the code base until it passes Geweke and
+simulation-based calibration (SBC) tests. % [R] SPEC.md §3 R6 (l.121)
+The rule answers the first threat of \cref{sec:intro}, a published sampler that targeted the
+wrong posterior \citep{carriero2019large,bognanni2022comment,carriero2022corrigendum}. % the episode itself is told in §1 (01_introduction.tex l.19); its retelling here is deleted as duplicated
+A passing suite is informative only if one knows what it would
+have caught, so we measure its power by injecting known errors into the production samplers
+(\cref{sec:validation-mutation}). % The harness size (rai_bvar.validation, 4,233 lines at 7f410dc, 4,230 at c823d20; [V] wc -l) is stated in App. D (app:runtimes); deleted here as duplicated
 
-The specification of \pkg{rai-bvar} contains a merge rule: no sampler enters the code base until
-it passes Geweke and simulation-based calibration (SBC) tests. % [R] SPEC.md §3 R6 (l.121)
-The rule answers the first threat of \cref{sec:intro}: a published equation-by-equation
-algorithm for large BVARs with stochastic volatility \citep{carriero2019large} targeted a different
-posterior from the intended one \citep{bognanni2022comment} until it was corrected
-\citep{carriero2022corrigendum}. A passing suite is informative only if one knows what it would
-have caught, so we measure the power of ours by injecting known errors into the production samplers
-(\cref{sec:validation-mutation}). The harness ships as library code,
-\code{rai_bvar.validation} (4,230 lines). % [V] wc -l src/rai_bvar/validation/*.py at c823d20 = 4230
+\phantomsection\label{sec:validation-tiers}\label{sec:validation-cost}%
+Seven tiers carry the evidence: identities (U), block-level tests (B), Geweke tests (G), SBC (S),
+analytic twins (A), parity with independent implementations (P) and mutation testing (M) (rules,
+cadence, test counts and costs in \cref{tab:Tab5,app:runtimes}).
+Tier~U, the per-PR Geweke size G-small and kernel-level Tier~B run on every pull request (PR);
+the continuous-integration job named ``nightly'' runs weekly and carries the rest. % [V] .github/workflows/ci.yml (cron "17 3 * * 0"; job comment "nightly: # weekly despite the name"); Linux, Python 3.12-3.14 and the weekly list: App. D, app:tiers (Tab5)
+% (moved to App. D, app:tiers: "Every RuntimeWarning is an error, as is any silent float32 truncation in the MCMC tests.")
 
 \subsection{Harness principles}\label{sec:validation-harness}
 
 \paragraph{Two implementations.} Everything a test treats as the truth (prior samplers, simulators
-of observables and the log joint density) was written in a work package whose owner wrote no kernel
-code, with one exception: the reference for the SOC/SUR dummy rows was added later by the owners of
-the kernels it checks, from the model rather than from the kernels. % [R] docs/phase2/DESIGN.md §13 WP9 ("owner writes no kernel"), WP25 ("Done jointly by the owners of WP6, WP10 and WP11"; delivered validation/dummies.py); src/rai_bvar/validation/dummies.py docstring l.1-4
+of observables and the log joint density) comes from a work package whose owner wrote no kernel
+code, except the SOC/SUR dummy-row reference, which the kernels' owners added later from the
+model. % [R] docs/phase2/DESIGN.md §13 WP9 ("owner writes no kernel"), WP25 ("Done jointly by the owners of WP6, WP10 and WP11"; delivered validation/dummies.py); src/rai_bvar/validation/dummies.py docstring l.1-4
 No reference imports a kernel module; a subprocess test enforces this. % [V] tests/validation/test_log_joint.py::test_references_never_import_kernels
-The algebra differs too: the references are joint densities on the natural parameters, the
-kernels conditional formulas, and for the SOC/SUR dummy rows the reference uses the covariance form
-($m\times m$ systems, Matheron's rule; \citealp{journel1978mining,chiles2012geostatistics,wilson2020efficiently})
-where the kernels use the precision form ($q\times q$ Gram updates). % [V] src/rai_bvar/validation/dummies.py docstring l.1-4; tests/validation/test_reference_dummies.py
-The mixture constants are transcribed twice, and a test requires agreement on every printed
-digit. % [V] tests/validation/test_mixture_transcription.py
-A design review introduced the two-implementation rule after rejecting validation of each block
-with its own prior sampler (erratum E9, \cref{app:errata}). An oracle shares any convention we copied into it,
-whereas Geweke and SBC tests share only our prior and simulator, so the two are complementary.
+The algebra differs too: references are joint densities on the natural parameters and kernels
+conditional formulas, and for the dummy rows the reference works in covariance form ($m\times m$
+systems, Matheron's rule; \citealp{journel1978mining,chiles2012geostatistics,wilson2020efficiently})
+and the kernels in precision form ($q\times q$ Gram updates). % [V] src/rai_bvar/validation/dummies.py docstring l.1-4; tests/validation/test_reference_dummies.py
+Mixture constants are transcribed twice and must agree on every printed digit. % [V] tests/validation/test_mixture_transcription.py
+An oracle shares any convention we copied into it, whereas Geweke and SBC tests share only our
+prior and simulator, so the two are complementary (the rule's origin: erratum E9,
+\cref{app:errata}).
 
-\paragraph{Production code, demanding configurations.} One step of a test chain is the production
-\code{prepare(data, prior)} followed by one production sweep, never a copy. % [V] src/rai_bvar/validation/joint.py docstring l.1-11
-Test configurations make every term matter: tight proper priors, $M \ne 0$ in
-\eqref{eq:centring}, an outlier probability $\sim\mathrm{Beta}(2, 18)$ so that outliers occur at
-$T = 20$, $\nu \in \{5, \dots, 12\}$, $T_{\mathrm{eff}}$ never a multiple of the 32-row padding
-bucket, and hyperparameters that do not depend on $y$. % [V] src/rai_bvar/validation/joint.py docstring l.13-29; tests/geweke/test_geweke_compositions.py::test_g_small (asserts T_eff % 32 != 0)
+\paragraph{Production code; failures fail.} A test chain's step is the production
+\code{prepare(data, prior)} followed by one production sweep, never a copy, % [V] src/rai_bvar/validation/joint.py docstring l.1-11
+under proper, tight test priors in which every term matters (\cref{app:geweke-functions}). % [V] src/rai_bvar/validation/joint.py docstring l.13-29; tests/geweke/test_geweke_compositions.py::test_g_small (asserts T_eff % 32 != 0)
+A non-finite test function gives $p = 0$ and is counted, and a failed SBC replication fails the
+test; the only filter acts on the simulated data alone ($\tilde y$ finite, $\max|\tilde y| < 10^3$)
+and leaves ranks uniform, because uniformity holds conditionally on the data
+\citep{modrak2025simulation}. % [V] tests/validation/test_geweke_selftest.py::test_non_finite_test_functions_fail_with_counts, ::test_sampler_failures_in_the_sc_chains_fail_with_counts; src/rai_bvar/validation/sbc.py docstring
 
-\paragraph{Failures fail.} A non-finite test function gives $p = 0$ and is counted, and a failed
-SBC replication fails the test. The only filter allowed acts on the simulated data alone ($\tilde y$
-finite, $\max|\tilde y| < 10^3$), which leaves ranks uniform because uniformity holds conditionally
-on the data \citep{modrak2025simulation}. % [V] tests/validation/test_geweke_selftest.py::test_non_finite_test_functions_fail_with_counts, ::test_sampler_failures_in_the_sc_chains_fail_with_counts; src/rai_bvar/validation/sbc.py docstring
-
-\paragraph{Fixed seeds and a sequential wrapper.} Keys are derived from (seed, tier, CRC-32 of the
+\paragraph{Fixed seeds, sequential decisions.} Keys derive from (seed, tier, CRC-32 of the
 composition name, chain), so results do not depend on how chains are vectorised. % [V] src/rai_bvar/validation/geweke.py docstring (Keys); tests/validation/test_geweke_selftest.py::test_results_do_not_depend_on_block_sizes
-With fixed seeds a false alarm is deterministic, so marginal results go to the sequential procedure
-of \citet[Algorithm~3]{gandy2021unit}. With family level $\alpha$, $k$ stages and a size multiplier
-$\Delta$,
-\begin{equation}\label{eq:gandy-scott}
-  \beta_1 = \alpha/k, \qquad \gamma_{\mathrm{GS}} = \beta_1^{1/k}, \qquad
-  \beta_{i+1} = \beta_i/\gamma_{\mathrm{GS}}, \qquad
-  \Pr(\text{reject} \mid H_0) \le \sum_{i=1}^{k} \gamma_{\mathrm{GS}}^{\,i-1}\beta_i = \alpha .
-\end{equation}
-Stage $i$ fails if its Bonferroni-adjusted p-value $q_i \le \beta_i$, passes if
-$q_i > \gamma_{\mathrm{GS}} + \beta_i$, and otherwise defers to a fresh, independent experiment,
-enlarged once by $\Delta$. % [V] src/rai_bvar/validation/sequential.py docstring; tests/validation/test_sequential.py
-Per PR, $\alpha = 10^{-3}$, $k = 3$ and $\Delta = 4$ give $\gamma_{\mathrm{GS}} = 0.0693$ and about
-30\% expected extra effort under the null. % [R] docs/phase2/06_validation_geweke_sbc.md §4.6 table (beta = 3.33e-4, 4.81e-3, 0.0693)
-Holm's procedure \citep{holm1979simple} only lists the failing functions.
-
-\subsection{Tiers, cadence and suite size}\label{sec:validation-tiers}
-
-\cref{tab:Tab5} lists the seven tiers. The continuous-integration job named ``nightly'' runs
-weekly, so composition-level Tier~B, G-full, SBC, the large analytic twins, long parity runs and the
-mutation suite run weekly; Tier~U, G-small and the kernel-level Tier~B run on every pull request
-(PR), on Linux for Python 3.12--3.14. % [V] .github/workflows/ci.yml (cron "17 3 * * 0"; job comment "nightly: # weekly despite the name")
-Every \code{RuntimeWarning} is an error, as is any silent float32 truncation in the MCMC tests. % [V] pyproject.toml [tool.pytest.ini_options]; tests/geweke/test_geweke_compositions.py pytestmark
-At commit 62d15f6 the suite has 4,964 parametrised test IDs: 4,520 in the PR suite, 441 weekly and
-3 benchmarks. % [V] pytest --collect-only -q, reproduced in dossier 04 §3.1; b9c66c0 reports "Fast suite 4655 passed" [R]
-\todo{[REL] Refresh the counts here and in \cref{tab:Tab5} from
-\code{docs/paper/data/release/collect.txt} on the release commit.}
-
-\begin{table}[tbp]
-  \centering
-  \caption{Validation tiers: content, decision rule, cadence as designed and as run in
-    continuous integration (the job named ``nightly'' runs weekly), and parametrised test IDs
-    at commit 62d15f6, counted under the tier's pytest marker where one exists. Tiers~U, B and A
-    have no tier-wide marker (for B see note a); the G count includes the kernel-level Geweke
-    tests.}
-  \label{tab:Tab5}
-  % Body to be regenerated by docs/paper/figures/tab_tiers.py from .github/workflows/ci.yml,
-  % pyproject.toml and docs/paper/data/release/collect.txt [REL]; counts below are at 62d15f6
-  % (dossier 04 §3.1-§3.2).
-  \footnotesize
-  \begin{tabular}{@{}l p{0.28\textwidth} p{0.27\textwidth} p{0.2\textwidth} r@{}}
-    \toprule
-    Tier & Content & Decision rule & Cadence (designed / run) & IDs \\
-    \midrule
-    U & density-ratio and Metropolis--Hastings identities; dense oracles with injected noise;
-        closed forms; infrastructure
-      & relative error below a fixed tolerance ($10^{-8}$ for identities)
-      & PR / PR & -- \\
-    B & block-conditional SBC ($N = 200$, $L = 99$); one-block invariance ($N = 1000$, $L = 20$)
-      & Bonferroni at $\alpha = 10^{-3}$; sequential wrapper
-      & PR / kernel level PR, composition level weekly & 43$^{a}$ \\
-    G & Geweke: G-small ($C = 1000$, $M_c = 100$, $M_1 = 2\cdot10^5$) and G-full ($C = 4000$,
-        $M_c = 500$, $M_1 = 10^6$)
-      & $\min_g p_g \le \alpha/G$, $\alpha = 10^{-3}$ (small) or $10^{-2}$ (full); sequential
-        wrapper
-      & small PR, full nightly / small PR, full weekly & 95 \\
-    S & SBC, $N = 1000$, $L = 99$, two-pass thinning, ESS gates
-      & $\gamma$ test, Bonferroni at $\alpha = 10^{-2}$; no failed replication; ESS gates
-      & nightly / weekly & 22 \\
-    A & analytic twins and exact oracles A1--A7
-      & $|z| \le \max(4, z_{\mathrm{Bonf}})$ (A2--A5); log ML to $10^{-10}$ (A1)
-      & PR: A1, A2, A5 ($n = 3$), A6, a small A7; nightly: A3, A4, the rest / the
-        nightly part weekly & -- \\
-    P & parity with independent implementations
-      & quantile $|z| \le \max(4, z_{1-0.01/(2m)})$; log ML rtol $10^{-8}$
-      & short PR, long nightly / short PR, long weekly & 15$^{b}$ \\
-    M & 18 injected mutants (\cref{tab:Tab7})
-      & caught iff the tier fails on the mutant and passes on the control
-      & weekly / weekly & 37$^{c}$ \\
-    \bottomrule
-  \end{tabular}
-
-  \smallskip
-  \raggedright
-  $^{a}$Composition-level tests in \code{tests/sbc/test_block_tier.py}.
-  $^{b}$Marker \code{parity_long}; \code{tests/parity} has 364 IDs in all.
-  $^{c}$Mutant $\times$ tier checks; the registry test runs on every PR.
-\end{table}
+A false alarm is then deterministic, so a marginal Bonferroni $p$-value is settled by the sequential
+procedure of \citet[Algorithm~3]{gandy2021unit}, which reruns a fresh, four times larger experiment
+at family level $\alpha$ (\cref{app:geweke-small}); % [V] src/rai_bvar/validation/sequential.py docstring; tests/validation/test_sequential.py
+per PR ($\alpha = 10^{-3}$, three stages) this costs about 30\% extra effort under the null. % [R] docs/phase2/06_validation_geweke_sbc.md §4.6 table (beta = 3.33e-4, 4.81e-3, 0.0693)
+Holm's procedure \citep{holm1979simple} only names the failing functions.
 
 \subsection{Tier U: deterministic identities}\label{sec:validation-u}
 
 For a block $b$ with implemented conditional $q_b(\theta_b \mid \theta_{-b}, y)$ and two states
 $x_0, x_1$ that differ only in $\theta_b$, the identity \citep{grosse2014testing}
-\begin{equation}\label{eq:density-ratio}
-  \log q_b(x_1) - \log q_b(x_0) = \log p(x_1, y) - \log p(x_0, y)
-\end{equation}
-is checked against the independent log joint density. For a Metropolis--Hastings step, the computed
+$\log q_b(x_1) - \log q_b(x_0) = \log p(x_1, y) - \log p(x_0, y)$ is checked against the
+independent log joint density; for a Metropolis--Hastings step, the computed
 log acceptance ratio before truncation must equal
 $\log\pi(x') + \log q(x \mid x') - \log\pi(x) - \log q(x' \mid x)$, including the mixture-correction
 weights \eqref{eq:w}, the combined accept/reject of the $\sigma^2$ step and the ASIS Jacobians. Both
-are asserted at $|\mathrm{LHS} - \mathrm{RHS}|/(1 + |\mathrm{RHS}|) \le 10^{-8}$. % [V] src/rai_bvar/validation/identities.py docstring; tests/mcmc/blocks/test_sv_core.py::test_exact_h_log_accept_identity, ::test_nc_mu_sigma_log_accept_identity, ::test_sigma2_log_ratio_identity_and_ig_gibbs
-Dense oracles with injected noise check the linear algebra, at $10^{-10}$ to $10^{-13}$. % [R] DESIGN §9.3 item 1 (precision draw 1e-10, packed Gram 1e-13, tridiagonal SV 1e-12, CCCM vs SUR 1e-10); tests in tests/mcmc/unit/test_linalg.py, tests/mcmc/blocks/test_linear_fastpaths.py, tests/mcmc/blocks/test_cccm.py
-One tolerance lesson generalises: two exact samplers of the same Gaussian agree only to
-$O(\epsilon_{\mathrm{mach}}\operatorname{cond}(K))$, with $\operatorname{cond}(K)$ the condition number of the Jacobi-scaled
-precision, which reaches $10^6$ for Minnesota priors on level data. Path-against-path comparisons
-therefore use the envelope $2\times10^{-12} + 5\epsilon_{\mathrm{mach}}\operatorname{cond}(K)(1 + t)$ for means (with
-$t$ the largest posterior $t$-ratio) and $2\times10^{-12} + 5\epsilon_{\mathrm{mach}}\operatorname{cond}(K)$ for
-covariances. % [V] tests/mcmc/blocks/test_linear_fastpaths.py docstring l.7-10 and l.131-135; tests/mcmc/blocks/test_contemp_lstsq.py l.83
-Infrastructure checks cover float64 on every array, a JAX-free package import, typed keys with
-JAX's key-reuse checker, the invariances of \cref{sec:arch-repro} and the failure path.
+hold to $|\mathrm{LHS} - \mathrm{RHS}|/(1 + |\mathrm{RHS}|) \le 10^{-8}$. % [V] src/rai_bvar/validation/identities.py docstring; tests/mcmc/blocks/test_sv_core.py::test_exact_h_log_accept_identity, ::test_nc_mu_sigma_log_accept_identity, ::test_sigma2_log_ratio_identity_and_ig_gibbs
+Dense oracles with injected noise check the linear algebra at $10^{-10}$ to $10^{-13}$; % [R] DESIGN §9.3 item 1 (precision draw 1e-10, packed Gram 1e-13, tridiagonal SV 1e-12, CCCM vs SUR 1e-10); tests in tests/mcmc/unit/test_linalg.py, tests/mcmc/blocks/test_linear_fastpaths.py, tests/mcmc/blocks/test_cccm.py
+as two exact samplers of one Gaussian agree only to $O(\epsilon_{\mathrm{mach}}\operatorname{cond}(K))$,
+path-against-path tests use envelopes that grow with $\operatorname{cond}(K)$, and infrastructure
+checks complete the tier (\cref{app:tier-u}). % [V] tests/mcmc/blocks/test_linear_fastpaths.py docstring l.7-10 and l.131-135; tests/mcmc/blocks/test_contemp_lstsq.py l.83 (K = the Jacobi-scaled precision, cond(K) up to 1e6 for Minnesota priors on level data; envelope formulas and the infrastructure list: App. D, app:tier-u)
 
 \subsection{Tier G: Geweke tests}\label{sec:validation-geweke}
 
 Following \citet{geweke2004getting}, the marginal-conditional simulator draws $M_1$ independent
-pairs $\theta \sim p(\theta)$, $y \sim p(y \mid \theta)$; the successive-conditional simulator runs
-$C$ independent chains of $M_c$ steps ($y \sim p(y \mid \theta)$, then one production sweep), each
-started at a prior draw with no burn-in. With
+pairs $\theta \sim p(\theta)$, $y \sim p(y \mid \theta)$, and the successive-conditional simulator
+runs $C$ independent chains of $M_c$ steps ($y \sim p(y \mid \theta)$, then one production sweep),
+each started at a prior draw with no burn-in. With
 $\bar g_{\mathrm{MC}}$ and $\hat\sigma^2_g$ the marginal-conditional mean and variance of a test
 function $g$, and $\bar g_{\mathrm{SC}}$ and $s^2_C$ the mean and variance of the $C$ chain means,
 \begin{equation}\label{eq:geweke}
@@ -160,189 +85,150 @@ function $g$, and $\bar g_{\mathrm{SC}}$ and $s^2_C$ the mean and variance of th
   \qquad p_g = 2\Pr\bigl(t_{C-1} > |z_g|\bigr),
 \end{equation}
 and the test fails iff $\min_g p_g \le \alpha/G$ over the $G$ functions. % [V] src/rai_bvar/validation/geweke.py docstring l.1-32; tests/validation/test_geweke_selftest.py::test_statistics_follow_the_documented_keys_and_formulas, ::test_correct_toy_holds_the_nominal_level_over_20_seeds, ::test_deliberately_wrong_toys_fail
-Batch means within chains \citep{flegal2010batch} give a non-gating cross-check of the chains'
-long-run variance. % [V] src/rai_bvar/validation/geweke.py docstring (b = floor(sqrt(M_c))); tests/validation/test_geweke_selftest.py::test_batch_means_follow_the_documented_formulas
-A chain started at $\theta^{(0)} \sim p(\theta)$ is stationary from its first sweep under the null,
-so the size needs only that the sweep leave the posterior invariant; ergodicity affects power, and a
-burn-in would only lower it.
+A prior-started chain is stationary from its first sweep under the null, so the size needs only
+that the sweep leave the posterior invariant; ergodicity affects power, and a burn-in would only
+lower it.
 \todo{TODO 15: verify before attributing the opposite concern (Geweke $z$-scores need converged
 chains) to Talts et al.\ (2018); until then cite no one for it.}
-The $t_{C-1}$ critical values matter at Bonferroni-sized tails: at $G = 100$ and $\alpha = 10^{-3}$
-the normal approximation has actual size $1.64\times10^{-3}$ for $C = 200$. % [R] docs/phase2/06_validation_geweke_sbc.md §3.2 table (1.11e-3 at C = 1000)
 Test priors follow the rule $r = \mathrm{Var}_{\mathrm{prior}}/\mathrm{Var}_{\mathrm{post}} \le 5$,
-derived in the scalar conjugate model, where a successive-conditional sweep is an AR(1) step with
-integrated autocorrelation time $2r - 1$ (\cref{app:derivations}); it is unverified for
-$\phi$, $\sigma$, $p$ and $\nu$. % [R] docs/phase2/06_validation_geweke_sbc.md §3.3, §12 item 4; App. B.6
-Test functions must have finite variance: $\mathrm{E}[y^2] = \infty$ under the SV test prior, so
-data functions are log-scale or bounded; $\log\lambda$ replaces $\lambda^2$, whose variance is
-infinite under an inverse-gamma prior with shape at most 4; and the Constant test prior is
-$\mathrm{IG}(5, 4)$. The exact log-likelihood \eqref{eq:loglik} is among the
-test functions. % [R] docs/phase2/06_validation_geweke_sbc.md §3.4; DESIGN §9.5; [V] finite-variance flags in src/rai_bvar/validation/reference.py
-
-G-small uses $C = 1000$, $M_c = 100$, $M_1 = 2\times10^5$, $\alpha = 10^{-3}$, and G-full
-$C = 4000$, $M_c = 500$, $M_1 = 10^6$, $\alpha = 10^{-2}$, at $n \le 3$. Rows with the approximate
-(\code{exact=False}) SV sampler are recorded but do not gate. % [V] tests/geweke/test_geweke_compositions.py (sizes; test_g_full_inexact_recorded)
-All 15 PR compositions pass G-small at commit 62d15f6 (\cref{tab:TabD1}), with largest
-final-stage $|z|$ 3.03 against critical values of 4.10--4.50. % [V] pytest tests/geweke -m "geweke and not slow", reproduced at 62d15f6 on Apple M5 Max (dossier 04 §6.6; fact-check re-run identical) [REL: geweke.jsonl]
-In row 201 (structural Constant with dummy rows) stage~1 gave $q = 0.0012$ ($|z| = 4.21$) and the fresh, four times larger experiment
-passed with $q = 1.0$, deterministically on one machine for fixed code and seed (not a reproduction
-across machines). % [V] same run; mutants.py EVIDENCE["M17"] is the same computation (SEED_G), not an independent check
-The smallest relative numerical efficiency per composition is 0.008--0.129, which lowers power,
-not size; in the four compositions examined it falls on intercepts, a data function and levels of
-$h$, not on $\phi$ or $\sigma$. % [V] dossier 04 §6.6 and Q2 (structural_constant, reduced_constant, structural_sv, zero_sv)
-G-full runs weekly.
+derived for the scalar conjugate model only (\cref{app:derivations,sec:limitations}); % [R] (unverified for phi, sigma, p and nu: stated in §12, 12_limitations.tex l.86-87) docs/phase2/06_validation_geweke_sbc.md §3.3, §12 item 4; App. B.6 (the AR(1) step with IAT 2r - 1)
+test functions must have finite variance, which excludes raw data moments under the SV test prior
+(\cref{app:geweke-functions}), and include the exact log-likelihood \eqref{eq:loglik}. % [R] docs/phase2/06_validation_geweke_sbc.md §3.4; DESIGN §9.5; [V] finite-variance flags in src/rai_bvar/validation/reference.py
+G-small runs per PR and the larger G-full weekly, at $n \le 3$ (\cref{app:geweke-small,app:sbc});
+rows with the approximate (\code{exact=False}) SV sampler are recorded but do not gate. % [V] tests/geweke/test_geweke_compositions.py (sizes; test_g_full_inexact_recorded)
+At commit 62d15f6 the 15 PR compositions then registered pass G-small (\cref{tab:TabD1}), largest
+final-stage $|z|$ 3.03 against critical values of 4.10--4.50, row 201 at the fresh second stage; % [V] pytest tests/geweke -m "geweke and not slow", reproduced at 62d15f6 on Apple M5 Max (dossier 04 §6.6; fact-check re-run identical) [REL: geweke.jsonl]; row 201: same run, deterministic on one machine for fixed code and seed; mutants.py EVIDENCE["M17"] is the same computation (SEED_G), not an independent check
+row~18, added later as the sixteenth PR row, is reported in \cref{sec:validation-coverage}. % [V] tests/geweke/test_geweke_compositions.py PR_ROWS at 7f410dc (rows 1-5, 7-10, 17, 18, 201-205 = 16)
 \todo{[REL] Report G-full and the \code{exact=False} rows only from a committed
 \code{geweke_full.jsonl}; do not write that G-full passes on every row before then.}
-Exploring the whole prior, the Geweke simulator also reaches states far outside those that
-ordinary data produce;
-this is how a float64 weakness of a coefficient draw was found (\cref{sec:robustness-f1}).
+The Geweke simulator also reaches states far outside those that ordinary data produce, which is how
+a float64 weakness of a coefficient draw was found (\cref{sec:robustness-f1}).
 
-\subsection{Tier S: simulation-based calibration}\label{sec:validation-sbc}
+\subsection{Tiers S and B: simulation-based calibration and block-level tests}\label{sec:validation-sbc}
 
 SBC \citep{cook2006validation,gelman2017correction,talts2018validating,modrak2025simulation} checks
 that the rank of a prior draw $\tilde\theta$ among posterior draws given data $\tilde y$ simulated
-from it is uniform; a variant conditional on observed data \citep{sailynoja2025posterior} is
-related work. Per replication, a pilot chain started at an independent prior draw gives
+from it is uniform (a variant conditional on observed data, \citealp{sailynoja2025posterior}, is
+related work). Per replication, a pilot chain started at an independent prior draw gives
 $\mathrm{IAT}_i$, the largest Geyer initial-monotone estimate \citep{geyer1992practical} over the
-quantities and their tail indicators; a fresh chain then keeps $L$ draws every
-$t_i = \min(\lceil 2\,\mathrm{IAT}_i \rceil, t_{\max})$ sweeps. As $t_i$ depends only on $\tilde y$
+quantities and their tail indicators, and a fresh chain keeps $L$ draws every
+$t_i = \min(\lceil 2\,\mathrm{IAT}_i \rceil, t_{\max})$ sweeps; as $t_i$ depends only on $\tilde y$
 and pilot noise, ranks stay uniform. % [V] src/rai_bvar/validation/sbc.py docstring l.1-30; tests/validation/test_sbc_selftest.py
-Uniformity is tested with the statistic of \citet{sailynoja2022graphical}: for $N$ ranks in
-$\{0, \dots, L\}$, $z_i = i/(L + 1)$ and $R_i$ the number of ranks below $i$,
-\begin{equation}\label{eq:gamma-sbc}
-  \gamma_{\mathrm{S}} = 2\min_{1 \le i \le L}\,\min\bigl\{F_{\mathrm{Bin}}(R_i; N, z_i),\;
-  1 - F_{\mathrm{Bin}}(R_i - 1; N, z_i)\bigr\},
-\end{equation}
-whose exact null distribution follows from the forward recursion of \citet{sailynoja2022graphical}
-over the binomial increments of $R_i$; our implementation accumulates the mass that leaves the
-envelope at each step, so that far-tail p-values keep relative precision. % [V] src/rai_bvar/validation/uniformity.py docstring; tests/validation/test_uniformity.py::test_exact_recursion_agrees_with_simulation, ::test_null_pvalues_are_super_uniform
-
-With $L = 99$ kept draws a per-replication effective sample size (ESS) of $0.8L$ cannot be
-certified, even for independent draws, so that ESS is predicted from the pilot IAT. A second gate, for a pilot that
-underestimates the IAT, requires the kept-draw ESS pooled over replications (from ECDF indicators,
-with Kish's effective number of replications; \citealp{kish1965survey}) to reach $0.8L$. % [V] design change (DESIGN §9.6 erratum; NOTES B.5); src/rai_bvar/validation/sbc.py docstring l.24-54
-\todo{TODO 25: the iid shortfall share (about 76\%) and the pooled minimum ($0.836L$) are
-docstring-only; commit a test before quoting either.}
-The thinning cap is $t_{\max} = 200$; in runs recorded in the test module, a cap of 50 made the
-ESS rule fail on slowly mixing datasets of a $t$ row and an outlier-$t$ row while the $\gamma$
-test was clean. % [R] tests/sbc/test_sbc_compositions.py docstring l.13-21 (NOTES B.6): at t_max = 50 the ESS rule failed on slow outlier/t datasets while the gamma test was clean -> App. D
-Besides the parameters, the ranked quantities include $h$ at three dates, the total and
-per-equation log-likelihood, $\log p(\theta)$, and $h_{T+1}$ and $y_{T+1}$ drawn through the
-production forecast core. Such data-dependent quantities are needed: a ``posterior'' equal to the
-prior passes SBC on every data-free quantity \citep{modrak2025simulation}. % [V] tests/sbc/test_sbc_compositions.py::test_quantity_selection, ::test_truth_and_forecast_core_are_the_same_map
+Uniformity is tested with the $\gamma$ statistic of \citet{sailynoja2022graphical}, with exact
+far-tail $p$-values from a forward recursion (\cref{app:sbc}). % [V] src/rai_bvar/validation/uniformity.py docstring; tests/validation/test_uniformity.py::test_exact_recursion_agrees_with_simulation, ::test_null_pvalues_are_super_uniform (formula: App. D, app:sbc)
+$L = 99$ kept draws cannot certify a per-replication effective sample size (ESS) of $0.8L$, so that
+ESS is predicted from the pilot IAT, and a second gate on the kept-draw ESS pooled over
+replications \citep{kish1965survey} catches pilots that underestimate the IAT. % [V] design change (DESIGN §9.6 erratum; NOTES B.5); src/rai_bvar/validation/sbc.py docstring l.24-54
+The thinning cap is $t_{\max} = 200$ (400 for row~18), raised from the design's 50 by the ESS
+rule's own remedy (\cref{app:sbc}). % [R] tests/sbc/test_sbc_compositions.py docstring l.13-21 (NOTES B.6); [V] T_MAX = 200, SBC_OVERRIDES = {"reduced_sv_rw": {"t_max": 400}} at 7f410dc; the t_max = 50 runs: App. D, app:sbc
+Besides the parameters, the ranked quantities include $h$ at three dates, log-likelihoods,
+$\log p(\theta)$, and $h_{T+1}$ and $y_{T+1}$ drawn through the production forecast core; such
+data-dependent quantities are needed, because a ``posterior'' equal to the prior passes SBC on
+every data-free quantity \citep{modrak2025simulation}. % [V] tests/sbc/test_sbc_compositions.py::test_quantity_selection, ::test_truth_and_forecast_core_are_the_same_map
 \todo{TODO 15: check the theorem number of this result in the journal version of Modr\'ak et
 al.\ (2025) before citing it by number.}
-The configuration is $N = 1000$, $L = 99$, $\alpha = 10^{-2}$, for 22 compositions at $n \le 3$.
-Apart from the mutation suite's S check (\cref{tab:Tab7}) and the runs recorded in the test
-module, the only committed SBC result is for row 205 (structural
-\code{iw_equivalent} with dummy rows): minimum $p$ 0.018. % [V] NOTES 13; the t_max = 50 runs are in tests/sbc/test_sbc_compositions.py docstring l.13-21 [R]
+The configuration is $N = 1000$, $L = 99$, $\alpha = 10^{-2}$ for 23 compositions (rows 1--18
+and 201--205) at $n \le 3$. % [V] tests/sbc/test_sbc_compositions.py::test_sbc over validation.joint.COMPOSITIONS (23 at 7f410dc; 22 at c823d20)
+Apart from the mutation suite's S check, the $t_{\max} = 50$ runs and row~18, the only recorded SBC
+result is row 205's (structural \code{iw_equivalent} with dummy rows): minimum $p$ 0.018. % [V] NOTES 13; [R] the t_max = 50 runs: tests/sbc/test_sbc_compositions.py docstring l.13-21; row 18: the same docstring and NOTES 6 at 7f410dc
 \todo{[REL] Report the SBC rows from a committed \code{sbc.jsonl} (\cref{tab:TabD3}).}
-
-\subsection{Tier B: block-level tests}\label{sec:validation-block}
-
-Blocks that draw exactly from their conditional get block-conditional SBC ($N = 200$, $L = 99$):
-$L$ independent draws of the block given $\tilde\theta_{-b}$, ranking its coordinates and the exact
-log-likelihood. Metropolis--Hastings, ASIS and Gibbs-scan blocks get one-block invariance: $N = 1000$
-joint draws, $L = 20$ applications of the live block with $\tilde y$ fixed, and a two-sample
-Kolmogorov--Smirnov test per statistic against independent joint draws. Both use Bonferroni at
-$\alpha = 10^{-3}$ inside the sequential wrapper. % [V] src/rai_bvar/validation/sbc.py (block_sbc); tests/sbc/test_block_tier.py docstring (43 IDs, weekly); kernel-level PR checks e.g. tests/mcmc/blocks/test_sv_core.py::test_centred_step_one_block_invariance
+\phantomsection\label{sec:validation-block}%
+In Tier~B, blocks that draw exactly from their conditional get block-conditional SBC, and Metropolis--Hastings, ASIS and Gibbs-scan blocks one-block invariance
+tests, both at Bonferroni $\alpha = 10^{-3}$ inside the sequential wrapper (\cref{app:sbc}). % [V] src/rai_bvar/validation/sbc.py (block_sbc); tests/sbc/test_block_tier.py docstring (43 IDs, weekly); kernel-level PR checks e.g. tests/mcmc/blocks/test_sv_core.py::test_centred_step_one_block_invariance
 
 \subsection{Tier A: analytic twins and exact oracles}\label{sec:validation-twins}
 
 Analytic twins and exact oracles compare the MCMC engine with closed forms, quadrature or exact
-draws, up to realistic sizes (\cref{tab:TabD4}). A1 checks that the structural NIG log
-marginal likelihood of \citet{chan2022asymmetric} equals the analytic engine's
-to $10^{-10}$, with and without SOC/SUR rows. % [V] tests/analytic/test_structural_nig.py::test_a1_log_ml_equals_phase1
+draws (\cref{app:twins}): A1 equates the structural NIG log marginal likelihood of
+\citet{chan2022asymmetric} with the analytic engine's to $10^{-10}$, with and without SOC/SUR
+rows; % [V] tests/analytic/test_structural_nig.py::test_a1_log_ml_equals_phase1
 A2 and A3 compare MCMC structural Mode~II $\times$ \code{Constant("iw")} with the analytic NIW
-posterior at $n = 3$ and at $n = 20$, $p = 4$, $T = 300$, a size at which Geweke and SBC tests would
-be too expensive. % [V] tests/analytic/test_mcmc_twin.py::test_a2_mode2_iw_matches_the_phase1_niw_posterior, ::test_a3_realistic_size [REL: A3 release result]
-A4 checks Chan's asymmetric conjugate prior against its closed form, A5 Mode~I $\times$ Constant
-against quadrature, A6 the exact-$h$, ASIS and step-order kernels on toy posteriors, and A7 the
-reduced-form Constant sampler against a Gibbs sampler whose coefficient step is an exact
-system-wide draw. % [V] tests/analytic/test_mcmc_twin.py::test_a4_chan_asymmetric_prior; tests/analytic/test_mode1_quadrature.py; tests/mcmc/blocks/test_sv_toy_quadrature.py; tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta_small
-Each exact quantile $x_q$ is tested in CDF form,
-\begin{equation}\label{eq:twin-z}
-  z = \frac{\hat F_{\mathrm{MCMC}}(x_q) - q}{\sqrt{\mathrm{MCSE}^2(\hat F) + q(1 - q)/N_{\mathrm{ref}}}},
-\end{equation}
-with the MCSE from the indicator's own ESS and $N_{\mathrm{ref}}$ exact reference draws; it passes
-iff $|z| \le \max(4, z_{\mathrm{Bonf}})$ at family level $10^{-2}$, and it avoids the density
-estimate that made the order-statistic quantile MCSE heavy-tailed at $n = 20$. % [R] tests/analytic/test_mcmc_twin.py docstring "Comparison" (the -4.99 at seed 221 stays out; TODO 25)
-Negative controls show that the comparisons have power: A2 rejects a posterior with one extra
-degree of freedom, A5 an inverse-gamma shape off by one half, and A6 and A7 deliberately wrong
-kernels (the uncorrected non-centred move, the step order of \citealp{primiceri2005time}, the
-CCM-2019 step). % [V] tests/analytic/test_mcmc_twin.py::test_a2_rejects_a_slightly_wrong_posterior; tests/analytic/test_mode1_quadrature.py::test_a5_rejects_a_slightly_wrong_posterior; tests/mcmc/blocks/test_sv_toy_quadrature.py docstring; tests/mcmc/blocks/test_cccm.py::test_a7_detects_ccm2019. A3 and A4 have no negative control of their own.
+posterior at $n = 3$ and at $n = 20$, $p = 4$, $T = 300$, a size too expensive for Geweke and SBC
+tests; % [V] tests/analytic/test_mcmc_twin.py::test_a2_mode2_iw_matches_the_phase1_niw_posterior, ::test_a3_realistic_size [REL: A3 release result]
+A4 checks Chan's asymmetric conjugate prior against its closed form, A5 Mode~I $\times$
+Constant against quadrature, A6
+the exact-$h$, ASIS and step-order kernels on toy posteriors, and A7 the reduced-form Constant
+sampler against an exact system-wide coefficient draw. % [V] tests/analytic/test_mcmc_twin.py::test_a4_chan_asymmetric_prior; tests/analytic/test_mode1_quadrature.py; tests/mcmc/blocks/test_sv_toy_quadrature.py; tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta_small
+Negative controls give the comparisons measured power: A2 rejects one extra degree of freedom, A5
+an inverse-gamma shape off by one half, and A6 and A7 deliberately wrong kernels (the uncorrected
+non-centred move, the step order of \citealp{primiceri2005time}, the CCM-2019 step). % [V] tests/analytic/test_mcmc_twin.py::test_a2_rejects_a_slightly_wrong_posterior; tests/analytic/test_mode1_quadrature.py::test_a5_rejects_a_slightly_wrong_posterior; tests/mcmc/blocks/test_sv_toy_quadrature.py docstring; tests/mcmc/blocks/test_cccm.py::test_a7_detects_ccm2019. A3 and A4 have no negative control of their own.
 Apart from the A6 toys, the twins cover constant volatility only.
 
 \subsection{Tier P: parity with independent implementations}\label{sec:validation-parity}
 
-Parity compares the 5, 25, 50, 75 and 95\% quantiles of $m$ quantities through
-\begin{equation}\label{eq:parity-z}
-  z = \frac{\hat q_{\mathrm{ours}} - \hat q_{\mathrm{ref}}}
-           {\sqrt{\mathrm{mcse}^2_{\mathrm{ours}} + \mathrm{mcse}^2_{\mathrm{ref}}}},
-  \qquad \text{pass iff } |z| \le \max\bigl(4, z_{1 - 0.01/(2m)}\bigr).
-\end{equation}
-% [V] tests/parity/test_stochvol.py; tests/parity/SV_PARAMETRIZATION.md l.73-81
-The analytic engine is compared with R \pkg{BVAR} 1.0.5 \citep{kuschnig2021bvar} and the Bank of
-England's Python \pkg{bvar} 0.3.5 \citep{labonne2026bvar}. The tests assert log marginal
-likelihoods to relative $10^{-8}$; % [V] tests/parity/test_r_bvar.py, tests/parity/test_boe_bvar.py
-the recorded agreement is below $10^{-11}$ (\pkg{BVAR}, fixtures with exact marginal likelihoods)
-and at most $1.5\times10^{-11}$ (\pkg{bvar}), with posterior moments to about $10^{-9}$, empirical-Bayes
-modes to $10^{-3}$ and sampled quantiles within Monte Carlo error. % [R] tests/parity/BVAR_PARAMETRIZATION.md §12; tests/parity/BOE_BVAR_NOTES.md §14; SPEC.md l.672
-On the MCMC side, \pkg{stochvol} 3.2.1 \citep{kastner2016dealing,hosszejni2021modeling} is compared
-with \code{ZeroMean} $\times$ \code{SV} at $n = 1$, main and default-prior settings on four
-datasets: largest $|z|$ 1.63--2.59 in the PR tier and 1.64--3.57 in long runs, against a bound of
-4.00. % [R] tests/parity/SV_PARAMETRIZATION.md §6 (recorded on an M1 Pro); tests committed
+Parity compares the 5, 25, 50, 75 and 95\% quantiles of $m$ quantities by a $z$-statistic built
+from both implementations' Monte Carlo standard errors, passing iff
+$|z| \le \max(4, z_{1 - 0.01/(2m)})$ (\cref{app:parity}). % [V] tests/parity/test_stochvol.py; tests/parity/SV_PARAMETRIZATION.md l.73-81
+The analytic engine matches R \pkg{BVAR} 1.0.5 \citep{kuschnig2021bvar} and the Bank of England's
+Python \pkg{bvar} 0.3.5 \citep{labonne2026bvar} in log marginal likelihood to a tested relative
+$10^{-8}$, % [V] tests/parity/test_r_bvar.py, tests/parity/test_boe_bvar.py
+with recorded agreement below $10^{-11}$ (\pkg{BVAR}, exact cases) and at most
+$1.5\times10^{-11}$ (\pkg{bvar}). % [R] tests/parity/BVAR_PARAMETRIZATION.md §12; tests/parity/BOE_BVAR_NOTES.md §14; SPEC.md l.672
+On the MCMC side, \pkg{stochvol} 3.2.1 \citep{kastner2016dealing,hosszejni2021modeling} against
+\code{ZeroMean} $\times$ \code{SV} ($n = 1$; main and default-prior settings, four datasets) gives
+largest $|z|$ 1.63--2.59 in the PR tier and 1.64--3.57 in long runs, against a bound of 4.00. % [R] tests/parity/SV_PARAMETRIZATION.md §6 (recorded on an M1 Pro); tests committed
 Our standardised-$t$ SV sampler is checked against an exact importance-sampling posterior on a
-four-observation problem (largest $|z|$ 1.83); a problem this small has an exact posterior, so the
-check needs no second sampler as its oracle. % [V] tests/parity/test_stochvol.py::test_sv_t_matches_the_exact_importance_sampling_posterior
+four-observation problem (largest $|z|$ 1.83), an oracle that needs no second sampler. % [V] tests/parity/test_stochvol.py::test_sv_t_matches_the_exact_importance_sampling_posterior
 % Policy: no statement here or in any caption about any other package's t sampler or the status of its fixture (OUTLINE §8.9; TODO 13).
 The planned reduced-form reference, \pkg{bayesianVARs} \citep{gruber2026bayesianvars}, could not
-be built in our test environment and was not run. Its substitute, an R sampler that draws the
-reduced-form coefficients jointly from their exact system-wide conditional, gives largest $|z|$ of
-2.76, 3.45 and 3.56 on three fixtures, against bounds of 4.05--4.51. % [R] tests/parity/SV_PARAMETRIZATION.md §4, §6 (n3p2 const, n3p2 SV, n7p4 SV); tests/parity/test_bayesianvars.py
-The reduced-form parity criterion is met against this substitute, not against
-\pkg{bayesianVARs}. Our parity tier has no external VAR-level oracle for structural Mode~I $\times$
-SV, the default MCMC composition, nor an external oracle for exact-mode SV beyond reweighted
-single-series runs; these rest on
-Tiers U, B, G and S (details in \cref{tab:TabD2}). % [R] dossier 01 §5; SV_PARAMETRIZATION.md §6 (stochvol_i_exact, stochvol_iv_exact)
+be built in our test environment and was not run; against a substitute R sampler that draws the
+reduced-form coefficients jointly from their exact system-wide conditional, the largest $|z|$ are
+2.76, 3.45 and 3.56 on three fixtures (bounds 4.05--4.51), % [R] tests/parity/SV_PARAMETRIZATION.md §4, §6 (n3p2 const, n3p2 SV, n7p4 SV); tests/parity/test_bayesianvars.py
+so the reduced-form criterion is met against this substitute, not against \pkg{bayesianVARs}. There is no external VAR-level oracle for structural Mode~I $\times$ SV, the
+default MCMC composition, nor for exact-mode SV beyond reweighted single-series runs; these rest on
+Tiers U, B, G and S (\cref{tab:TabD2}). % [R] dossier 01 §5; SV_PARAMETRIZATION.md §6 (stochvol_i_exact, stochvol_iv_exact)
 
 \subsection{Coverage of the compositions the replication scores}\label{sec:validation-coverage}
 
-The replication of \cref{sec:replication} scores two compositions that are not registered
-validation rows. Its primary arm, reduced-form Minnesota $\times$ SV(rw), and the variant reduced
-form $\times$ SV(rw, $t$) have no Geweke or SBC row: at the commits cited in this paper the registry
-carries the random walk only in the structural row 14, and its reduced-form SV rows (8, 9, 10
-and 13) use AR(1) log-volatilities. % [V] src/rai_bvar/validation/joint.py _COMPOSITIONS l.454-480 (committed state, c823d20/d58c9ef): reduced rows are 7-11, 13 and 203; rows 7, 11 and 203 are Constant; row 12 is structural
-Neither is among the 12 MCMC compositions of the contract tests. % [V] tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS l.128-141 (committed state)
-Their correctness currently rests on their validated parts: the CCCM step (the reduced-form rows
-7--11, 13 and 203), the random-walk volatility block (row 14), the Student-$t$ component (rows 4
-and 10, with the standardised scale and $\nu$ on a grid; the replication's $t$ variant fixes
-$\nu = 10$ and uses the unit scale, which only Tier~U checks of the transitory block's closed forms
-and conditional draws cover), and the MCMC
-tests of the path-integrated estimator on reduced-form CCCM fits. % [V] tests/mcmc/forecast/test_lpd_integrated_mcmc.py (b9c66c0; reduced-SV(outliers)-p2-ct, reduced-SV-p2-c); validation/joint.py docstring (t "standardized tau", nu in {5..12}); benchmarks/clark_ravazzolo.py models() (SV(rw, tails="t", nu_prior=DiscreteUniform(10, 10), t_scale="unit")); tests/mcmc/blocks/test_transitory.py (tests parametrised over t_scale)
-The replication's baseline, reduced form $\times$ \code{Constant("iw_equivalent")}, is row 11, and
-its AR-SV(0.9) arm runs the code path of row 8 with a different prior on $\phi$. % [V] benchmarks/clark_ravazzolo.py models() l.330 (SV(phi_prior=Beta(71.25, 3.75)))
-\todo{TODO 3: row~18, \code{reduced_sv_rw} (reduced form $\times$ SV(rw)), and a \code{reduced-SV(rw)} contract fit were committed in 7f410dc, after the acceptance commit c823d20; the SV(rw, $t$) variant is still not covered. Its results so far are recorded only in the commit message (under load); state them here only from the release records (TODO 7). If the release commit includes it, rewrite this paragraph.} % 7f410dc: joint.py adds "reduced_sv_rw": _Def(18, _R, rw=True); mcmc_fits.py adds "reduced-SV(rw)"; SBC_OVERRIDES t_max = 400. When the release includes it: 22 -> 23 compositions (§8.6, C5); 15 -> 16 PR rows (§8.5); sibling caveats in 03_framework, 06_evaluation, 11_replication, 12_limitations, appendix C/D (OUTLINE TODO 3).
+The primary arm of the replication in \cref{sec:replication}, reduced-form Minnesota $\times$
+SV(rw), is validation row~18, \code{reduced_sv_rw}, registered after the acceptance commit c823d20
+in commit 7f410dc, which changes no sampler code, % [V] main repo 7f410dc: src/rai_bvar/validation/joint.py "reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3)); git show 7f410dc --stat (the only src/ file changed is validation/joint.py)
+and the row's configuration equals the arm's in every component field except the shapes, the test
+priors and an inert $\nu$ grid. % [R] docs/phase2/DESIGN.md §9.5 "Row 18" note (7f410dc; StaticConfig built through the production resolve path); the committed test_pr_rows_are_the_design_rows checks only mean kind, persistent vol, rw and transitory
+Like rows 7--10 it runs G-small per PR and G-full and SBC weekly, with its \code{exact=False}
+variant recorded, and the arm is among the 13 MCMC compositions of the contract tests and among
+those fitted through the public \code{BVAR.fit} path. % [V] 7f410dc: tests/geweke/test_geweke_compositions.py PR_ROWS, INEXACT_ROWS; tests/sbc/test_sbc_compositions.py (COMPOSITIONS); tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS (13, incl. "reduced-SV(rw)"); tests/unit/test_fit_mcmc_api.py COMPOSITIONS (("reduced", rb.SV(rw=True)))
+In runs recorded with the commit (one Apple M5 Max, under load), the row's largest $|z|$ is 1.98
+in G-small (critical value 4.42) and 1.90 in G-full (3.94), and the arm passes all ten contract
+tests. % [R] commit message 7f410dc; DESIGN §9.5 row 18 note ("G-small max |z| 1.98, G-full 1.90 ... all at stage 1"); tests/contract/test_forecast_contract_mcmc.py has 10 test functions; [REL] re-record on the release commit
+In one-off runs on the row, outside the mutation suite, its G-small rule fails, against the
+control's 1.98, for the mutants M1 (17.8), M15 (53.4) and M2 (461) and for two unregistered errors, a
+dropped $h_0$ prior in the random-walk AWOL proposal (22.6) and a dropped last random-walk edge (30.0). % [R] commit message 7f410dc ("Positive controls on the row, PR G-small rule"); M1, M2 and M15 are mutants of tests/mutation/mutants.py, but their runs on row 18 are not registered there (nor are the other two errors), so the 37 checks of Tab7 are unchanged
+A prior variance $V_0$ used as a precision is invisible at the test prior $h_0 \sim \mathrm{N}(0,
+1)$; a variant G-small test at $\mathrm{N}(-1, 4)$, run on every PR, catches it ($|z|$ 13.8
+against 2.33). % [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior (RW_H0_PRIOR = {"V0": 4.0, "m0": -1.0}; row 18 PR, row 14 nightly); [R] 13.8 / 2.33 from its docstring and DESIGN §9.5 row 18 note
+SBC passes with a per-row thinning cap of 400; at the shared 200 the per-replication ESS rule held
+for 987 of 997 replications, short of 99\%, and with a 4000-sweep pilot instead of the design's
+1000 it fails at 400 too (981 of 997), with the $\gamma$ test and the pooled-ESS gate clean. The
+slow quantities are the reduced-form coefficients $\Pi$, mostly intercepts, on about 1--2\% of
+prior-drawn $T = 50$ datasets: a mixing tail, not a calibration error
+(\cref{app:sbc,sec:limitations}). % [V] tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max = 400), PILOT = 1000 at 7f410dc; [R] its module docstring ("Row 18"), NOTES item 6, DESIGN §9.5 row 18 note and §9.6 erratum (one run each, Apple M5 Max under load; Geweke and gamma clean); detail: App. D, app:row18
+\todo{[REL] Re-record row~18 (G-small, the $\mathrm{N}(-1, 4)$ variant, G-full, SBC at
+$t_{\max} = 400$, contract) on the release commit and quote those records; the injected errors have no
+committed test.}
+The baseline, reduced form $\times$ \code{Constant("iw_equivalent")}, is row 11, and the AR-SV(0.9)
+arm runs the code path of row 8 with a different prior on $\phi$. % [V] benchmarks/clark_ravazzolo.py models() l.330 (SV(phi_prior=Beta(71.25, 3.75)))
+The Student-$t$ variant, SV(rw, $t$), has no row of its own; it rests on row~18, on the Student-$t$
+component of rows 4 and 10 (standardised scale, $\nu$ on a grid) and, for its fixed $\nu = 10$ and
+unit scale, on Tier~U checks of the transitory block. % [V] 7f410dc: no rw x t row in validation/joint.py _COMPOSITIONS, none in mcmc_fits.py; validation/joint.py docstring (t "standardized tau", nu in {5..12}); benchmarks/clark_ravazzolo.py models() (SV(rw, tails="t", nu_prior=DiscreteUniform(10, 10), t_scale="unit")); tests/mcmc/blocks/test_transitory.py (tests parametrised over t_scale)
+\todo{TODO 3: register the SV(rw, $t$) variant as a row with a contract fit before submission, or
+keep the previous sentence.}
 
 \subsection{Tier M: the mutation suite}\label{sec:validation-mutation}
 
-The 18 mutants M1--M18 (\cref{tab:Tab7}) are injected only through production seams: an
-overridable kernel internal, the volatility slot, the sampler's prior arrays, the simulator or the
-configuration. A tier catches a mutant only if it fails on the mutant and passes on the unmutated
-control, with common seeds; a per-PR test requires a confirmed catching tier for every mutant, and
-an uncaught mutant blocks the release. % [V] tests/mutation/mutants.py docstring l.1-45; tests/mutation/test_mutants.py::test_registry, ::test_mutant_caught; DESIGN §9.7 l.1898
-Tier~U catches 14 mutants and Tier~G all 18 (M7 with a coarse mixture table, M11 and M12 under the
-auxiliary-mixture sampler); Tier~B catches the four that have a B check and Tier~S the one with an
-S check, which makes 37 checks. % [V] tests/mutation/mutants.py _ALL (catchers) l.767-826; pytest -m mutation collects 37
+The 18 mutants (\cref{tab:Tab7}) are injected only through production seams
+(\cref{app:mutants}); a tier catches a mutant only if it fails on the mutant and passes on the
+unmutated control with common seeds, a per-PR test requires a confirmed catching tier for every
+mutant, and an uncaught mutant blocks the release. % [V] tests/mutation/mutants.py docstring l.1-45; tests/mutation/test_mutants.py::test_registry, ::test_mutant_caught; DESIGN §9.7 l.1898
+Tier~U catches 14 mutants, G all 18 (M7 with a coarse mixture table, M11 and M12 under the
+auxiliary-mixture sampler), B the four with a B check and S the one with an S check: 37 checks. % [V] tests/mutation/mutants.py _ALL (catchers) l.767-826; pytest -m mutation collects 37
 At commit 62d15f6 all 37 catch their mutant with a passing control, in 177--182~s on an Apple M5
-Max with a cold compilation cache. % [V] pytest tests/mutation -m mutation, reproduced by dossier 04 and its fact-check (181.85 s, 177.40 s) [REL: mutation.jsonl]
-Recorded runs at earlier commits, M1--M16 and then M17--M18 on x86-64 Linux, also caught every
-mutant; statistics agree across machines to two or three significant figures, not bitwise (M2:
-702 / 2.48 in the committed evidence, labelled M1 Pro; 705 / 2.48 on the M5 Max; 705 / 2.47 on
-x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 [REL: mutation_x86.jsonl]
+Max with a cold compilation cache, % [V] pytest tests/mutation -m mutation, reproduced by dossier 04 and its fact-check (181.85 s, 177.40 s) [REL: mutation.jsonl]
+and recorded runs at earlier commits on x86-64 Linux also caught every mutant
+(\cref{app:mutants}; \cref{fig:FigD1} shows each statistic against its threshold). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 [REL: mutation_x86.jsonl]; cross-machine agreement (two or three significant figures) is in App. D
 \todo{TODO 8: fix the stale count (33/33) and the machine labels in the \code{mutants.py} evidence
 header and NOTES B.8 before the table is regenerated.}
-\cref{fig:FigD1} shows each statistic against its threshold. Mutation testing is established
+Mutation testing is established
 \citep{demillo1978hints,jia2011analysis}, including for probabilistic programming systems
 \citep{dutta2018testing}; we add curated algorithm-level mutants, some taken from published errors,
 and a release gate built on them.
@@ -351,71 +237,59 @@ knowledge'' wording.}
 
 \begin{table}[tbp]
   \centering
-  \caption{Mutation suite: 18 injected sampler bugs with injection seam, composition, confirmed
-    catching tiers and statistics (mutant / control). All 37 mutant $\times$ tier checks catch
-    their mutant while the control passes. U: error of the identity or closed form at one joint draw
-    (tolerance $10^{-8}$; $10^{-12}$ for M8 and M11, $10^{-4}$ for M12, $10^{-10}$ for M15). B and
-    S: Bonferroni-adjusted $q$ or minimum $p$. G: largest $|z|$ at G-small (critical values
-    4.10--4.40). Values reproduced on an Apple M5 Max at commit 62d15f6; they equal the committed
-    evidence strings except M2 (702 / 2.48 in the evidence, labelled M1 Pro).}
+  \caption{Mutation suite: injected error and, per catching tier, the mutant / control statistic
+    (seams, compositions, U tolerances: \cref{app:mutants}); all 37 checks catch their mutant with a
+    passing control. U: identity or closed-form error at one joint draw; B, S: Bonferroni-adjusted $q$
+    or minimum $p$; G: largest $|z|$ at G-small (critical values 4.10--4.40). Reproduced on an Apple
+    M5 Max at 62d15f6; equal to the committed evidence except M2 (702 / 2.48 there, labelled M1 Pro).}
   \label{tab:Tab7}
   % Body to be regenerated by docs/paper/figures/tab_mutation.py from
   % docs/paper/data/release/mutation.jsonl (Apple M5 Max) and mutation_x86.jsonl (x86-64 Linux),
   % both from `pytest tests/mutation -m mutation` on the release commit [REL]. Current body:
   % dossier 04 §11.2 (reproduced at 62d15f6) = tests/mutation/mutants.py EVIDENCE (l.834-858).
+  % Page-budget pass: the "Seam / composition" column is dropped (seam and composition of every
+  % mutant are in App. D, \cref{app:mutants}, M1-M18 list; U tolerances: same subsection), and the
+  % "Caught by" column is dropped (the tier prefixes of the last column name the catching tiers).
   \footnotesize
-  \begin{tabular}{@{}l p{0.27\textwidth} p{0.23\textwidth} l p{0.26\textwidth}@{}}
+  \begin{tabular}{@{}l p{0.42\textwidth} p{0.485\textwidth}@{}}
     \toprule
-    ID & Injected error & Seam / composition & Caught by & Mutant / control \\
+    ID & Injected error & Catching tier: mutant / control \\
     \midrule
-    M1 & CCM-2019 triangular step instead of the corrected step
-       & \code{cccm_core} / reduced Constant & U B G
+    M1 & CCM-2019 triangular step, not the corrected one
        & U 1.70 / $1.6\mathrm{e}{-14}$; B $p$ $2.8\mathrm{e}{-11}$ / 0.10; G 20.8 / 3.03 \\
-    M2 & stale mixture indicators (carried across sweeps, drawn after $h$)
-       & vol slot / structural SV & G & G 705 / 2.48 \\
+    M2 & stale indicators: carried over, drawn after $h$
+       & G 705 / 2.48 \\
     M3 & simulator draws fresh latents
-       & simulator / structural SV & G & G 23.5 / 2.59 \\
+       & G 23.5 / 2.59 \\
     M4 & $\tau$ conditional with shape $\nu/2$, not $(\nu + 1)/2$
-       & \code{tau_conditional} / structural SV-$t$ & U G
        & U 0.163 / $5\mathrm{e}{-15}$; G 281 / 2.12 \\
     M5 & $B_\sigma \times 2$ in the sampler only
-       & sampler prior / structural SV & G & G 50.3 / 2.59 \\
+       & G 50.3 / 2.59 \\
     M6 & non-centred $|\sigma|$ without flipping $\tilde h$
-       & \code{nc_fold} / univariate SV & U G & U 1.94 / 0; G 7.4 / 2.34 \\
-    M7 & uncorrected non-centred move in exact mode
-       & \code{nc_accept} with \code{COARSE1} / univariate SV & U G
+       & U 1.94 / 0; G 7.4 / 2.34 \\
+    M7 & exact-mode non-centred move left uncorrected
        & U 2.87 / 0; G 77.6 / 2.28 \\
     M8 & centring \eqref{eq:centring} dropped ($\gamma_i = \delta_i$)
-       & \code{structural_gamma} / structural Constant & U G S
        & U 0.585 / 0; G 101 / 2.77; S $q$ $1.6\mathrm{e}{-13}$ / pass$^{a}$ \\
     M9 & outlier pmf without $1/k$
-       & \code{outlier_logits} / structural SV-outliers & U G
        & U 0.699 / $1\mathrm{e}{-15}$; G 1474 / 2.51 \\
     M10 & $b_p + T$ instead of $b_p + T - N_1$ in the $p$ update
-       & \code{p_conditional} / structural SV-outliers & U G
        & U 0.120 / $1\mathrm{e}{-14}$; G 30.1 / 2.51 \\
     M11 & indicator pmf without $\sigma_j^{-1}$
-       & \code{indicator_logits} / auxiliary-mixture SV & U B G
        & U 0.112 / $6\mathrm{e}{-16}$; B $q$ $4.9\mathrm{e}{-19}$ / 0.93; G 86.9 / 2.18 \\
     M12 & mixture means shifted by $-1.2704$ twice
-       & \code{mixture_table} / auxiliary-mixture SV & U B G
        & U 1.2704 / $8.3\mathrm{e}{-5}$; B $q$ $2.5\mathrm{e}{-162}$ / 0.93; G 444 / 2.18 \\
     M13 & IG shape with $T_{\mathrm{pad}}$ instead of $T_{\mathrm{eff}}$
-       & \code{constant_conditional} / structural Constant & U G
        & U 1.64 / $3\mathrm{e}{-15}$; G 429 / 2.77 \\
     M14 & $a$-row regression on $+u_{<j}$ instead of $-u_{<j}$
-       & \code{contemp_conditional} / reduced Constant & U G
        & U 14.9 / $9\mathrm{e}{-15}$; G 325 / 3.03 \\
     M15 & ASIS map without the $\tilde h$ rescale
-       & \code{nc_step} / univariate SV & U B G
        & U 0.457 / $6\mathrm{e}{-17}$; B $q$ $1.8\mathrm{e}{-14}$ / 1.0; G 50.5 / 2.34 \\
     M16 & offset $c = 0.1$ at $\lambda \approx 0.01$, approximate sampler
-       & configuration / univariate SV & G & G 264 / 1.99 \\
-    M17 & Mode~I SOC/SUR rows weighted by the current $1/\lambda_i$, not the fixed $1/\bar\sigma_i^2$
-       & \code{linear_conditional} / structural Constant + dummies & U G
+       & G 264 / 1.99 \\
+    M17 & Mode~I dummy-row weight $1/\lambda_i$, not $1/\bar\sigma_i^2$
        & U 0.060 / $2.4\mathrm{e}{-15}$; G 23.1 / 1.94$^{b}$ \\
     M18 & SOC/SUR rows dropped from the CCCM $\Pi$ step
-       & \code{cccm_core} / reduced Constant + dummies & U G
        & U 0.405 / $2.9\mathrm{e}{-14}$; G 99.7 / 2.61 \\
     \bottomrule
   \end{tabular}
@@ -428,45 +302,35 @@ knowledge'' wording.}
 \end{table}
 
 The suite taught five lessons.
-\emph{(1) Identity tests and joint tests are both needed.} The four mutants without a U check, M2,
-M3, M5 and M16, are the non-local errors: a step order (M2, the indicator placement of the original
-algorithm of \citet{primiceri2005time}, corrected by \citet{delnegro2015time}), a simulator that draws fresh latents (M3), a prior mismatch
-between sampler and model (M5) and a model approximation (M16). Every conditional-formula error in the
-suite (M1, M4, M6--M15, M17, M18) is caught by a deterministic identity or closed form at one joint
-draw. % M3 = Geweke's "error 2" per NOTES B.7 / N06: verify the numbering in geweke2004getting before attributing it (TODO 15). [V] mutants.py _ALL (u_check=None: M2 l.771-773, M3 l.774-776, M5 l.780-782, M16 l.815-818); whether an identity could detect M5 is untested (dossier 04 §17 item 1)
+\emph{(1) Identity tests and joint tests are both needed.} The four mutants without a U check are
+the non-local errors: a step order (M2, the indicator placement of \citet{primiceri2005time}, corrected by
+\citet{delnegro2015time}), a simulator that draws fresh
+latents (M3), a sampler--model prior mismatch (M5) and a model approximation (M16); every
+conditional-formula error is caught by an identity or closed form at one joint draw. % M3 = Geweke's "error 2" per NOTES B.7 / N06: verify the numbering in geweke2004getting before attributing it (TODO 15). [V] mutants.py _ALL (u_check=None: M2 l.771-773, M3 l.774-776, M5 l.780-782, M16 l.815-818); conditional-formula errors = M1, M4, M6-M15, M17, M18; whether an identity could detect M5 is untested (dossier 04 §17 item 1)
 \emph{(2) Exactness changes what counts as a bug.} Exact-mode SV is exact for any mixture table and
-indicator law, because the correction \eqref{eq:w} uses the same table; M11 and M12 are bugs only of
-the auxiliary-mixture sampler. The uncorrected move M7 is invisible with the 10-component table at
-our test sizes and caught once a one-component table is injected in mutant and control alike. The general device:
+indicator law, because the correction \eqref{eq:w} uses the same table, so M11 and M12 are bugs only
+of the auxiliary-mixture sampler, and the uncorrected move M7, invisible with the 10-component table
+at our test sizes, is caught once a one-component table is injected in mutant and control alike:
 degrade an approximation on purpose to test its exact correction. % [V] tests/mcmc/blocks/test_sv_core.py::test_block_geweke_exact_mode_with_coarse_mixture; mutants.py docstring l.32-44; NOTES B.3
-\emph{(3) The log-likelihood is a test quantity.} Block SBC catches M1, the CCM-2019 step, through
-the rank of the exact log-likelihood, while one-block invariance of the whole CCCM scan did not in
-a recorded run that we have not repeated ($q = 0.29$); this is consistent with \citet{modrak2025simulation} on how test quantities shape
-sensitivity. % [V] block SBC catch; [R] whole-scan q 0.29 (mutants.py EVIDENCE["M1"], not re-run; NOTES B.4)
-\emph{(4) Moves must preserve the measure.} M6 takes $|\sigma|$ without flipping $\tilde h$, and
-both U and G catch it; only the joint fold
+\emph{(3) The log-likelihood is a test quantity.} Block SBC catches M1 through the rank of the
+exact log-likelihood; one-block invariance of the whole CCCM scan did not, in a recorded run not
+repeated here ($q = 0.29$), consistent with \citet{modrak2025simulation} on how test quantities
+shape sensitivity. % [V] block SBC catch; [R] whole-scan q 0.29 (mutants.py EVIDENCE["M1"], not re-run; NOTES B.4)
+\emph{(4) Moves must preserve the measure.} Only the joint fold
 $(\sigma, \tilde h) \mapsto (-\sigma, -\tilde h)$ leaves the non-centred posterior invariant
-\citep{fruhwirth2010stochastic}. % [V] tests/mcmc/blocks/test_sv_core.py::test_fold_is_measure_preserving_map; mutation suite (M6). Policy: no package named (OUTLINE §8.11 item 4; TODO 13)
-\emph{(5) Wrong dummy-row weights are loud:} $|z|$ 23.1 for M17 and 99.7 for M18, against controls
-of 1.94 (dense eigen path) and 2.61. % [V] mutation suite (M17, M18); NOTES D.15
+\citep{fruhwirth2010stochastic}; taking $|\sigma|$ alone (M6) is caught by U and G. % [V] tests/mcmc/blocks/test_sv_core.py::test_fold_is_measure_preserving_map; mutation suite (M6). Policy: no package named (OUTLINE §8.11 item 4; TODO 13)
+\emph{(5) Wrong dummy-row weights are loud} (M17 and M18 in \cref{tab:Tab7}). % [V] mutation suite (M17, M18); NOTES D.15
 
 \subsection{Runtime convergence diagnostics and the gate}\label{sec:validation-convergence}
 
-The convergence flag that the gate of \cref{sec:eval-verdict} reads is computed for every
-fit, with split $\hat R$ taken as the larger of its bulk and folded versions. % [V] src/rai_bvar/engines/mcmc/monitor.py (converged); src/rai_bvar/settings.py l.75-88; tests/mcmc/diagnostics/test_monitor.py
-At $n = 20$ the primary sets hold 41 (Constant), 101 (SV), 61 (random-walk SV) and 101 (SV with
-outliers and $t$) quantities; secondary sets never gate. % [V] tests/mcmc/diagnostics/test_monitor.py::test_monitored_set_sizes_at_n20
-The estimators follow \citet{geyer1992practical} and \citet{vehtari2021rank}; the NumPy implementation is tested against hard-coded ArviZ values
-\citep{kumar2019arviz} at rtol $10^{-10}$ and against AR(1) chains with known autocorrelation times. % [V] tests/mcmc/diagnostics/test_diagnostics_ext.py::test_matches_arviz, ::test_ar1_known_autocorrelation_times
+The convergence flag that the gate of \cref{sec:eval-verdict} reads is computed for every fit from
+rank-normalised split $\hat R$, the larger of its bulk and folded versions, and the bulk ESS
+\citep{geyer1992practical,vehtari2021rank} of a primary set of quantities. % [V] src/rai_bvar/engines/mcmc/monitor.py (converged; docstring "for q in primary: R-hat(q) < rhat_max and bulk ESS(q) > ess_min"); src/rai_bvar/settings.py l.75-88; tests/mcmc/diagnostics/test_monitor.py
+The secondary sets, which include the reduced-form intercepts, are reported but never gate (set
+sizes in \cref{app:diagnostics}). % [V] tests/mcmc/diagnostics/test_monitor.py::test_monitored_set_sizes_at_n20 (primary sets at n = 20: 41 Constant, 101 SV, 61 RW SV, 101 SV-outliers-t; stated in App. D app:diagnostics, appendix.tex l.1389-1391, so deleted here); src/rai_bvar/engines/mcmc/monitor.py docstring l.9-11 (secondary: a_ij, h_{i,1}, h_{i,ceil(T/2)}, the reduced-form intercepts B_{0,i}, log p_i, nu_i, the log prior); ArviZ and AR(1) tests of the estimators: App. D (tests/mcmc/diagnostics/test_diagnostics_ext.py::test_matches_arviz, ::test_ar1_known_autocorrelation_times)
 The gate is strict for SV: a pilot study predicted that SV fits at the default budget would
 routinely fail through $\phi$ and $\sigma$, % [R] docs/phase2/09_pilot.md §3.3
 the production benchmark ($4 \times 10{,}000$ draws) has \code{converged = False} in all six runs, % [R] tests/bench/baseline.json summary.converged
 and in the first full Clark--Ravazzolo run (four chains of 5000 draws) the SV arms converged at
 \fullrun{37--68\%} of the main-stage origins and SV(rw) at \fullrun{57--82\%} across orderings
-(the acceptance run is in \cref{sec:replication}). % [FULL] benchmarks/reports/clark_ravazzolo.md (551f181): SV 37%, SV(rw,t10) 57%, AR-SV(0.9) 62%, SV(rw) 68% of 106 origins; SV(rw) 57-82% across the 24 orderings
-
-\subsection{Cost}\label{sec:validation-cost}
-
-On one Apple M5 Max with a cold compilation cache and other jobs running, G-small for all PR
-compositions takes about 95--100~s, the mutation suite 177--182~s and the PR fast suite about
-1,000~s. These are wall-clock times under load, not budgets. % [V] reproduced at 62d15f6 by dossier 04 §3.3 and its fact-check (94.6/99.66 s; 181.85/177.40 s; 1,003/1,006.9 s) [REL: re-time on the release commit]
+(acceptance run: \cref{sec:replication}). % [FULL] benchmarks/reports/clark_ravazzolo.md (551f181): SV 37%, SV(rw,t10) 57%, AR-SV(0.9) 62%, SV(rw) 68% of 106 origins; SV(rw) 57-82% across the 24 orderings

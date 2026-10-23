@@ -4,59 +4,50 @@
 
 A model comparison is only as credible as its weakest link: the sampler, convergence at every
 origin, the Monte Carlo error of the score, the variable ordering, the validity of the test, and
-choices made after the scores were seen. \pkg{rai-bvar} makes each of these links checkable, and
-the preceding sections show the evidence for each. The econometrics is not new; the contribution is
-the integration, the contracts between the components, and the evidence, with its measured power
-and its stated gaps, that the samplers target the intended posteriors. For an applied forecaster this means that a BVAR is composed from a
-mean, a volatility and a prior component, fitted by whichever engine the composition requires,
-scored through one predictive contract, and compared by a verdict engine that credits a gain only
-when the two models differ along exactly one axis, so that a volatility gain is never credited to
-the mean or the prior, and that withholds a verdict which the Monte Carlo error or the convergence
-of the fits cannot support. The validation code behind that evidence ships with the library. % [V] src/rai_bvar/validation/ (part of the package; dossier 01 §2, commitment 4)
-In the pre-registered replication of \citet{clark2015macroeconomic}, the outcome of the acceptance
-run, criterion by criterion, is \acc{criteria[*].met}. \todo{One clause stating which criteria the
+choices made after the scores were seen. \pkg{rai-bvar} makes each of these links checkable. The
+econometrics is not new; the contribution is the integration, the contracts between the components,
+and the evidence, with its measured power and its stated gaps, that the samplers target the intended
+posteriors. The validation code behind that evidence ships with the library. % [V] src/rai_bvar/validation/ (part of the package; dossier 01 §2, commitment 4)
+In the pre-registered replication of \citet{clark2015macroeconomic}, the acceptance run's outcome
+by criterion is \acc{criteria[*].met}. \todo{One clause stating which criteria the
 acceptance run met and, if any failed, which, from \code{criteria[*].met}; no further
 outcome-dependent claim.}
 
 \paragraph{A checklist.}
-The lessons of building and validating the package, for forecasters and for implementers of the
-same algorithms, are these.
-\begin{enumerate}
-  \item Write every kernel as a pure function of injected noise, and expose each exact draw's
-    conditional and each Metropolis--Hastings step's log acceptance ratio
-    (\cref{sec:arch-mcmc}).
-  \item Write the reference prior samplers, simulators and joint densities independently of the
-    kernels, and enforce the separation with an import test (\cref{sec:validation-harness}).
+Lessons for forecasters and for implementers of the same algorithms:
+\begin{enumerate}[leftmargin=*,itemsep=2pt,topsep=4pt]% as the list of Section 4
+  \item Write every kernel as a pure function of injected noise, exposing each exact draw's
+    conditional and each Metropolis--Hastings log acceptance ratio (\cref{sec:arch-mcmc}).
+  \item Write the reference samplers, simulators and joint densities independently of the kernels,
+    and enforce the separation with an import test (\cref{sec:validation-harness}).
     % [V] tests/validation/test_log_joint.py::test_references_never_import_kernels
-  \item Check an identity at a joint draw for every conditional and every Metropolis--Hastings step;
-    run prior-started Geweke chains and SBC with data-dependent test quantities, including the exact
-    log-likelihood (\cref{sec:validation}).
-  \item Measure the power of the suite with injected bugs, among them errors of published
-    samplers, and degrade an approximation on purpose to test its exact correction
+  \item Check an identity at a joint draw for each conditional and Metropolis--Hastings step; run
+    prior-started Geweke chains and SBC on data-dependent quantities such as the log-likelihood
+    (\cref{sec:validation}).
+  \item Measure the suite's power with injected bugs, among them errors of published samplers,
+    and degrade an approximation on purpose to test its exact correction
     (\cref{sec:validation-mutation}).
     % [V] tests/mutation/mutants.py: M1 (CCM-2019 triangular step), M2 (Primiceri 2005 Alg. 1 indicator order); M7 with the COARSE1 table
-  \item Treat numerical failures as values: never add jitter, and fix the kernel rather than the
-    test prior (\cref{sec:robustness}).
-  \item Check convergence at every origin and gate verdicts on it, and size the MCMC budget with fit-only
+  \item Treat numerical failures as values: never add jitter; fix the kernel, not the test prior
+    (\cref{sec:robustness}).
+  \item Gate verdicts on convergence at every origin, and size the MCMC budget with fit-only
     diagnostics before any score exists (\cref{sec:eval-verdict,sec:replication-prereg}).
-  \item Do not read the delta-method MCSE of a Rao--Blackwellised log score as a bound on its tail
-    error; inspect the effective number of weights \citep{kish1965survey}, and at $h > 1$ integrate
-    the simulated path out and use enough forecast draws (\cref{sec:eval-tail}).
+  \item Do not read the delta-method MCSE of an RB log score as a bound on its tail error: inspect
+    the effective number of weights \citep{kish1965survey}; at $h > 1$, integrate the path out and
+    use enough forecast draws (\cref{sec:eval-tail}).
   \item Report RB and Gaussian-approximation scores side by side, the ordering spread next to the
     gain, and an order-invariant negative control (\cref{sec:replication-design,sec:replication-results}).
   \item Treat Diebold--Mariano $p$-values under expanding windows as descriptive, and state which
     route produced each verdict (\cref{sec:eval-tests}).
-  \item Pre-register settings as code, say how blind the pre-registration is, and make the absence
-    of look-ahead a run-time check (\cref{sec:replication-data,sec:replication-prereg}).
+  \item Pre-register settings as code, say how blind the pre-registration is, and check the absence
+    of look-ahead at run time (\cref{sec:replication-data,sec:replication-prereg}).
 \end{enumerate}
 
 \paragraph{Roadmap and availability.}
-The roadmap continues by phase: global-local priors, common stochastic volatility and conditional
-forecasts; non-linear means; time-varying parameters, regime switching and factor or
-order-invariant volatility; and identification beyond the recursive scheme. % [R] SPEC.md §13
-We make no promise about results. The next priority is the size and power study of the verdict
-engine on simulated data (\cref{sec:limitations}), followed by the Phase~3 prior axis, so
-that a two-axis ablation can be shown. \pkg{rai-bvar} is licensed under Apache-2.0.
+The roadmap continues by phase (\cref{sec:limitations}); we make no promise about results. % [R] SPEC.md §13
+The next priority is the size and power study of the verdict engine on simulated data, followed by
+the Phase~3 prior axis, so that a two-axis ablation can be shown. \pkg{rai-bvar} is licensed under
+Apache-2.0.
 % [V] LICENSE; pyproject.toml (license = "Apache-2.0")
 \todo{TODO 20: repository URL, release tag and commit hash, Zenodo DOI for the release and the
 replication outputs, and the single command that rebuilds every table and figure

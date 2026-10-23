@@ -11,12 +11,14 @@ fact-checked evidence is in `dossiers/`. What only the author can decide, run or
 | `sections/00_abstract.tex` ... `13_conclusion.tex`, `appendix.tex` | one file per section; appendices A-J |
 | `refs.bib` | bibliography (natbib, `plainnat`); cite only keys in this file |
 | `figures/make_*.py`, `figures/*.pdf` | figure scripts and their output; `figures/data/` holds local inputs |
+| `figures/tab_*.py`, `figures/tables/*.tex` | table generators (`tab_common.py` is their shared helper) and the table bodies they write, `\input` by the appendix |
 | `figures/acceptance_check.py` | the test that a report is the registered acceptance run |
 | `code/ex_a.py`, `code/ex_b.py`, `code/out/` | Listings 1 and 2 and their captured output (`code/run_examples.py`) |
 | `fill_acceptance.py` | fills the `\acc{}` placeholders from the acceptance JSON (below) |
 | `collect_todos.py` | regenerates `AUTHOR_TODO.md` |
 | `texmarks.py` | shared parser for the draft marks |
 | `build.sh`, `Makefile` | build and checks |
+| `make_arxiv.sh` | writes `arxiv.tar.gz` for arXiv (`make arxiv`) |
 
 ## Building
 
@@ -24,6 +26,8 @@ fact-checked evidence is in `dossiers/`. What only the author can decide, run or
 cd docs/paper
 make pdf                 # tectonic + log checks (build.sh)
 make                     # regenerate the figures first, then the PDF
+make tables              # regenerate the appendix table bodies (figures/tables/*.tex)
+make arxiv               # build, then write arxiv.tar.gz (ARXIV_TEST=1: also compile it in a temp dir)
 tectonic main.tex --keep-intermediates --keep-logs    # the bare build
 STRICT=1 ./build.sh      # also fail on undefined references and duplicate labels
 ```
@@ -136,10 +140,29 @@ with `PYTHONDONTWRITEBYTECODE=1`, and write `figures/<name>.pdf`.
 Like `fill_acceptance.py`, the acceptance figures refuse a report that is not the registered run.
 They dry-run on another report only with `--allow-non-acceptance --outdir DIR`.
 
-None of the table generators named in captions (`tab_*.py`) exists yet. The appendix tables that
-include `figures/tab_*.tex` print a `\todo` until they do. A generated file must hold only the
-`tabular`; the float, caption and label stay in `sections/appendix.tex`. The main-text tables
-(Tab1, Tab2, Tab5, Tab7, Tab12, Tab13) are written inline.
+## Tables
+
+`make tables` runs the 14 generators `figures/tab_*.py` (main repository environment, as for the
+figures); each writes the body of one appendix float to `figures/tables/<stem>.tex`, which
+`sections/appendix.tex` reads with `\input`. A generated file holds only the `tabular` and its
+notes; the float, caption, label and evidence tags stay in the appendix. Cells that wait for data
+are marks: `\acc{key}` (acceptance run; filled by `make fill`, which scans `figures/tables/` as well
+as `sections/`) and a red `[REL]` (release validation records, OUTLINE TODO 7), which stops a
+`\draftmarksfalse` build like `\acc` and `\todo`. The other tables (Tab1, Tab7, Tab13 in the main
+text; Tab2, Tab5 and Tab12, moved to Appendices C, D and F; TabA1, TabC1, TabF2, TabF3, TabG1 and
+TabH1) are typed into the sources; the generators named in their comments are not written (TODO
+20).
+
+## arXiv package
+
+`make arxiv` rebuilds the PDF (so `main.bbl` is current) and runs `make_arxiv.sh`, which writes
+`arxiv.tar.gz` with `main.tex`, `main.bbl`, `refs.bib`, the section files, the figure PDFs that the
+sources include, the table bodies in `figures/tables/`, `acceptance_values.tex` if it exists, and
+the four files that the listings print (`code/ex_a.py`, `code/ex_b.py`, `code/out/ex_a.txt`,
+`code/out/ex_b.txt`). No scripts are shipped otherwise, and no data. `./make_arxiv.sh --test` (or
+`make arxiv ARXIV_TEST=1`) also compiles the unpacked tarball in a clean temporary directory with
+tectonic. arXiv itself compiles with pdfLaTeX, i.e. the untested pdfTeX branch of `main.tex`; set
+`\draftmarksfalse` before submitting.
 
 Listings 1 and 2: `python3 code/run_examples.py` runs `code/ex_a.py` and `code/ex_b.py` in the main
 repository and rewrites `code/out/` (stdout, stderr, `env.json`). Re-run it on the release commit

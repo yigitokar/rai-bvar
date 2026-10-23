@@ -4,7 +4,7 @@ Shared by fill_acceptance.py and collect_todos.py. Comments are stripped first (
 not a comment), and arguments are read with balanced braces, so a mark may span several lines.
 
     from texmarks import find_marks
-    for m in find_marks("todo"):           # every \\todo in sections/*.tex (and main.tex)
+    for m in find_marks("todo"):           # every \\todo in sections/*.tex and figures/tables/*.tex
         print(m.path, m.line, m.text)
 """
 
@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SOURCES = [*sorted((HERE / "sections").glob("*.tex"))]
+# the section files and the generated table bodies (figures/tables/, written by `make tables`), whose
+# acceptance cells are \acc{} marks like those of the sections
+SOURCES = [*sorted((HERE / "sections").glob("*.tex")), *sorted((HERE / "figures" / "tables").glob("*.tex"))]
 
 
 @dataclass(frozen=True)
@@ -75,7 +77,7 @@ def _arg(src: str, start: int) -> tuple[str, int] | None:
 
 
 def find_marks(name: str, paths: list[Path] | None = None) -> list[Mark]:
-    """Every \\<name>{...} in the given files (default: sections/*.tex), in file order.
+    """Every \\<name>{...} in the given files (default: SOURCES), in file order.
 
     \\string\\<name>{} (main.tex's error messages) and the macro definitions themselves are skipped.
     """

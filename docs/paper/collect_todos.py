@@ -28,54 +28,79 @@ STATUS = {
        "`docs/paper/NOTES.md` and `docs/phase2/DESIGN.md` to 8000. NOTES 8b there still calls "
        "-19.1 \"exact given those draws\" (the paper never does). The paper-worktree copy "
        "`docs/paper/NOTES.md` is still the 62d15f6 file without the D-34 addendum.",
-    2: "Open. No `clark_ravazzolo_acceptance.json` in the main repository's `benchmarks/reports/` "
-       "at assembly time. When it is committed, run `python3 fill_acceptance.py` (README.md).",
-    3: "Partly done after the acceptance commit: 7f410dc (2026-10-23 14:44 EDT) registers row 18 "
-       "`reduced_sv_rw` (G-small per PR, G-full and SBC weekly with a per-row t_max of 400) and adds a "
-       "`reduced-SV(rw)` contract fit; the SV(rw, t) variant is not covered. The paper's coverage "
-       "statements are pinned to c823d20 (the acceptance run's commit) and stay true; the seven "
-       "TODO-3 marks in the sources say what to change if the release commit includes 7f410dc.",
-    20: "The paper's `Makefile` exists (`docs/paper/Makefile`: `make`, `make figures`, ...); the table "
-        "generators `tab_*.py` named in the captions do not.",
+    2: "Partly done since assembly: the main repository commits `benchmarks/reports/"
+       "clark_ravazzolo_acceptance.{json,md,log}` in 65dd212 (2026-10-23 15:47 EDT; on `main` "
+       "through the merge 08e1eda). The paper has not been filled: every `\\acc{}` is still a "
+       "placeholder (`make fill`, then re-read each sentence; README.md). Whether the committed "
+       "`.log` carries the UTC start time that the TODO 2 marks ask for was not checked.",
+    3: "Done for row 18 at integration (2026-10-23): 7f410dc registers row 18 `reduced_sv_rw` "
+       "(G-small per PR, G-full and SBC weekly with a per-row t_max of 400, the N(-1, 4) h0 variant "
+       "test), adds a `reduced-SV(rw)` contract fit and fits the composition through `BVAR.fit` "
+       "(tests/unit/test_fit_mcmc_api.py). The paper states coverage at 7f410dc (23 composition rows, "
+       "13 MCMC contract compositions; Sections 1, 3, 6, 8.10, 11, 12; App. C and D, app:row18). "
+       "Open: the SV(rw, t) variant has no row or contract fit (the remaining TODO 3 marks), and the "
+       "row-18 numbers are one run each on a loaded machine (re-record on the release commit, TODO 7).",
+    20: "The paper's `Makefile` has `make tables` (the 14 appendix table generators `figures/tab_*.py` "
+        "-> `figures/tables/`) and `make arxiv` (`make_arxiv.sh`). The 11 generators named only in "
+        "comments of typed tables (`tab_components`, `tab_resolution`, ...) are not written (the "
+        "TODO 20 mark in App. G). OUTLINE section 14 names `figures/out/` as the output directory; "
+        "the generators write `figures/tables/`.",
     31: "Not needed under tectonic (XeTeX, TU encoding prints < and >); `main.tex` loads T1 only "
-        "under pdfTeX, which is untested here.",
+        "under pdfTeX, which is untested here. arXiv compiles with pdfLaTeX, so test that branch "
+        "before submitting (`make arxiv` packages the sources; its --test build uses tectonic).",
 }
 
 ASSEMBLY_NOTES = r"""
-These came up while assembling the draft and are not (or not only) `\todo` marks in the text.
+These came up while assembling and integrating the draft and are not (or not only) `\todo` marks in
+the text.
 
-1. **Length.** The main text runs to about 47 pages in the draft build (about 45 with the `\todo`
-   boxes removed and numbers in place of the `\acc` placeholders) against the outline's 29.5;
-   the appendices run to about 36 pages against 20-25. Per section (draft build): introduction
-   3.9 (budget 2.5), related 1.5 (1), framework 4.6 (2.5), architecture 3.3 (2.5), samplers 3.4
-   (2.5), evaluation 5.5 (3), walk-through 4.7 (2), validation 7.5 (4.5), robustness 2.0 (1.5),
-   performance 0.7 (0.75), replication 6.4 (4), limitations 1.9 (1.75), conclusion 1.3 (1).
-   Cut candidates named by the section writers: Tab5 to App. D (risk 23); the two listing outputs of
-   Section 7 to an appendix; Fig3 to App. C; the "Later" rows of Tab1 into its caption; the Mode I
-   display and the Mode II / iw_equivalent detail of Section 3 to App. B; the eight-citation
-   cluster in C5 and the paper map of Section 1; Section 9.7 into Section 12; App. C.9-C.12 and
-   TabF8 to a supplement.
-2. **Table generators.** None of the `tab_*.py` scripts named in captions and comments exists;
-   the 14 `\InputIfFileExists{figures/tab_*.tex}` tables of the appendices print a `\todo` until
-   they do. Each generated file must contain only a `tabular` (the float, caption and label are in
-   `sections/appendix.tex`).
-3. **FigE1 (TODO 23).** The figure, computed from committed code, shows the old assembled RW path
-   returning badly wrong pivots and h levels at sigma <= 1e-8 without failing. Section 9 withholds
-   that observation until a committed test exists. Decide: keep and state it, or crop the figure.
-4. **Validation records of unknown provenance.** `docs/paper/figures/data/validation_record/`
+1. **Length (after integration, 2026-10-23).** The main text (title page to the end of Section 13)
+   is 31.8 pages in the draft build and 31.1 with the `\todo` boxes removed and `+0.000` in place
+   of the `\acc` placeholders; Section 13 ends on page 32 either way. Per section (draft build,
+   heading to heading): introduction 2.5 (budget 2.5), related 1.0 (1), framework 2.4 (2.5),
+   architecture 3.3 (2.5; Table 1 of Section 3 and Fig. 1 fall in its span), samplers 2.5 (2.5),
+   evaluation 3.1 (3), walk-through 2.0 (2), validation 4.9 (4.5), robustness 1.7 (1.5),
+   performance 0.7 (0.75), replication 4.0 (4), limitations 2.0 (1.75), conclusion 1.0 (1). To
+   get under 32 pages the integration moved four main-text floats to the appendices: Tab2 (engine
+   resolution) to App. C (app:resolution, with a prose summary in Section 4.2), Fig3 (the verdict
+   flow) to App. C (app:scores-tests; the boxed rule stays in Section 6.8), the compact Algorithm 2
+   of Section 5.4 into Algorithm C.7 (alg:C-sv, which carries every step and the label alg:sv), and
+   Tab12 (the six criteria) to App. F (app:cr-criteria; Section 11 states the outcome with
+   `\acc{criteria[*].met}`). Tab2, Fig3 and Tab12 are main-text floats in OUTLINE section 14.1;
+   revert a move if the venue allows more pages.
+2. **Appendix length.** The appendices run to 56.5 pages (A 2.4, B 6.7, C 8.8, D 10.8, E 5.0,
+   F 14.2, G 6.6, H 1.0, I 0.5, J 0.4) against the outline's 20-25, plus 8.5 pages of
+   bibliography (97 pages in all). Candidates for a separate supplement: the walk-through scripts
+   and outputs (App. G, app:walk-output, about 4 pages), TabF8 and the pre-registration quote
+   (App. F), and the runner algorithms C.9-C.11.
+3. **Table generators.** The 14 generators `figures/tab_*.py` write `figures/tables/*.tex`, which
+   the appendix `\input`s (`make tables`). Cells that wait for data are `\acc{}` (acceptance run;
+   `fill_acceptance.py` now scans `figures/tables/` too) or a red `[REL]` mark (release validation
+   records, TODO 7), which stops a `\draftmarksfalse` build. TabD1, TabD3 and TabG2 carry red
+   "interim" notes.
+4. **FigE1 (TODO 23), decided.** The figure stays. Section 9 (F2) states that before the fix the
+   old random-walk path could return a finite but wrong answer at a tiny positive pivot, with no
+   failure reported, as a recomputation at the synthetic test state, with the figure script as
+   evidence; App. E (app:float64-oldpath) gives the grid numbers. Still open: a committed test of
+   the old-path values (TODO 23) and whether pre-fix runs were affected (TODO 29).
+5. **Validation records of unknown provenance.** `docs/paper/figures/data/validation_record/`
    (untracked) feeds FigD1 and FigD2. It carries no commit or machine field, holds no G-small rows,
    and its G-full row of `reduced_sv` failed with non-finite test functions (seed 20261023): either
    the float64 failure that 3d3f51b fixed (a stale record) or a regression, and the record cannot
    say which. Rerun G-full `reduced_sv` on the release commit before anything else. Both figures
    carry a draft-data footer; replace them with the release records (TODO 7).
-5. **Convergence-diagnostic records.** `docs/paper/figures/data/convergence_diagnostic/` (untracked:
+6. **Convergence-diagnostic records.** `docs/paper/figures/data/convergence_diagnostic/` (untracked:
    a script and 520 + 424 fit records) reproduces the pre-registration's budget numbers; commit it
    to the main repository (TODO 4) or keep TabF6 at [PREREG].
-6. **Abstract length.** About 1840 characters with a short placeholder (arXiv limit 1920). Fill
+7. **Abstract length.** About 1840 characters with a short placeholder (arXiv limit 1920). Fill
    `criteria[*].met` with a short phrase.
-7. **Sentences built on filled values.** `fill_acceptance.py` prints values, not prose. Re-read every
+8. **Sentences built on filled values.** `fill_acceptance.py` prints values, not prose. Re-read every
    sentence with an `\acc` after filling (Sections 1, 11, 12, 13, App. F; the abstract), and write
    the interpretation sentences that the `\todo` marks in Section 11 ask for.
+9. **arXiv package.** `make arxiv` writes `arxiv.tar.gz` (main.tex, main.bbl, refs.bib, the
+   sections, the figure PDFs, `figures/tables/`, and the four listing inputs in `code/`); its
+   `--test` build compiles it with tectonic in a clean directory. arXiv uses pdfLaTeX, whose branch
+   of `main.tex` is untested (STATUS of TODO 31). Set `\draftmarksfalse` first.
 """
 
 

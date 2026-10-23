@@ -12,7 +12,11 @@
 #                     commit or has uncommitted changes)
 #   make fill         write acceptance_values.tex from the acceptance report (ACC=...), so that
 #                     \acc{} prints numbers (refuses a report that is not the registered run)
+#   make tables       every table generator figures/tab_*.py -> figures/tables/tab_*.tex (the
+#                     appendix \input's them; [REL]/[ACC] cells stay marks until the data exist)
 #   make todos        regenerate AUTHOR_TODO.md from the \todo marks and OUTLINE.md section 16
+#   make arxiv        build the PDF, then write arxiv.tar.gz (make_arxiv.sh; ARXIV_TEST=1 also
+#                     compiles the tarball in a clean temporary directory)
 #   make clean        remove LaTeX intermediates
 #
 # Figure scripts run with the main repository's environment and import its code read-only
@@ -37,7 +41,7 @@ NOW := fig_architecture fig_verdict_flow fig_mutation_heatmap fig_geweke_dots \
 ACC_REPORT := fig_cr_orderings fig_cr_convergence
 ACC_EXPORT := fig_cr_per_origin fig_cr_cumulative
 
-.PHONY: all pdf check figures acc-figures per-origin fill todos clean
+.PHONY: all pdf check figures tables acc-figures per-origin fill todos arxiv clean
 
 all: figures pdf
 
@@ -54,6 +58,12 @@ figures:
 	  else $(PY) make_$$f.py || exit 1; fi; done
 	cd figures && for f in $(ACC_EXPORT); do $(PY) make_$$f.py || exit 1; done
 
+# table generators (tab_common.py is the shared helper, not a table)
+TABLES := $(filter-out tab_common,$(basename $(notdir $(wildcard figures/tab_*.py))))
+
+tables:
+	cd figures && for f in $(TABLES); do $(PY) $$f.py || exit 1; done
+
 acc-figures:
 	@test -f "$(ACC)" || { echo "no acceptance report at $(ACC)"; exit 1; }
 	cd figures && for f in $(ACC_REPORT); do $(PY) make_$$f.py --acc "$(ACC)" || exit 1; done
@@ -68,5 +78,8 @@ fill:
 todos:
 	python3 collect_todos.py
 
+arxiv: pdf
+	./make_arxiv.sh $(if $(ARXIV_TEST),--test,)
+
 clean:
-	rm -f main.aux main.bbl main.blg main.log main.out main.toc main.xdv main.lof main.lot
+	rm -f main.aux main.bbl main.blg main.log main.out main.toc main.xdv main.lof main.lot arxiv.tar.gz

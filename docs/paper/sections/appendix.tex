@@ -4,8 +4,9 @@
 %   [V] committed test/fixture, [R] recorded (source named), [TC] to check, [REL] re-record on
 %   the release commit, [ACC] acceptance JSON, [FULL] first full run (551f181), [PREREG] c823d20.
 % Line numbers into benchmarks/clark_ravazzolo.py are at c823d20; into src/ and dossiers at 62d15f6
-% unless stated. Script-generated tables are \InputIfFileExists'd from figures/<script stem>.tex
-% (OUTLINE section 14.2 stems); figures are figures/<script stem>.pdf.
+% unless stated. Script-generated table bodies are \input from figures/tables/<script stem>.tex,
+% written by figures/<script stem>.py (`make tables`; OUTLINE section 14.2 stems, which OUTLINE
+% places in figures/out/); figures are figures/<script stem>.pdf.
 % =====================================================================================
 
 \appendix
@@ -22,6 +23,8 @@
 \counterwithin{equation}{section}
 \makeatletter
 \@ifundefined{c@algorithm}{}{\counterwithin{algorithm}{section}}
+\@ifundefined{c@lstlisting}{}{\counterwithin{lstlisting}{section}%
+  \def\theHlstlisting{app.\thesection.\arabic{lstlisting}}}% unique hyperref anchors
 \makeatother
 
 % -------------------------------------------------------------------------------------
@@ -116,6 +119,78 @@ tcode & $y_t$ & Pathwise inverse for $x_{T+h}$ & History & Own-lag mean \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+% (moved from §3 in the page-budget pass; cited from §3 three times)
+\subsection{Prior options and defaults}\label{app:prior-details}
+
+This subsection records the options and defaults of the priors of \cref{sec:framework:priors,sec:framework:vol}
+that the main text leaves out.
+
+\emph{Scales under the COVID-19 scaling.}
+With the scaling of \citet{lenza2022estimate} (below), the default scales $\psi_j$ (residual variances of
+univariate AR($p$) regressions with a constant on the estimation window) are computed on the
+periods before $t^*$ when enough of them exist. % [V] src/rai_bvar/engines/analytic.py::_ar_residual_variances
+
+\emph{Dummy rows.}
+The default \code{soc_scope="persistent"} keeps differenced variables from being pulled towards a
+unit root. % [V] src/rai_bvar/priors/dummies.py (Rows); src/rai_bvar/engines/analytic.py (Conventions)
+\code{soc_scope="all"} restores the SOC rows of \citet{giannone2015prior} for every variable,
+including those with a zero own-lag prior mean. % [V] src/rai_bvar/priors/dummies.py (Rows); src/rai_bvar/engines/analytic.py (Conventions)
+
+\emph{The COVID-19 scaling.}
+The scale $s_t$ of \citet{lenza2022estimate} is 1 before the start period $t^*$, free in $t^*$ and the
+next two periods, and decays geometrically towards 1 afterwards; the log marginal likelihood gains
+the Jacobian $-n\sum_t \log s_t$. % [V] src/rai_bvar/data/outliers.py; tests/analytic/test_conjugate.py::test_lenza_primiceri_jacobian_by_the_heteroskedastic_chib_identity
+
+\emph{The hierarchy.}
+The hierarchy of \citet{giannone2015prior} is used with their default hyperpriors, plus a prior on
+$\alpha$, which \citet{giannone2015prior} fix at 2, used only when $\alpha$ is estimated. % [R] alpha fixed at 2 in GLP: GLPHyperpriors docstring, SPEC §4.4 Priors table. [V] src/rai_bvar/priors/hyperpriors.py (GLPHyperpriors)
+\code{hierarchy="eb"} maximises $\log p(Y \mid \vartheta) + \log p(\vartheta)$, and \code{"mh"} samples
+$\vartheta$ by random-walk Metropolis with $(B, \Sigma)$ drawn exactly given each $\vartheta$. % [V] src/rai_bvar/engines/analytic.py (module docstring); src/rai_bvar/priors/hyperpriors.py (GLPHyperpriors)
+With dummy rows, $p(Y \mid \vartheta)$ is the marginal likelihood of dummies and data divided by
+that of the dummies alone. % [V] tests/analytic/test_conjugate.py::test_log_ml_with_dummies_is_the_difference_of_two_marginal_likelihoods
+
+\emph{Empirical Bayes on the MCMC engine when $\kappa_c \neq 1$.}
+Hyperparameters are fixed during MCMC: at given values (\code{hierarchy="fixed"}) or, by default
+(\code{"eb"}), at the empirical-Bayes mode of the analytic conjugate twin, fitted at
+$\kappa_c = \kappa_a = 1$ on the same window. % [V] tests/analytic/test_eb_mcmc.py::test_eb_plug_in_equals_the_phase1_eb_mode_at_cross_1; src/rai_bvar/engines/mcmc/eb.py
+Two cases differ when $\kappa_c \neq 1$: in structural form the mode of the per-equation closed-form marginal likelihood of \citet{chan2022asymmetric},
+plus the same log hyperprior, is used instead, with $\kappa_c$ and $\kappa_a$ held fixed and the
+twin's mode as the starting point; in reduced form, where no closed form exists, the twin's mode is
+used and a note is recorded with the fit. % [V] tests/analytic/test_eb_mcmc.py::test_structural_cross_not_1_uses_eb_structural, ::test_reduced_cross_not_1_records_the_note_and_does_not_raise; src/rai_bvar/engines/mcmc/eb.py (module docstring, items 2-3); DESIGN D-12
+
+\emph{Options the MCMC engine rejects.}
+\code{hierarchy="mh"} and the COVID-19 scaling are rejected on MCMC compositions, where SV with
+outliers treats the 2020 observations; \cref{app:resolution} lists every construction-time
+rejection. % [V] tests/unit/test_api_resolution.py::test_metropolis_hastings_hierarchy_is_rejected_on_mcmc, ::test_lenza_primiceri_scaling_is_rejected_on_mcmc
+
+\emph{The unit-scale Student-$t$.}
+With \code{tails="t"} and \code{t_scale="unit"}, $\tau_{i,t} \sim \mathrm{IG}(\nu_i/2, \nu_i/2)$, the
+scale mixture of \citet{jacquier2004bayesian}, in place of the standardised default
+$\mathrm{IG}(\nu_i/2, (\nu_i - 2)/2)$ with $\mathrm{E}\,\tau_{i,t} = 1$. % [V] src/rai_bvar/components/specs.py (t_scale)
+
+\emph{Outliers.}
+The grid $o_{i,t} \in \{1, \dots, 20\}$ is the discretisation by \citet{carriero2024addressing} of a
+uniform outlier scale on $[2, 20]$. % [R] docs/phase2/03_sv_outliers_t.md §0 table (CCMM REStat §III.A "U(2,20)", online appendix II.iv fn. 8, code grid 1:20); [V] src/rai_bvar/components/specs.py (outlier_max=20)
+The Beta prior on the outlier probability $p_i$ of \code{SV(outliers=True)} encodes, by default, one
+outlier every 4 years over 10 prior years (every 10 years with $t$ errors). % [V] src/rai_bvar/priors/sv_arrays.py::outlier_beta; src/rai_bvar/components/specs.py (_default_outlier)
+
+% (moved from §7.1 in the page-budget pass; cited from §7.1)
+\subsection{Data input and the FRED loader}\label{app:data}
+
+\code{VARData.from_frame(raw, tcodes={...})} raises an error on gaps in the index, duplicate
+columns, infinite values, logs of non-positive values and missing values inside the sample;
+leading and trailing incomplete periods are trimmed, with a warning except for the leading periods
+that the transformations themselves consume.
+% [V] tests/unit/test_dataset.py::test_interior_missing_value_raises; dossier 02 §9.1; src/rai_bvar/data/dataset.py l.215-237 (_trim warns on leading periods only when first > the transforms' history length) at d58c9ef
+\code{realized(origin, h)} returns the future outcomes on the transformed scale.
+The \code{variables} argument of \code{rb.datasets.load} takes a named set or a list of series
+(the order given is the ordering), and \code{tcodes} takes \code{"rai"}, \code{"official"} or a
+mapping.
+The named variable sets (\code{"small"}, \code{"medium"}, \code{"large"}) contain only series
+published by U.S.\ federal agencies, and interior publication gaps are interpolated (linearly, in
+logs for logged series) with a warning that lists every filled period (\code{fill\_gaps=True}).
+% [V] src/rai_bvar/datasets/fred.py module docstring and load() (l.169-179) at d58c9ef; dossier 02 §9.5
 
 % -------------------------------------------------------------------------------------
 \section{Derivations}\label{app:derivations}
@@ -255,6 +330,18 @@ The implied reduced-form moments are reported by \code{fit.summary()}.
 % [V] tests/priors/test_structural_prior.py::test_leak_ratio_closed_form_formula_and_monte_carlo
 % [R] derivation: docs/phase2/05_structural_equation_sampler.md section 4.3 ("Closed form")
 
+% (moved from §3 in the page-budget pass; cited from §3)
+\subsection{Tests of the prior equivalences}\label{app:prior-tests}
+
+Besides the tests stated with \cref{app:niw-structural} (the Mode~II prior and its closed-form log
+marginal likelihood) and \cref{app:mode1} (the Mode~I moments), two committed tests check the
+equivalences of \cref{sec:framework:priors}: the analytic log marginal likelihood satisfies the Chib
+identity, and the $\Sigma$ implied by \code{iw_equivalent} passes Kolmogorov--Smirnov tests against
+$\mathrm{IW}(\operatorname{diag}\psi, n+2)$. % [V] tests/analytic/test_conjugate.py::test_log_ml_satisfies_the_chib_identity; tests/priors/test_structural_prior.py::test_iw_equivalent_sigma_is_inverse_wishart
+The Mode~II identity makes the analytic engine an exact posterior oracle for the Mode~II
+\code{Constant} compositions of the MCMC engine; the Mode~I and \code{iw_equivalent} tests check
+priors only (\cref{sec:validation}). % [V] tests/analytic/test_structural_nig.py::test_a1_log_ml_equals_phase1 (abs 1e-10, five A1_CASES); tests/priors/test_structural_prior.py::test_mode_i_matches_the_niw_moments_exactly_and_by_monte_carlo, ::test_mode_ii_prior_is_the_niw_prior (20,000 draws, min p > 1e-3)
+
 \subsection{The exact mixture correction and the single ASIS accept/reject}\label{app:exact-sv}
 
 Consider one equation with cleaned residuals $\tilde e_t$ (transitory scales removed), log-volatility
@@ -367,6 +454,26 @@ test asserts a gap of more than 5 nats and an MCSE above $0.5$, and that the int
 is exact.
 % [V] tests/unit/test_lpd_integrated.py::test_conditioned_estimator_misses_the_tail_that_the_integrated_one_gets
 % (assertions); [R] -35.2 / -22.3 / 1.0 are in that test's docstring
+
+% (moved from §6.4 in the page-budget pass; §6.4 cites app:mcse-bound for these checks and the scope)
+\emph{Further checks and scope.}
+The value $-19.1$ quoted in \cref{sec:eval-tail} for the replication's 2008Q2 cell is free of the
+path-conditioning error only; it is itself a Monte Carlo estimate over the same 1000 draws.
+% [R] main-repo docs/paper/NOTES.md 8b at d58c9ef (WP23 review); b9c66c0 commit message
+The commit message of b9c66c0 records an agreement of $1.8\times10^{-14}$ with the companion-form
+oracle (test tolerance $10^{-10}$).
+% [R] 1.8e-14 from the b9c66c0 commit message; [V] tests/unit/test_lpd_integrated.py::test_integrated_lpd_is_exact_for_a_single_parameter_draw (atol 1e-10)
+The estimator is equivariant to rescaling variables by $10^{\pm6}$, and on real MCMC fits each
+draw's density matches moments obtained by \code{jax.jacfwd} of the forecast core to $10^{-10}$.
+% [V] tests/unit/test_lpd_integrated.py::test_integrated_lpd_is_unit_equivariant; tests/mcmc/forecast/test_lpd_integrated_mcmc.py::test_integrated_moments_equal_the_jacobian_oracle
+The estimator is opt-in; the SPEC default is unchanged.
+It needs each draw's lag matrices, which MCMC forecasts of linear or zero means carry
+(\code{lag\_coefs}, \cref{tab:TabC1}); analytic, benchmark and ordering-pooled forecasts raise at
+$h > 1$.
+% [V] tests/unit/test_lpd_integrated.py::test_integrated_errors; tests/unit/test_scores_lpd_method.py::test_integrated_needs_lag_coefs_beyond_horizon_one
+Combining the estimator with \code{rb\_transitory} raises at $h > 1$ because it would require
+integrating the transitory scales of $T+1, \dots, T+h-1$ jointly.
+% [V] tests/unit/test_lpd_integrated.py::test_integrated_errors
 
 \emph{A bound on the delta-method MCSE.}
 The library reports the delta-method MCSE $\mathrm{sd}(w)/(\sqrt{S}\,\bar w)$ with $w_s = \exp(\log
@@ -539,6 +646,8 @@ p(\tilde y_2 \mid y_1, \pi^{(1)}) = \mathrm{N}\big(\tilde y_2;\; X(a_{21}\pi^{(1
 XV_2X' + \Lambda_2\big),
 \end{equation}
 which depends on $\pi^{(1)}$ whenever $a_{21} \ne 0$.
+In general the triangular step draws $\pi^{(j)}$ from equation $j$ of the triangular system alone,
+and its conditional is correct only for the last equation. % [V] tests/mcmc/blocks/test_cccm.py::test_ccm2019_regression_guard; tests/mutation/mutants.py (M1) (moved from §5.3)
 The error is thus a prior effect: it is large with tight Minnesota priors and short samples and
 fades as the data dominate.
 Averaged over simulated datasets, per-dataset shifts of the posterior mean in both directions can
@@ -644,6 +753,55 @@ predictive contract that the forecast core (\cref{alg:C-forecast}) fills.
 % [V] dossier 03 sections 5-11 (pseudocode read from the code at 62d15f6); the RW path and the
 % QR a-row draw are at 62d15f6 and unchanged at c823d20 except D-34 plumbing in forecast.py
 
+% (moved from §4.2 in the page-budget pass; cited from §4.2)
+\subsection{Construction-time resolution}\label{app:resolution}
+
+The constructor of \code{BVAR} resolves the \code{"auto"} defaults (a Minnesota form left at
+\code{"auto"} becomes \code{"conjugate"} with a \code{Constant} prior left at \code{"auto"} or set to
+\code{"iw"}, and \code{"structural"} otherwise; \code{Constant("auto")} then becomes \code{"iw"} or
+\code{"ig"}), applies the nine rules of \cref{tab:resolution}, and, for MCMC compositions, rejects
+what the engine does not support: Lenza--Primiceri scaling and the Metropolis--Hastings
+hyperparameter hierarchy (both planned for a later phase), and empirical Bayes over $\psi$ with
+cross-lag tightness $\kappa_c \neq 1$ in structural form. % [R] src/rai_bvar/api.py (_check_mcmc_rules error messages: "arrives in Phase 3"); [V] src/rai_bvar/api.py (BVAR.__post_init__, _resolve_auto, _check_mcmc_rules); tests/unit/test_api_resolution.py::test_lenza_primiceri_scaling_is_rejected_on_mcmc, ::test_metropolis_hastings_hierarchy_is_rejected_on_mcmc, ::test_structural_eb_over_psi_with_cross_shrinkage_is_rejected
+
+\begin{table}[!htbp]
+  \centering
+  \small
+  % (Tab2, moved from §4.2 in the integration pass.) Content read from src/rai_bvar/api.py (_resolve_auto, engine); cross-checked by
+  % docs/paper/figures/tab_resolution.py against tests/unit/test_api_resolution.py::test_resolution_table (OUTLINE §14, Tab2).
+  \begin{tabular}{@{}rllp{0.5\textwidth}@{}}
+    \toprule
+    \# & Prior form & Volatility & Engine and mode \\
+    \midrule
+    1 & conjugate  & \code{Constant("iw")}            & analytic (conjugate NIW) \\
+    2 & conjugate  & any other                        & \code{ValueError} \\
+    3 & structural & \code{Constant("ig")}            & MCMC, Mode~I \\
+    4 & structural & \code{Constant("iw")}            & MCMC, Mode~II (NIW twin), labelled \code{scaling=conjugate} \\
+    5 & structural & \code{Constant("iw\_equivalent")} & MCMC, Mode~I $\delta$ prior, $(a, \lambda)$ prior of \citet{chan2022asymmetric} \\
+    6 & structural & \code{SV(...)}                   & MCMC, Mode~I \\
+    7 & reduced    & \code{Constant("ig")}, \code{SV(...)} & MCMC, corrected triangular (CCCM) step \\
+    8 & reduced    & \code{Constant("iw\_equivalent")} & MCMC, CCCM, Chan's $(a, \lambda)$ prior; order-invariant \\
+    9 & reduced    & \code{Constant("iw")}            & \code{ValueError} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Engine resolution: rules that map a resolved (prior form, volatility prior) to an engine
+    and mode; the first match applies. \code{BVAR()},
+    \code{BVAR(vol=Constant("ig"))} and \code{BVAR(vol=SV())} reach rules 1, 3 and 6.}
+  \label{tab:resolution}
+\end{table}
+
+\subsection{The Gibbs sweep and the coefficient steps}\label{app:alg-sweep}
+
+\cref{alg:C-sweep} is one sweep; \cref{alg:C-structural,alg:C-eigen,alg:C-qr} are the structural
+coefficient and contemporaneous draws, and \cref{alg:C-cccm} the reduced-form step.
+% (moved from §3 in the page-budget pass; §3 cites alg:C-structural here)
+In the $\delta$-coordinates of \cref{sec:framework:priors}, equation $i$ is the regression
+\begin{equation}\label{eq:delta}
+  y_i = (XM_{<i} - Y_{<i})\,a_i + X\delta_i + e_i ,
+\end{equation}
+whose contemporaneous regressors are minus the prior-mean residuals of the earlier variables;
+\cref{alg:C-structural} draws all equations with the shared design $F$ of its caption. % [V] src/rai_bvar/priors/structural.py (module docstring)
+
 \begin{algorithm}[!htbp]
 \caption{One Gibbs sweep of one chain (\code{engines/mcmc/sweep.py}, \code{_sweep_fn}). The order of
 the steps is the \code{Plan} built by \code{build_plan}.}
@@ -667,6 +825,18 @@ the steps is the \code{Plan} built by \code{build_plan}.}
 \State keep the first non-zero code $1 + 1000\cdot\mathrm{block} + \mathrm{eq}$ per chain and the running minimum pivot
 \end{algorithmic}
 \end{algorithm}
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_plan.pdf}
+\caption{The Gibbs plan as data: the output of \code{fit.plan.describe()} (each step's block and
+write set) for a structural SV(outliers, $t$) model and a reduced-form SV model, fitted to the
+simulated data of \cref{lst:Lst2}, followed by each step's declared read set
+(\code{Step.reads}). The mixture indicators are local to
+the \texttt{vol} step, so no step runs between the indicators and $h$.}
+\label{fig:FigC1}
+% [V] src/rai_bvar/engines/mcmc/plan.py (describe() l.91-103 prints block and write set); generated by docs/paper/figures/make_fig_plan.py
+\end{figure}
 
 \begin{algorithm}[!htbp]
 \caption{Structural $(\delta_i, a_i)$ draw with D3 centring, weighted path
@@ -760,6 +930,32 @@ The noise row $z_j$ comes from \code{sub_key(eq_key(step_key, j), Sub.Z)}.
 Mutant M1 replaces the scan by the triangular step of \citet{carriero2019large}.
 % [V] tests/mcmc/blocks/test_cccm.py (SUR oracle 1e-10; density-ratio identities); swa_oracle.py
 
+% (moved from §5.2-§5.3 in the page-budget pass; cited from §5.2)
+\subsection{Static numerical paths}\label{app:coef-paths}
+
+In the structural coefficient draw the slots $a_{ij}$, $j \ge i$, are inactive (prior mean 0,
+precision 1, zero columns) and are zeroed after the draw, which leaves the active draw exact
+(\cref{alg:C-structural}). % [V] tests/mcmc/unit/test_linalg.py::test_padding_is_exact
+The weighted Gram $F^\top\Lambda_i^{-1}F$, $\Lambda_i = \mathrm{diag}(\lambda^{\mathrm{eff}}_{i,\cdot})$,
+comes by default from a packed product of the columns of $F$ stored once per fit, so under
+\code{vmap} the Grams of all chains and equations are one matrix product (\cref{alg:C-structural}). % [V] src/rai_bvar/engines/mcmc/linalg.py (weighted_gram); packed is the default while T_pad·P·8 ≤ 256 MiB (DESIGN §10.5)
+Under constant volatility without a transitory scale the weights do not vary over time, so the data
+part of the precision is $G/\lambda_i$ with $G$ fixed per fit: $K(\lambda_i) = \mathrm{diag}(d) +
+G/\lambda_i$ in Mode~I, and $K = \tilde K/\lambda_i$ with a $\lambda$-free $\tilde K$ in Mode~II, where
+the prior precision also scales with $1/\lambda_i$. A deterministic rule then picks an exact fast
+path: \code{eigen} for Mode~I (one graded eigendecomposition per fit, then $O(q^2)$ per draw;
+\cref{alg:C-eigen}), \code{fixed\_factor} for Mode~II and \code{cholesky\_const} for
+\code{iw\_equivalent}. % [V] src/rai_bvar/components/mean/linear.py (module docstring, four static paths); src/rai_bvar/engines/mcmc/resolve.py (resolve_const_path)
+In the reduced-form step (\cref{alg:C-cccm}) the $n$ precisions $K_j$ are factored in parallel
+before the sequential scan by default; a deterministic shape rule turns this precompute off above a
+memory bound. % [V] src/rai_bvar/engines/mcmc/resolve.py::resolve_cccm_precompute (n·k²·8·C ≤ 512 MiB)
+
+\subsection{The volatility block}\label{app:alg-vol}
+
+\cref{alg:C-vol} is the atomic volatility update of one equation, with the transitory steps of
+\cref{tab:C-transitory}, the SV core of \cref{alg:C-sv} and its random-walk path draw,
+\cref{alg:C-laplacian}.
+
 \begin{algorithm}[!htbp]
 \caption{The volatility block of one equation, transitory then persistent, atomic
 (\code{components/vol/robust.py}, \code{VolBlockImpl.sample_eq}).}
@@ -787,9 +983,11 @@ is the coupling returned by the coefficient step (zero in Mode~I).
 \centering\small
 \caption{Transitory steps (\code{components/vol/transitory.py}); all conditionals are exact. $\log
 z_t^2 = \log e_t^2 - \log\lambda^{\mathrm{pers}}_t$, $r_t^2$ the corresponding squared standardised
-residual, $c(\nu) = \nu - 2$ (standardised $t$) or $\nu$ (unit scale).}
+residual; $c(\nu) = \nu - 2$ in the standardised parametrisation (the default) and $c(\nu) = \nu$
+under \code{t_scale="unit"}.}
 \label{tab:C-transitory}
 % [V] dossier 03 section 6.8 (code docstring); tests/mcmc/blocks/test_transitory.py (density-ratio identities)
+% [V] (c(nu) and the default, moved from §5.6) src/rai_bvar/components/vol/transitory.py; tests/mcmc/blocks/test_transitory.py
 \begin{tabular}{@{}p{0.13\linewidth}p{0.27\linewidth}p{0.52\linewidth}@{}}
 \toprule
 Kind & Steps, in order & Conditionals \\
@@ -812,7 +1010,7 @@ accepted candidate of an iid sequence is the rejection sampler, so the draw is e
 \caption{SV update of one equation, AR(1) log-volatility, with the exact correction and ASIS
 (\code{components/vol/sv.py}, \code{SVCore}). Steps (c), (a), (b) and (b**) follow the design
 document; $w(\cdot)$ is~\eqref{eq:B-w}.}
-\label{alg:C-sv}
+\label{alg:C-sv}\label{alg:sv}% alg:sv: the compact main-text box of §5.4, merged here in the integration pass
 \footnotesize
 \begin{algorithmic}[1]
 \State $y^*_t \gets \operatorname{logaddexp}(\log\tilde e_t^2, \log c_i)$ on observed rows \Comment{$c_i = 10^{-12}\psi_i$}
@@ -832,9 +1030,11 @@ document; $w(\cdot)$ is~\eqref{eq:B-w}.}
 
 The cold start draws $h$ once from the AWOL system after the initial values, because with $h \equiv
 \mu$ and a rejected first exact step the $\sigma^2$ proposal is the point 0, which is then absorbing;
-this was found on the pilot prototype.
-% [R] docs/phase2/09_pilot.md section 3.1; SVCore.init docstring (DESIGN section 5.4 not amended)
+this was found on the pilot prototype, and a regression check tests the cold start.
+% [R] docs/phase2/09_pilot.md section 3.1; SVCore.init docstring (DESIGN section 5.4 not amended); [V] tests/mcmc/blocks/test_sv_core.py::test_state_structure_dtypes_and_init (regression check; moved from §5.4)
 The AWOL precision draw follows \citet{chan2009efficient} and \citet{mccausland2011simulation}.
+For a random-walk log variance the centred step draws $\sigma^2$ only, the non-centred regression
+is on $(h_0, \sigma)$, and the path is drawn by \cref{alg:C-laplacian}. % [V] src/rai_bvar/components/vol/sv.py (c_step "RW: σ² only"; nc_regression and nc_step RW branches) (moved from §5.5)
 
 \begin{algorithm}[!htbp]
 \caption{Random-walk SV path as a path Laplacian (\code{linalg.laplacian_precision_sample}):
@@ -843,12 +1043,19 @@ $Q = \mathrm{Lap}_w + \operatorname{diag}(\delta)$, $Q_{tt} = \delta_t + w_{t-1}
 \label{alg:C-laplacian}
 \footnotesize
 \begin{algorithmic}[1]
+\Require $\delta_{0:T} \ge 0$; edge weights $w_{0:T-1} \in \{0, 1\}$, $w_T = 0$; $b$; $z \sim \mathrm{N}(0, I)$
 \State $q_0 \gets \delta_0$; $q_t \gets \delta_t + w_{t-1}q_{t-1}/(w_{t-1} + q_{t-1})$ ($q_t = \delta_t$ after a zero edge) \Comment{excess over the next edge}
 \State $p_t \gets q_t + w_t$; $\ell_t \gets \sqrt{p_t}$; $c_t \gets -w_{t-1}/\ell_{t-1}$ \Comment{all terms $\ge 0$}
 \State forward: $v_t \gets (b_t - c_tv_{t-1})/\ell_t$; backward: $x_t \gets (v_t + z_t - c_{t+1}x_{t+1})/\ell_t$
 \State $\log|Q| \gets \sum_t[\log w_t + \operatorname{log1p}(q_t/w_t)]$ ($\log q_t$ where no next edge); $\mathrm{min\_pivot} \gets \min_t p_t$
+\State in the SV step (\code{sv.py}): $h \gets \sigma x$ \Comment{random walk: no separate level}
 \end{algorithmic}
 \end{algorithm}
+
+\subsection{Runner, failures and replay}\label{app:alg-runner}
+
+\cref{alg:C-bodies,alg:C-driver} are the compiled bodies of one chain and the host driver, and
+\cref{alg:C-failure} the failure path with its deterministic replay.
 
 \begin{algorithm}[!htbp]
 \caption{Burn-in and sampling bodies of one chain (\code{engines/mcmc/runner.py}, \code{_bodies}).
@@ -916,6 +1123,11 @@ The replay of an equation failure after the production CCCM step originally rais
 % [V] tests/mcmc/runner/test_failures.py (toys, plus
 % ::test_replay_of_an_equation_failure_after_the_production_cccm_step with the production program)
 
+\subsection{The forecast core and the predictive contract}\label{app:alg-forecast}
+
+\cref{alg:C-forecast} simulates one forecast path per parameter draw, and \cref{tab:TabC1} lists
+the predictive contract that it fills.
+
 \begin{algorithm}[!htbp]
 \caption{Forecast core for one parameter draw (\code{engines/mcmc/forecast.py},
 \code{forecast_core}).}
@@ -941,18 +1153,6 @@ agree, to $10^{-12}$ in the tests.
 % [V] tests/mcmc/forecast/test_forecast_core.py::test_recursion_equals_reduced_form_with_the_same_shocks,
 % ::test_in_loop_forecast_equals_post_hoc_sv; tests/mcmc/runner/test_in_loop_forecast.py
 
-\begin{figure}[!htbp]
-\centering
-\includegraphics[width=\linewidth]{figures/fig_plan.pdf}
-\caption{The Gibbs plan as data: the output of \code{fit.plan.describe()} (each step's block and
-write set) for a structural SV(outliers, $t$) model and a reduced-form SV model, fitted to the
-simulated data of \cref{lst:Lst2}, followed by each step's declared read set
-(\code{Step.reads}). The mixture indicators are local to
-the \texttt{vol} step, so no step runs between the indicators and $h$.}
-\label{fig:FigC1}
-% [V] src/rai_bvar/engines/mcmc/plan.py (describe() l.91-103 prints block and write set); generated by docs/paper/figures/make_fig_plan.py
-\end{figure}
-
 \begin{table}[!htbp]
 \centering\footnotesize
 \caption{The predictive contract: fields of \code{ForecastResult}, which wraps an
@@ -960,7 +1160,7 @@ the \texttt{vol} step, so no step runs between the indicators and $h$.}
 \code{check_structure} and by every consumer, and are never contract fields.}
 \label{tab:TabC1}
 % [V] src/rai_bvar/forecast/result.py:1-19, :96-162 (62d15f6); tests/contract/test_forecast_contract.py,
-% tests/contract/test_forecast_contract_mcmc.py (12 MCMC compositions, tests/mcmc/forecast/mcmc_fits.py:128-141);
+% tests/contract/test_forecast_contract_mcmc.py (13 MCMC compositions at 7f410dc, tests/mcmc/forecast/mcmc_fits.py:128-142);
 % lag_coefs added in b9c66c0 (D-34); checked against a live ForecastResult by docs/paper/figures/tab_contract.py
 \begin{tabular}{@{}p{0.20\linewidth}p{0.28\linewidth}p{0.45\linewidth}@{}}
 \toprule
@@ -983,15 +1183,107 @@ attrs (MCMC) & --- & \code{ordering}, \code{n_chains}, \code{mixture}, \code{exa
 \end{tabular}
 \end{table}
 
-The contract tests run for every registered analytic model and for 12 MCMC compositions:
+The contract tests run for every registered analytic model and for 13 MCMC compositions:
 structural $\times$ \{SV, SV(outliers), SV($t$), SV(outliers, $t$), SV(rw), Constant(ig),
-Constant(iw), Constant(iw\_equivalent)\} and reduced $\times$ \{SV, SV(outliers), Constant(ig),
-Constant(iw\_equivalent)\}.
-Reduced $\times$ SV($t$), reduced $\times$ SV(rw) (the primary arm of the replication) and reduced
-$\times$ SV(outliers, $t$) are not in this list.
-% [V] tests/mcmc/forecast/mcmc_fits.py:128-141 (re-run, dossier 02 section 0.1); unchanged in the committed
-% tree at d58c9ef
-\todo{TODO 3: row~18, \code{reduced_sv_rw} (reduced form $\times$ SV(rw)), and a \code{reduced-SV(rw)} contract fit were committed in 7f410dc, after the acceptance commit c823d20; the SV(rw, $t$) variant is still not covered. If the release commit includes it, update this list, \cref{app:sbc} and the main-text caveats.}
+Constant(iw), Constant(iw\_equivalent)\} and reduced $\times$ \{SV, SV(outliers), SV(rw),
+Constant(ig), Constant(iw\_equivalent)\}; reduced $\times$ SV(rw), the primary arm of the
+replication, was added in 7f410dc with validation row~18 (\cref{app:row18}).
+Reduced $\times$ SV($t$), reduced $\times$ SV(outliers, $t$) and the replication's variant
+reduced $\times$ SV(rw, $t$) are not in this list.
+% [V] tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS l.128-142 at 7f410dc (13 entries; "reduced-SV(rw)" added
+% in 7f410dc); tests/contract/test_forecast_contract_mcmc.py; [R] 7f410dc commit message (contract 10/10 for
+% the new composition; SV(rw, t) not added); [REL] re-run on the release commit
+
+% (moved from §6.1 in the page-budget pass; cited from §6.1)
+\subsection{Forecast draws, impulse responses and variance decompositions}\label{app:irf}
+
+The analytic engine draws $(B, \Sigma)$ from the NIW posterior and uses
+$L = \operatorname{chol}(\Sigma)$, scaled by the future Lenza--Primiceri factor when that treatment
+is active \citep{lenza2022estimate}.
+The MCMC forecast draws are evenly spaced stored draws of each chain
+(\cref{alg:C-forecast}).
+Besides the effective variances $\lambda^{\mathrm{eff}}_{s,T+h}$ of~\eqref{eq:forecast-recursion},
+which include the future outlier and Student-$t$ scales, the forecast core returns the persistent
+variances $\lambda^{\mathrm{pers}}_{s,T+h}$, which exclude them.
+Impulse responses use $\Phi_0 = I$, $\Phi_j = \sum_{l=1}^{\min(j,p)} A_l\Phi_{j-l}$ with $A_l$ the
+reduced-form lag matrices; unit-shock responses $\Phi_j A^{-1}$ are date-free, while
+one-standard-deviation responses depend on the date and use the persistent variance by default;
+the forecast error variance decomposition is computed from the responses.
+% [V] tests/mcmc/forecast/test_irf_mcmc.py::test_irf_equals_direct_phi_ainv_lambda, ::test_unit_shock_irf_is_phi_ainv_and_date_free; FEVD: tests/unit/test_irf.py::test_fevd_matches_forecast_error_covariance
+
+% (moved from §6.3, §6.5, §6.6, §6.8 and §6.9 in the page-budget pass; cited from §6)
+\subsection{Scores, tests and the ordering check}\label{app:scores-tests}
+
+\emph{Scores.}
+All scores are computed per origin, horizon and model on the transformed scale: the joint and
+per-variable log score with the chosen estimator (an integrated run also stores the conditioned
+values from the same forecast); the fair CRPS in its probability-weighted-moment form, computed
+with \pkg{scoringrules} \citep{zanetta2024scoringrules}; quantile-weighted CRPS with centre and tail
+weights \citep{gneiting2011comparing} and optional threshold-weighted CRPS; energy
+\citep{gneiting2007strictly} and variogram ($p = 0.5$; \citealp{scheuerer2015variogram}) scores on
+a subsample of at most 1000 draws; squared and absolute errors; and PIT values with 50\% and 90\%
+coverage.
+% [V] src/rai_bvar/evaluation/scores.py l.54-177 at d58c9ef; tests/unit/test_scores.py::test_unweighted_qwcrps_matches_fair_crps, ::test_crps_against_gaussian_closed_form; tests/unit/test_scores_lpd_method.py::test_integrated_layout_and_values
+An opt-in option (\code{rb\_transitory=True}) also integrates the outlier and $t$ scales of $T+h$
+out of the log score~\eqref{eq:rb-lpd} analytically.
+% [V] tests/mcmc/forecast/test_lpd_mcmc.py::test_rb_transitory_matches_monte_carlo
+
+\emph{The Diebold--Mariano statistic.}
+For loss differences $d_t = \ell_{M,t} - \ell_{B,t}$ over $P$ common origins (for the log score,
+$\ell = -\log\hat p$), the Diebold--Mariano statistic \citep{diebold1995comparing} uses a
+rectangular-kernel long-run variance with $h - 1$ autocovariances $\hat\gamma_k$ and the
+small-sample correction of \citet{harvey1997testing},
+\begin{equation}\label{eq:dm}
+  \mathrm{DM}_{\mathrm{HLN}} = \frac{\bar d}{\sqrt{\hat\omega/P}}
+  \sqrt{\frac{P + 1 - 2h + h(h-1)/P}{P}},\qquad
+  \hat\omega = \hat\gamma_0 + 2\sum_{k=1}^{h-1}\hat\gamma_k ,
+\end{equation}
+compared with Student-$t_{P-1}$ quantiles; Bartlett (Newey--West) weights \citep{newey1987simple}
+are used only if $\hat\omega$ is not positive.
+% [V] src/rai_bvar/evaluation/significance.py l.27-77 at d58c9ef; tests/unit/test_significance.py::test_dm_size_under_null, ::test_dm_hln_uses_student_t. SPEC §9.3 says Newey-West (dossier 02 §15 D1; TODO 18): the text describes the code
+The test is DM with the HLN correction applied to log-score losses; \citet{amisano2007comparing}
+give the analogous weighted likelihood ratio test for density forecasts.
+
+\emph{The model confidence set and the volatility grid.}
+The model confidence set uses the $T_{\max}$ statistic on the joint log-score losses with a
+circular block bootstrap (block length $\max(1, \operatorname{round}(P^{1/3}))$, 2000
+replications); $\mathcal M_{25\%}$ in~\eqref{eq:verdict} is the set at $\alpha = 0.25$.
+% [V] src/rai_bvar/evaluation/significance.py l.100-137, compare.py l.152-157 and l.259 at d58c9ef; tests/unit/test_significance.py::test_mcs_eliminates_clearly_worse_models_first
+The comparison table prints two-sided DM $p$-values while the verdict uses one-sided ones (0.029
+against 0.014 in \cref{lst:Lst1-out}).
+% [V] compare.py l.172 (two-sided, table) and l.256-257 (one-sided, verdict) at d58c9ef; docs/paper/code/out/ex_a.txt
+\code{verdict(axis="vol")} pairs each model with the arm that has the baseline's value on that
+axis and agrees on all others, and \code{grid()} harmonises the arms so that this pairing is
+meaningful: in a volatility grid the Constant baseline becomes the MCMC Mode~I model
+\code{Constant("ig")}, not the analytic NIW model, and Mode~II is labelled a prior change.
+% [V] tests/unit/test_grid_harmonise.py::test_spec_grid_becomes_a_one_axis_volatility_comparison, ::test_mode_one_and_mode_two_arms_are_named_apart
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.85\textwidth]{figures/fig_verdict_flow.pdf}
+  \caption{The verdict rule~\eqref{eq:verdict} of \cref{sec:eval-verdict}, with the convergence
+    gate, as a decision flow.}
+  \label{fig:verdict-flow}\label{fig:Fig3}
+  % moved from §6.8 in the integration pass; docs/paper/figures/make_fig_verdict_flow.py (static TikZ)
+\end{figure}
+
+\emph{The ordering check.}
+A metric is flagged as material only when it exceeds its threshold, 0.05 nats per variable or 0.10
+for the joint score, besides the signal-to-noise condition of \cref{sec:eval-ordering}.
+% [V] src/rai_bvar/structural/ordering.py THRESHOLDS (l.113-121) at d58c9ef; tests/integration/test_ordering.py
+Besides the analytic NIW engine, whose forecasts are exactly order-invariant, the reduced-form
+\code{Constant("iw\_equivalent")} model is order-invariant because its implied $\Sigma$ prior is
+inverse Wishart \citep{chan2022asymmetric}.
+% [V] src/rai_bvar/structural/ordering.py l.5-7 at d58c9ef; tests/integration/test_ordering.py::test_analytic_engine_is_exactly_order_invariant; ::test_reduced_iw_equivalent_is_order_invariant_within_mcse (slow)
+In prior mode \code{rb.ordering\_sensitivity()} simulates the prior under each ordering without a
+fit; in forecast or backtest mode it refits, recomputing every data-dependent quantity from the
+permuted window.
+% [V] src/rai_bvar/structural/ordering.py module docstring at d58c9ef; tests/integration/test_ordering.py
+Optionally, \code{rb.ordering\_sensitivity()} also returns the equal-weight mixture over
+orderings, which is exactly order-invariant when all orderings are used.
+% [V] src/rai_bvar/structural/ordering.py module docstring (pool=True) at d58c9ef
+MCMC fits of compositions that are not order-invariant warn from $n = 4$ variables on (R8).
+% [V] src/rai_bvar/engines/mcmc/monitor.py l.77 (_ORDERING_N = 4), l.692-699 at d58c9ef
 
 \clearpage
 
@@ -1011,6 +1303,80 @@ Where a number below was reproduced on an earlier commit, the commit and the mac
 \code{parity_long}, the analytic twins and the mutation suite on the release commit (Apple M5 Max and
 x86-64 Linux) and commit the JSONL files.}
 
+% (Tab5 and its paragraph moved from §8 in the page-budget pass; §8 cites app:validation)
+\subsection{Tier map and cadence}\label{app:tiers}
+
+\cref{tab:Tab5} lists the seven tiers. Tier~U, G-small and the kernel-level Tier~B run on every
+pull request, on Linux for Python 3.12--3.14; the continuous-integration job named ``nightly'' runs
+weekly, so composition-level Tier~B, G-full, SBC, the large analytic twins, long parity runs and the
+mutation suite run weekly. % [V] .github/workflows/ci.yml (cron "17 3 * * 0"; job comment "nightly: # weekly despite the name")
+Every \code{RuntimeWarning} is an error, as is any silent float32 truncation in the MCMC tests. % [V] pyproject.toml [tool.pytest.ini_options]; tests/geweke/test_geweke_compositions.py pytestmark
+\todo{[REL] Refresh the counts in \cref{tab:Tab5} and in \cref{app:runtimes} from
+\code{docs/paper/data/release/collect.txt} on the release commit.} % b9c66c0 reports "Fast suite 4655 passed" [R]; at 7f410dc row 18 adds G and S test IDs (G-small, G-full, G-full-inexact, the RW h0 variant; SBC 22 -> 23)
+
+\begin{table}[!htbp]
+  \centering
+  \caption{Validation tiers: content, decision rule, cadence as designed and as run in
+    continuous integration (the job named ``nightly'' runs weekly), and parametrised test IDs
+    at commit 62d15f6, counted under the tier's pytest marker where one exists. Tiers~U, B and A
+    have no tier-wide marker (for B see note a); the G count includes the kernel-level Geweke
+    tests.}
+  \label{tab:Tab5}
+  % Body to be regenerated by docs/paper/figures/tab_tiers.py from .github/workflows/ci.yml,
+  % pyproject.toml and docs/paper/data/release/collect.txt [REL]; counts below are at 62d15f6
+  % (dossier 04 §3.1-§3.2); row 18 (7f410dc) adds G and S IDs not counted here.
+  \footnotesize
+  \begin{tabular}{@{}l p{0.28\textwidth} p{0.27\textwidth} p{0.2\textwidth} r@{}}
+    \toprule
+    Tier & Content & Decision rule & Cadence (designed / run) & IDs \\
+    \midrule
+    U & density-ratio and Metropolis--Hastings identities; dense oracles with injected noise;
+        closed forms; infrastructure
+      & relative error below a fixed tolerance ($10^{-8}$ for identities)
+      & PR / PR & -- \\
+    B & block-conditional SBC ($N = 200$, $L = 99$); one-block invariance ($N = 1000$, $L = 20$)
+      & Bonferroni at $\alpha = 10^{-3}$; sequential wrapper
+      & PR / kernel level PR, composition level weekly & 43$^{a}$ \\
+    G & Geweke: G-small ($C = 1000$, $M_c = 100$, $M_1 = 2\cdot10^5$) and G-full ($C = 4000$,
+        $M_c = 500$, $M_1 = 10^6$)
+      & $\min_g p_g \le \alpha/G$, $\alpha = 10^{-3}$ (small) or $10^{-2}$ (full); sequential
+        wrapper
+      & small PR, full nightly / small PR, full weekly & 95 \\
+    S & SBC, $N = 1000$, $L = 99$, two-pass thinning, ESS gates
+      & $\gamma$ test, Bonferroni at $\alpha = 10^{-2}$; no failed replication; ESS gates
+      & nightly / weekly & 22 \\
+    A & analytic twins and exact oracles A1--A7
+      & $|z| \le \max(4, z_{\mathrm{Bonf}})$ (A2--A5); log ML to $10^{-10}$ (A1)
+      & PR: A1, A2, A5 ($n = 3$), A6, a small A7; nightly: A3, A4, the rest / the
+        nightly part weekly & -- \\
+    P & parity with independent implementations
+      & quantile $|z| \le \max(4, z_{1-0.01/(2m)})$; log ML rtol $10^{-8}$
+      & short PR, long nightly / short PR, long weekly & 15$^{b}$ \\
+    M & 18 injected mutants (\cref{tab:Tab7})
+      & caught iff the tier fails on the mutant and passes on the control
+      & weekly / weekly & 37$^{c}$ \\
+    \bottomrule
+  \end{tabular}
+
+  \smallskip
+  \raggedright
+  $^{a}$Composition-level tests in \code{tests/sbc/test_block_tier.py}.
+  $^{b}$Marker \code{parity_long}; \code{tests/parity} has 364 IDs in all.
+  $^{c}$Mutant $\times$ tier checks; the registry test runs on every PR.
+\end{table}
+
+% (moved from §8, Tier U, in the page-budget pass; §8 cites app:validation)
+\subsection{Tier U: tolerances and infrastructure checks}\label{app:tier-u}
+
+One tolerance lesson generalises: two exact samplers of the same Gaussian agree only to
+$O(\epsilon_{\mathrm{mach}}\operatorname{cond}(K))$, with $\operatorname{cond}(K)$ the condition number of the Jacobi-scaled
+precision, which reaches $10^6$ for Minnesota priors on level data. Path-against-path comparisons
+therefore use the envelope $2\times10^{-12} + 5\epsilon_{\mathrm{mach}}\operatorname{cond}(K)(1 + t)$ for means (with
+$t$ the largest posterior $t$-ratio) and $2\times10^{-12} + 5\epsilon_{\mathrm{mach}}\operatorname{cond}(K)$ for
+covariances. % [V] tests/mcmc/blocks/test_linear_fastpaths.py docstring l.7-10 and l.131-135; tests/mcmc/blocks/test_contemp_lstsq.py l.83
+Infrastructure checks cover float64 on every array, a JAX-free package import, typed keys with
+JAX's key-reuse checker, the invariances of \cref{sec:arch-repro} and the failure path.
+
 \subsection{Geweke tests at the per-PR size}\label{app:geweke-small}
 
 The G-small configuration runs $C = 1000$ independent successive-conditional chains of $M_c = 100$
@@ -1022,13 +1388,19 @@ structural and $n = 3$ in reduced form (with the design table's overrides: $n = 
 $n = 1$ for the univariate row 17), $p = 1$ and an intercept.
 % [V] src/rai_bvar/validation/joint.py docstring and _COMPOSITIONS (n overrides)
 % [V] tests/geweke/test_geweke_compositions.py (SEED_SMALL = 20261022; test_g_small asserts T_eff % 32 != 0)
-\cref{tab:TabD1} gives the result for each of the 15 per-PR compositions.
-On commit 62d15f6 (Apple M5 Max) every composition passed: the largest final-stage $|z|$ was 3.03
+\cref{tab:TabD1} gives the result for each of the 16 per-PR compositions: the 15 registered at
+62d15f6 and row~18, added in 7f410dc.
+On commit 62d15f6 (Apple M5 Max) every one of the 15 passed: the largest final-stage $|z|$ was 3.03
 against critical values of 4.10--4.50; row 201 went to a second, fresh and larger stage after a
 first-stage Bonferroni $q$ of 0.0012 ($|z| = 4.21$ on a log-scale data autocorrelation) and passed
-there with $q = 1.0$; and the minimum relative numerical efficiency per composition was 0.008--0.129.
+there with $q = 1.0$; and the minimum relative numerical efficiency per composition was 0.008--0.129
+(where it falls is stated in \cref{app:ar1-rule}).
 % [V] reproduced twice at 62d15f6 on Apple M5 Max (dossier 04 section 6.6 and its fact-check);
 % deterministic for fixed code and seed on that machine, not a cross-machine reproduction; [REL]
+Row~18 passed at stage~1 with a largest $|z|$ of 1.98 against 4.42, in one run recorded with
+7f410dc (\cref{app:row18}). % [R] commit message 7f410dc; DESIGN §9.5 row 18 note (Apple M5 Max under load); [REL]
+Batch means within chains \citep{flegal2010batch} give a non-gating cross-check of the chains'
+long-run variance. % [V] src/rai_bvar/validation/geweke.py docstring (b = floor(sqrt(M_c))); tests/validation/test_geweke_selftest.py::test_batch_means_follow_the_documented_formulas (moved from §8)
 The sequential design bounds the probability of a false rejection by
 $\sum_i \gamma^{i-1}\beta_i = \alpha$, with $\beta_1 = \alpha/k$, $\gamma = \beta_1^{1/k}$ and
 $\beta_{i+1} = \beta_i/\gamma$; a stage fails if $q_i \le \beta_i$, passes if $q_i > \gamma +
@@ -1042,15 +1414,14 @@ At the per-PR settings $\gamma = 0.0693$ and $\beta = (3.33\times10^{-4}, 4.81\t
 
 \begin{table}[!htbp]
 \centering\small
-\caption{G-small Geweke results for the 15 per-PR compositions: number of test functions
+\caption{G-small Geweke results for the 16 per-PR compositions: number of test functions
 $G$, $t_{C-1}$ critical value, maximum $|z|$ and its argument, Gandy--Scott stage and Bonferroni
 $q$, minimum relative numerical efficiency, and time. Generated from \code{geweke.jsonl}
 (\code{pytest tests/geweke -m "geweke and not slow"}) on the release commit.}
 \label{tab:TabD1}
 % [REL] docs/paper/data/release/geweke.jsonl; generated by docs/paper/figures/tab_geweke.py;
 % cross-check against dossier 04 section 6.6 (62d15f6)
-\InputIfFileExists{figures/tab_geweke.tex}{}{\todo{Generate with \code{tab_geweke.py} from the
-release \code{geweke.jsonl}.}}
+\input{figures/tables/tab_geweke.tex}
 \end{table}
 
 \subsection{Geweke test functions and the finite-variance rule}\label{app:geweke-functions}
@@ -1098,11 +1469,11 @@ quantile is used.
 \subsection{G-full, the approximate rows, Tier B and SBC}\label{app:sbc}
 
 G-full uses $C = 4000$, $M_c = 500$, $M_1 = 10^6$ and $\alpha = 10^{-2}$ at $n = 3$, $p = 2$ and
-$T_{\mathrm{eff}} = 50$ (rows 14--16: $n = 2$; row 17: $n = 1$); the eleven \code{exact=False} rows
+$T_{\mathrm{eff}} = 50$ (rows 14--16: $n = 2$; row 17: $n = 1$); the twelve \code{exact=False} rows
 (the auxiliary-mixture sampler) are recorded but do not gate, because that sampler targets the
 mixture approximation rather than the exact posterior; only a non-finite test function, which is a
 bug whatever the approximation, fails them.
-% [V] tests/geweke/test_geweke_compositions.py::test_pr_rows_are_the_design_rows, ::test_g_full_inexact_recorded
+% [V] tests/geweke/test_geweke_compositions.py::test_pr_rows_are_the_design_rows, ::test_g_full_inexact_recorded; INEXACT_ROWS (12 rows, incl. 18) at 7f410dc
 Composition-level Tier B consists of block-conditional SBC ($N = 200$, $L = 99$) of every exact-draw
 block, with ranks of the block's coordinates and of the exact log-likelihood, and one-block invariance
 ($N = 1000$ joint draws, $L = 20$ applications of the live blocks, two-sample Kolmogorov--Smirnov tests)
@@ -1110,19 +1481,29 @@ for Metropolis--Hastings, ASIS and Gibbs-scan blocks; its 43 tests run weekly, w
 suite runs its own Tier~B per PR.
 % [V] tests/sbc/test_block_tier.py docstring l.4-28 (pytestmark slow)
 SBC uses $N = 1000$ replications, $L = 99$ kept draws, burn-in 300, a pilot of 1000 sweeps,
-$t_{\max} = 200$ and $\alpha = 10^{-2}$ for the 22 compositions, inside the same sequential wrapper.
-% [V] tests/sbc/test_sbc_compositions.py docstring l.1-11 (committed tree, d58c9ef); [R] t_max = 200 (docstring l.13-21)
-\todo{TODO 3: row~18, \code{reduced_sv_rw} (reduced form $\times$ SV(rw)), and a \code{reduced-SV(rw)} contract fit were committed in 7f410dc, after the acceptance commit c823d20; the SV(rw, $t$) variant is still not covered; NOTES item 6 records that it passes the ESS rule only with a per-row $t_{\max}$ of 400. If the release commit includes it, update the composition count and the cap here.}
+$t_{\max} = 200$ (400 for row~18) and $\alpha = 10^{-2}$ for the 23 compositions (rows 1--18 and
+201--205), inside the same sequential wrapper.
+% [V] tests/sbc/test_sbc_compositions.py docstring l.1-11 (committed tree, d58c9ef); [R] t_max = 200 (docstring l.13-21); [V] SBC_OVERRIDES and the 23 COMPOSITIONS at 7f410dc
+The thinning cap was raised from the design's 50 to 200 because, in runs recorded in the test
+module, a cap of 50 made the ESS rule fail on slowly mixing datasets of a $t$ row and an
+outlier-$t$ row while the $\gamma$ test was clean. % [R] tests/sbc/test_sbc_compositions.py docstring l.13-21 (NOTES B.6): at t_max = 50 the ESS rule failed on slow outlier/t datasets while the gamma test was clean
+Row~18 has a cap of 400 by the same rule (below); the cap bounds the work, not the gate,
+which is stated in ESS. % [V] tests/sbc/test_sbc_compositions.py T_MAX = 200, SBC_OVERRIDES = {"reduced_sv_rw": {"t_max": 400}} at 7f410dc; [R] DESIGN §9.6 erratum (2026-10-23)
 Each replication draws $(\tilde\theta, \tilde y)$ from the joint model, applies only the data filter
 $\operatorname{finite}(\tilde y) \wedge \max|\tilde y| < 10^3$, runs a pilot chain from an
 independent prior draw, sets its thinning to $t_i = \min(\lceil 2\,\mathrm{IAT}_i\rceil,
 t_{\max})$ with the Geyer initial-monotone IAT \citep{geyer1992practical} of the quantities and of
 their tail indicators, and then keeps $L$ draws from a fresh chain; ranks are uniform conditionally
 on $\tilde y$, so data-dependent thinning preserves uniformity.
-Uniformity is tested with the $\gamma$ statistic of \citet{sailynoja2022graphical}, whose null
-distribution is computed exactly by a forward recursion that accumulates the mass leaving the
-interior at each step, so that $p$-values in the far tail keep their relative accuracy.
-% [V] src/rai_bvar/validation/sbc.py, uniformity.py; tests/validation/test_uniformity.py
+Uniformity is tested with the statistic of \citet{sailynoja2022graphical}: for $N$ ranks in
+$\{0, \dots, L\}$, $z_i = i/(L + 1)$ and $R_i$ the number of ranks below $i$,
+\begin{equation}\label{eq:gamma-sbc}
+  \gamma_{\mathrm{S}} = 2\min_{1 \le i \le L}\,\min\bigl\{F_{\mathrm{Bin}}(R_i; N, z_i),\;
+  1 - F_{\mathrm{Bin}}(R_i - 1; N, z_i)\bigr\},
+\end{equation}
+whose exact null distribution follows from the forward recursion of \citet{sailynoja2022graphical}
+over the binomial increments of $R_i$; our implementation accumulates the mass that leaves the
+envelope at each step, so that far-tail $p$-values keep relative precision. % [V] src/rai_bvar/validation/sbc.py, uniformity.py docstring; tests/validation/test_uniformity.py::test_exact_recursion_agrees_with_simulation, ::test_null_pvalues_are_super_uniform
 The quantities include the parameters, $h$ at fixed dates and its path means, the total and per-equation
 log-likelihood, $\log p(\theta)$ and the predictive unknowns $h_{T+1}$ and $y_{T+1}$ through the
 production forecast core; data-dependent quantities are needed because a ``posterior'' equal to the
@@ -1143,22 +1524,64 @@ enough), to be at least $0.8L$ for every quantity.
 % [R] the "about 76%" and "0.836 L" figures are docstring-only (TODO 25)
 \todo{TODO 25: commit a small test for the 76\% and $0.836L$ figures, or keep them out.}
 \cref{tab:TabD3} collects the G-full, \code{exact=False}, composition-level B and SBC records.
-No committed record of these runs existed at 62d15f6; the only committed numbers are those that the
-repository notes record for row 205 (G-full 2.76, SBC minimum $p$ 0.018).
-% [R] NOTES 13 (dossier 04 sections 6.7, 7.6); [REL] geweke.jsonl (tiers G-full, G-full-inexact), sbc.jsonl;
+No committed record of these runs existed at 62d15f6; the only recorded numbers are those that the
+repository notes record for row 205 (G-full 2.76, SBC minimum $p$ 0.018) and, since 7f410dc, those
+recorded for row~18 (below).
+% [R] NOTES 13 (dossier 04 sections 6.7, 7.6); row 18: 7f410dc commit message, DESIGN §9.5 row 18 note; [REL] geweke.jsonl (tiers G-full, G-full-inexact), sbc.jsonl;
 % composition-level B has no record hook yet (TODO 7)
 
 \begin{table}[!htbp]
 \centering\small
 \caption{G-full, the recorded \code{exact=False} rows, composition-level Tier~B and full SBC per
-composition: maximum $|z|$ or minimum $p$, stages, ESS gates and the number of replications
-at $t_{\max}$. Generated on the release commit.}
+composition: maximum $|z|$ or minimum $p$ and stage, the thinning cap and the largest thinning used,
+the number of replications failing the per-replication ESS rule, and the pooled ESS. Generated on
+the release commit.}
 \label{tab:TabD3}
 % [REL] docs/paper/data/release/geweke.jsonl (tiers G-full, G-full-inexact), sbc.jsonl; composition-level B needs a record hook (TODO 7); docs/paper/figures/tab_geweke_full_sbc.py
-\InputIfFileExists{figures/tab_geweke_full_sbc.tex}{}{\todo{Generate with
-\code{tab_geweke_full_sbc.py} from the release records; until then no G-full or SBC result other than
-row 205 is stated.}}
+\input{figures/tables/tab_geweke_full_sbc.tex}
 \end{table}
+
+% (new detail behind §8, sec:validation-coverage, written from 7f410dc; replaces the TODO 3 box)
+\paragraph{Row 18.}\phantomsection\label{app:row18}
+Row~18 (\code{reduced_sv_rw}, reduced-form CCCM $\times$ random-walk SV) is the replication's
+primary SV arm built through the production resolve path: its static configuration equals the
+arm's in every component field, and it differs where every row differs by construction, in the
+shapes ($n = 3$ at both sizes, so that the middle column of the CCCM step is exercised; $p = 1$ and
+2, $T_{\mathrm{eff}} = 20$ and 50, against $n = 4$, $p = 4$ and $T_{\mathrm{eff}} = 77$ to 182 in
+the replication), in the inert $\nu$ grid and in the test priors (random-walk $h_0 \sim
+\mathrm{N}(0, 1)$ against the library default $\mathrm{N}(\log(\psi_i/\iota), 4)$; the tight test
+Minnesota prior). % [R] DESIGN §9.5 row 18 note (shapes of the CR arm measured through resolve() on the FRED-QD 2026-09 vintage); [V] validation/joint.py "reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3))
+Its references compose the reduced-form linear reference and the random-walk SV reference, so the
+row needed no new reference code. % [R] commit message 7f410dc ("References compose LinearReducedRef and SVRWRef (no kernel code)")
+In one run each recorded with 7f410dc (Apple M5 Max under load), its largest $|z|$ is 1.98 in
+G-small (critical value 4.42) and 1.90 in G-full (3.94), all at stage~1, and the recorded
+\code{exact=False} variant has a G-full largest $|z|$ of 2.49. % [R] commit message 7f410dc ("G-small max|z| 1.98 (t_crit 4.42); G-full 1.90 (3.94); inexact 2.49"); DESIGN §9.5 row 18 note; [REL]
+In one-off runs on the row, with no committed test, its G-small rule fails, against the control's
+1.98, for three mutants of the suite, M1 (the CCM-2019 triangular step, 17.8), M15 (53.4) and M2
+(461), and for two errors that are not registered mutants, a dropped $h_0$ prior in the random-walk
+AWOL proposal (22.6) and a dropped last random-walk edge (30.0). % [R] commit message 7f410dc ("Positive controls on the row, PR G-small rule"); M1, M2, M15: tests/mutation/mutants.py, whose registered checks do not include row 18
+At the default test prior a prior variance $V_0$ used as a precision, or a dropped prior mean
+$m_0$, in the random-walk AWOL step is numerically invisible, while the replication runs at
+$V_0 = 4$ with data-centred $m_0$; \code{test_g_small_rw_h0_prior} therefore runs G-small at
+$h_0 \sim \mathrm{N}(-1, 4)$ for row~18 on every PR and for row~14 weekly, and a $V_0$-as-precision
+mutant fails there (largest $|z|$ 13.8 for row~18 and 11.3 for row~14, against 2.33 and 1.39 for
+production; critical values 4.42 and 4.29). % [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior; [R] its docstring and DESIGN §9.5 row 18 note
+SBC at the shared cap $t_{\max} = 200$ had a clean $\gamma$ test (minimum $p$ 0.019 over 59
+quantities), but 10 of 997 replications had pilot IATs of 187--319, one more than the 99\% ESS rule
+allows; at 400 the rule covers every pilot IAT observed and the row passes at stage~1. % [R] tests/sbc/test_sbc_compositions.py docstring ("Row 18"); NOTES item 6
+That pass rests on the ESS rule's blind spot, a pilot that underestimates the IAT: with a pilot of
+4000 sweeps instead of the design's 1000, the same run fails the per-replication rule (981 of 997;
+pilot IAT 99th percentile 530, maximum 1438 against 319), while the $\gamma$ test and the pooled-ESS
+gate (minimum 98.7) stay clean. % [R] same docstring; DESIGN §9.6 erratum (2026-10-23)
+A reduced-form coefficient, an intercept in 19 of 35 cases, is the slowest quantity in every
+replication with a pilot IAT above 91, and extending the 20 slowest chains to 16{,}000 sweeps leaves
+the IAT estimate growing in 10 of them (up to 4376). About 1--2\% of prior-drawn $T = 50$ datasets
+therefore mix with IATs in the hundreds to thousands of sweeps under this composition, a mixing
+tail that the $\gamma$ test does not see as a calibration error; the design's pilot of 1000 is
+kept, and the limitation is stated in \cref{sec:limitations}. % [R] same docstring; DESIGN §9.5 row 18 note; NOTES item 6
+Row~18 took 5.7~min of SBC at $t_{\max} = 200$ and 11.4~min at 400. % [R] same docstring (Apple M5 Max, load average 40-95 from other jobs)
+The contract tests pass for the composition (10 of 10), which is also fitted through the public
+\code{BVAR.fit} path. % [R] commit message 7f410dc ("contract 10/10"); [V] tests/mcmc/forecast/mcmc_fits.py "reduced-SV(rw)"; tests/unit/test_fit_mcmc_api.py COMPOSITIONS (("reduced", rb.SV(rw=True)))
 
 \subsection{Analytic twins and exact oracles}\label{app:twins}
 
@@ -1187,14 +1610,13 @@ not: in Mode~II with dummy rows, the $\lambda$ step must count the rows (\cref{a
 % [R] NOTES 12 (hand injection; the quantile count is withheld until TODO 24)
 
 \begin{table}[!htbp]
-\centering\small
+\centering\footnotesize
 \caption{Analytic twins and exact oracles A1--A7: oracle, statistic and tolerance, negative
 control and its measured power, cadence, and result on the release commit.}
 \label{tab:TabD4}
 % [V] tests/analytic/test_mcmc_twin.py, test_mode1_quadrature.py, test_structural_nig.py;
 % tests/mcmc/blocks/test_sv_toy_quadrature.py, swa_oracle.py; [REL] docs/paper/data/release/twins.xml
-\InputIfFileExists{figures/tab_twins.tex}{}{\todo{Generate with \code{tab_twins.py} from the release
-junit XML.}}
+\input{figures/tables/tab_twins.tex}
 \end{table}
 
 \subsection{Parity with independent implementations}\label{app:parity}
@@ -1223,6 +1645,8 @@ quantiles within Monte Carlo error.
 against \code{ZeroMean} $\times$ SV with $n = 1$, on the main and default-prior rows of four
 datasets: maximum $|z|$ 1.63--2.59 at the per-PR size and 1.64--3.57 at the size of the weekly tier, against a bound of 4.00.
 % [R] tests/parity/SV_PARAMETRIZATION.md section 6 table (machine label under review, TODO 8); tests committed
+The design document names \pkg{stochvol} 3.2.9, but the committed fixtures were generated with
+version 3.2.1. % [V] tests/parity/test_stochvol.py; tests/parity/SV_PARAMETRIZATION.md "Versions" (moved from §2)
 \item \emph{Standardised Student-$t$ SV.} The exit criterion for this sampler is an exact posterior
 obtained by self-normalised importance sampling on a four-observation problem, against which the
 maximum $|z|$ is 1.83. A small problem with an exact posterior is an oracle that does not depend on
@@ -1249,8 +1673,7 @@ relative tolerance.}
 \label{tab:TabD2}
 % [R] tests/parity/SV_PARAMETRIZATION.md section 6; BVAR_PARAMETRIZATION.md section 12;
 % BOE_BVAR_NOTES.md section 14; [REL] docs/paper/data/release/parity.jsonl (pytest -m parity_long)
-\InputIfFileExists{figures/tab_parity.tex}{}{\todo{Generate with \code{tab_parity.py}; neutral
-wording only (TODO 13).}}
+\input{figures/tables/tab_parity.tex}
 \end{table}
 
 \subsection{The mutant catalogue}\label{app:mutants}
@@ -1341,9 +1764,10 @@ $(\Sigma^{-1})_{jj}$, a fixed-factor weight $2w$); these are not registered muta
 tier's decision threshold, and \cref{fig:FigD2} places the G statistics of the mutants against
 the per-composition controls (G-full rows of the validation record and the mutation suite's
 G-small controls).
-Statistics agree across machines to two or three significant figures (for M2, 702 and 705 for the
-mutant, 2.47 and 2.48 for the control); they are not expected to agree bitwise across platforms.
-% [V] M2 705 / 2.48 reproduced at 62d15f6 (Apple M5 Max); [R] 702 / 2.48 and 705 / 2.47 from EVIDENCE
+Recorded runs at earlier commits, M1--M16 and then M17--M18 on x86-64 Linux, also caught every
+mutant; statistics agree across machines to two or three significant figures, not bitwise (M2:
+702 / 2.48 in the committed evidence, labelled M1 Pro; 705 / 2.48 on the M5 Max; 705 / 2.47 on
+x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 [REL: mutation_x86.jsonl]
 
 \begin{figure}[!htbp]
 \centering
@@ -1374,6 +1798,9 @@ records.}
 
 \subsection{Runtime convergence diagnostics}\label{app:diagnostics}
 
+Under stochastic volatility the primary quantities of the convergence flag of
+\cref{sec:eval-verdict} include the last log-volatilities $h_{i,T}$.
+% [V] primary set: src/rai_bvar/engines/mcmc/monitor.py docstring (D-33); tests/mcmc/diagnostics/test_monitor.py::test_failure_in_a_primary_quantity_is_not_converged (moved from §6.8)
 The convergence flag is computed by in-repository NumPy code: rank normalisation with normal scores
 $(r - 0.375)/(S + 0.25)$, split chains, R-hat as the maximum of the bulk and folded versions
 \citep{vehtari2021rank}, ESS with Geyer's initial positive and monotone sequence truncation
@@ -1399,8 +1826,8 @@ At commit 62d15f6 the suite collected 4,964 parametrised test IDs: 4,520 in the 
 (\code{not slow and not network and not bench}), 441 in the CI job named ``nightly'', which runs
 weekly, and 3 benchmarks.
 % [V] pytest --collect-only, reproduced (dossier 04 section 3.1); .github/workflows/ci.yml (cron "17 3 * * 0")
-The harness code in \code{src/rai_bvar/validation/} has 4,230 lines.
-% [V] wc -l (also at c823d20)
+The harness code in \code{src/rai_bvar/validation/} has 4,233 lines at 7f410dc (4,230 at c823d20).
+% [V] wc -l over git show 7f410dc:src/rai_bvar/validation/*.py (row 18 adds three lines to joint.py)
 On an Apple M5 Max with a cold compilation cache and other jobs running (load average 3.5--18), the
 fast suite gave 4,507 passed, 12 skipped and 1 expected failure, with no failures, in 1,003\,s, and
 1,006.9\,s on a re-run; the skips are six live ArviZ comparisons (ArviZ not installed), three
@@ -1452,8 +1879,7 @@ F3 & the replay of F2 & the replay re-ran the production CCCM step on host array
 \end{tabular}
 
 \medskip
-\InputIfFileExists{figures/tab_rw_pivots.tex}{}{\todo{Generate with \code{tab_rw_pivots.py} (pairs
-with the old-path-fails test of TODO 23).}}
+\input{figures/tables/tab_rw_pivots.tex}
 \end{table}
 
 The recorded diagnostics of F1 at the real state (the QR draw matches the exact conditional to
@@ -1462,6 +1888,28 @@ $2.22\times10^{-16}$ against an exact $5.308\times10^{-15}$; log-determinant $-3
 $-32.8695$; $h_0 = -73.90$ against $-3.024$) come from commit messages and scratch computations, not
 from committed tests.
 % [R] commits 3d3f51b and f60d736; dossier 05 sections 2.2-2.3 (scratch R3, re-run by its fact-check)
+
+% (moved from §9 in the page-budget pass; §9 cites app:float64)
+\paragraph{Tests of the two fixes.}\phantomsection\label{app:float64-tests}
+The QR draw of F1 is tested three ways: it agrees with the Cholesky precision draw within the
+path-versus-path envelope of \cref{app:tier-u} at 20 random states of each of the five
+reduced-form compositions; at a synthetic state with $\operatorname{cond}(K_a) > 10^{15}$ it matches
+the mean of a 60-digit exact conditional to $50\epsilon_{\mathrm{mach}}\operatorname{cond}(K_a)^{1/2}$
+and reproduces its noise map (only the QR side is run there); and a slow test replays chain 3214 of
+the failing G-full run, where the old draw returns status 1003 and the production sweep is finite.
+% [V] tests/mcmc/blocks/test_contemp_lstsq.py::test_lstsq_draw_equals_the_cholesky_draw (20 states x 5
+% compositions: REDUCED = reduced_constant, reduced_sv, reduced_sv_outliers_t, reduced_iw_equivalent,
+% reduced_constant_dummies; envelope 2e-12 + 5 eps kappa (1 + t) in sd units), ::test_extreme_scale_state
+% (QR side only, the Cholesky path is not run there; tol 50 eps sqrt(cond); noise map d'Kd = z'z),
+% ::test_g_full_reduced_sv_failing_chain_is_fixed (slow: old draw status 1003, production sweep finite)
+The tiny-$\sigma$ tests of F2 use the synthetic problem \code{problem(4, T_eff=88, T_pad=96, rw=True,
+sigma=5e-9)} of \code{test_sv_core.py}: 88 periods, two of them masked, padded to 96.
+Against its 60-digit reference the excess-pivot recursion gives the smallest pivot to a relative
+$10^{-12}$, $\log|\tilde Q|$ to $10^{-13}$ and $h = \sigma x$ to $10^{-12}$, and the whole random-walk
+update at that $\sigma$ returns \code{ok} with every quantity finite, for five noise draws.
+% [V] tests/mcmc/blocks/test_sv_core.py::test_rw_awol_at_a_tiny_sigma (n_mask=2; pivot rel 1e-12, logdet
+% rel 1e-13, h = sigma x rtol 1e-12), ::test_rw_step_at_a_tiny_sigma_is_ok (5 noise draws); Apple M5 Max;
+% Linux re-run is TODO 23
 The random-walk \code{aux_log_likelihood} had the same flaw (17534.8 instead of $-1650.8$ at
 $\sigma = 5\times10^{-9}$); the fix is tested against the dense Gaussian likelihood under the
 closed-form random-walk covariance $V_0 + \sigma^2\min(s, t)$.
@@ -1494,12 +1942,29 @@ measured against a 60-digit reference, at the synthetic state of
 \label{fig:FigE1}
 % computed from committed code by docs/paper/figures/make_fig_laplacian_pivots.py (problem() of
 % tests/mcmc/blocks/test_sv_core.py); --json docs/paper/data/laplacian_pivots.json writes the plotted numbers
-\todo{TODO 23 (author decision): the figure also shows that at $\sigma \le 10^{-8}$, where the
-assembled path does not fail, its pivot and the level of $h$ are badly wrong (relative pivot error up
-to about 0.95, $h$ off by up to about 61), which \cref{sec:robustness} deliberately does not
-state. Keep the figure and state this as a recomputation at a synthetic state, or crop it to the
-failing range, and commit the old-path test of TODO 23 either way.}
 \end{figure}
+
+% (new text for decision (b): §9, sec:robustness-f2, carries the summary; replaces the TODO 23
+% author-decision box that sat in this figure)
+\paragraph{The old path at small $\sigma$.}\phantomsection\label{app:float64-oldpath}
+Before f60d736 the assembled path could return a finite but wrong draw without reporting a failure,
+because the step accepts any finite positive pivot.
+% [V] src/rai_bvar/components/vol/sv.py l.809 at 8a622c5 (pre-fix) and l.855 at 7f410dc: ok = isfinite(piv) & (piv > 0), plus finite h and sigma > 0 (state_ok)
+\cref{fig:FigE1} shows where: on its grid of 28 values of $\sigma$ from $10^{-1}$ to $10^{-10}$, the
+assembled factorisation returns a zero pivot, and so a reported failure, only for the five values
+$\sigma \le 2.2\times10^{-9}$; at $\sigma = 10^{-8}$ and $4.6\times10^{-9}$ it returns finite draws
+whose level pivot is off by 7\% and 95\% and whose $h$ is off by up to 0.23 and 61.
+The excess-pivot recursion stays within a relative $10^{-15}$ of the reference pivot, and within
+$5.3\times10^{-14}$ of the reference $h$, at every $\sigma$ of the grid.
+These are recomputations at the synthetic state of \code{test_rw_awol_at_a_tiny_sigma}, not at the
+production fit of F2; whether pre-fix runs were affected is not stated (TODO 29).
+% [R] the committed figure FigE1 and its script docs/paper/figures/make_fig_laplacian_pivots.py (paper repo,
+% committed in 33dd9f8; computes both factorisations from the main repository's committed linalg.py
+% and the test's problem() and 60-digit reference), re-run 2026-10-23 against main repo 7f410dc with
+% --json: assembled pivot <= 0 at 5 of 28 sigmas (largest 2.15e-9); sigma 1e-8: rel. pivot error
+% 0.069, max |h error| 0.228; sigma 4.64e-9: 0.951 and 60.6; recursion: max rel. pivot error 9.8e-16,
+% max |h error| 5.28e-14 over the grid. A script, not a test, so not [V]: a committed test asserting the
+% old-path values is TODO 23.
 
 \subsection{Performance}\label{app:performance}
 
@@ -1516,6 +1981,14 @@ diagnostics, in fresh processes; wall and compilation times are medians over thr
 warm runs, and the per-sweep time and peak memory are medians over all six.
 % [R] dossier 03 section 13.3 (phase2_perf.summarise)
 % [V] benchmarks/phase2_perf.py docstring; tests/bench/test_perf_phase2.py
+% (moved from §10 in the page-budget pass; §10 cites app:performance)
+The per-sweep time is the minimum over three blocks of 1000 sweeps of the compiled burn-in
+executable, for all four chains together (the runner's own rate over the sampling sweeps is
+4.07\,ms); the peak resident set is reported in MiB, and ESS per second is taken over the warm-run
+wall time.
+% [R] tests/bench/baseline.json summary.sweep_ms_min3x1000 (runner rate over the sampling sweeps:
+% 4.07 ms), summary.peak_rss_mb (MiB), summary.ess.*.ess_per_s_min; benchmarks/phase2_perf.py
+% (phase2_perf.summarise; dossier 03 section 13.3)
 \cref{tab:TabE2} gives the result recorded at commit deb3929 on an Apple M5 Max that was not
 idle (one-minute load 2--6, desktop applications open): 52.3\,s cold and 49.6\,s warm, compilation
 3.46\,s cold and 1.00\,s from the persistent cache, 3.90\,ms per sweep, and a peak resident set of
@@ -1543,8 +2016,7 @@ per sweep, peak RSS, ESS and ESS per second by quantity group, the convergence f
 machine, load and commit.}
 \label{tab:TabE2}
 % [R] tests/bench/baseline.json (deb3929, non-idle Apple M5 Max); docs/paper/figures/tab_bench.py
-\InputIfFileExists{figures/tab_bench.tex}{}{\todo{Generate with \code{tab_bench.py} from
-\code{tests/bench/baseline.json}.}}
+\input{figures/tables/tab_bench.tex}
 \end{table}
 
 \begin{table}[!htbp]
@@ -1554,7 +2026,7 @@ indicators, AWOL draw, exact correction, SV core and sweep; XLA flops and bytes 
 design budget lines.}
 \label{tab:TabE3}
 % [R] tests/bench/baseline.json kernels; tests/bench/bench_kernels.py; docs/paper/figures/tab_kernels.py
-\InputIfFileExists{figures/tab_kernels.tex}{}{\todo{Generate with \code{tab_kernels.py}.}}
+\input{figures/tables/tab_kernels.tex}
 \end{table}
 
 \emph{Not measured on the production engine.}
@@ -1774,6 +2246,42 @@ an uncommitted copy of a script and of 520 + 424 fit records sits under
 
 \subsection{The criteria as coded}\label{app:cr-criteria}
 
+\cref{tab:cr-criteria} gives each criterion in the words of the replication plan, with its outcome
+in the first full run and in the acceptance run.
+
+\begin{table}[!htbp]
+\centering
+\small
+\caption{The six acceptance criteria: wording of the replication plan, and outcome of the rule as
+coded (quoted below) in the first full run (history; report at 551f181, path-conditioned
+LPD, $4 \times 5000$ draws) and in the acceptance run (path-integrated LPD, $4 \times 20{,}000$ draws).}
+\label{tab:cr-criteria}\label{Tab12}\label{tab:Tab12}
+% data: acceptance JSON criteria[*].{id,met,rule,detail}; first run benchmarks/reports/clark_ravazzolo.json criteria (551f181); script tab_cr_criteria.py (OUTLINE §14)
+% (Tab12, moved from §11 in the integration pass.) The "Rule as coded" column was removed in the page-budget pass: the rules are quoted verbatim in the list below.
+\begin{tabular}{@{}p{0.03\textwidth}p{0.56\textwidth}>{\leavevmode}p{0.08\textwidth}>{\leavevmode}p{0.25\textwidth}@{}}% \leavevmode: the \color that starts \fullrun and \acc would otherwise open the cell with an empty line
+\toprule
+\# & Wording (plan) & First run & Acceptance \\
+\midrule
+1 & SV beats Constant in average LPD at $h = 1, 2$ for all four variables in both samples; the joint
+  $h = 1$ gain is clearly positive
+  & \fullrun{met} & \acc{criteria[id=1].met} \\
+2 & CRPS ratio $< 1$ at $h \leq 2$ for all four variables
+  & \fullrun{met} & \acc{criteria[id=2].met} \\
+3 & RMSE ratios $\leq$ about 1 at short horizons
+  & \fullrun{met} & \acc{criteria[id=3].met} \\
+4 & Full sample: the $h = 8$ gain shrinks or turns negative for UR and the bill; pre-crisis it stays
+  positive for GDP and inflation
+  & \fullrun{not met} & \acc{criteria[id=4].met} \\
+5 & Neither SV-$t$ nor AR-SV systematically beats RW or AR SV
+  & \fullrun{met} & \acc{criteria[id=5].met} \\
+6 & \code{compare()} says ``better'' (DM one-sided at 10\% for at least GDP and the bill at
+  $h = 1$) in all 24 orderings, or the report states which fail
+  & \fullrun{not met} & \acc{criteria[id=6].met} \\
+\bottomrule
+\end{tabular}
+\end{table}
+% [FULL: criteria[*].met] first-run column; [V] rule strings identical in benchmarks/clark_ravazzolo.json (551f181) and the code at c823d20
+
 The six criteria of the replication plan are qualitative; the script turns them into the operational
 rules below, which are the project's own choices (for example, ``about 1'' became $\le 1.02$ and
 ``systematically'' became at least 3 of 4 joint horizons or 8 of 16 cells).
@@ -1895,7 +2403,7 @@ and outcome of each run, from the quick run to the acceptance run.}
 % [R] headers of clark_ravazzolo_quick.json and clark_ravazzolo.json (config, versions, seconds); issue #3;
 % commit metadata; [ACC] config, versions, seconds; run log (TODO 2); docs/paper/figures/tab_runs.py
 % NOTE for tab_runs.py: 4fc0162 is not an ancestor of 4bb978a (full run #2); list it after that run, not among its fixes
-\InputIfFileExists{figures/tab_runs.tex}{}{\todo{Generate with \code{tab_runs.py}.}}
+\input{figures/tables/tab_runs.tex}
 \end{table}
 
 \subsection{Data and models}\label{app:cr-data}
@@ -1968,10 +2476,13 @@ Tables~1--3 \citep{clark2012macroeconomic}, as hard-coded in the script (\code{C
 \code{CR_PRE_DLPS}, l.\,167).
 \todo{TODO 22: obtain the JAE tables, or keep saying that the working-paper numbers are used; resolve
 the 40-versus-56 count of re-read numbers in N08.}
-CR's VAR uses a Minnesota prior with $\theta = 0.2$, $1/l^2$ decay and a normal-diffuse prior on
-the coefficients \citep{kadiyala1997numerical}; their VAR-SV samples random-walk log-volatilities by
-the single-move step of \citet{jacquier1994bayesian}, with a $\sigma^2$ prior
-$\mathrm{IG}(1/2, 0.0175)$ that the replication does not adopt.
+CR's VAR(4) has a Minnesota prior without cross-variable shrinkage (tightness $\theta = 0.2$,
+$1/l^2$ lag decay, zero prior means) in the normal-diffuse form of \citet{kadiyala1997numerical},
+normal on the coefficients and diffuse on the error covariance; their VAR-SV has random-walk
+log-volatilities, sampled by the single-move step of \citet{jacquier1994bayesian}, with a $\sigma^2$
+prior $\mathrm{IG}(1/2, 0.0175)$ that the replication does not adopt.
+The variants we use are their AR-SV with a nearly fixed autoregressive coefficient and their SV with
+Student-$t$ errors with fixed degrees of freedom $d$ \citep{jacquier2004bayesian}. % [R] N08 §C3 (moved from §11.1)
 The working paper does not state a variable ordering, which is why all 24 orderings are run.
 % [R] dossier 06 section 2 (N08 sections C2, D item 2; the JAE text was not accessible)
 
@@ -1979,20 +2490,46 @@ The working paper does not state a variable ordering, which is why all 24 orderi
 
 \cref{tab:TabF4} gives the pre-crisis comparison of SV(rw) and Constant at $h = 1$ and $h = 8$,
 \cref{tab:TabF5} every SV arm against Constant with the convergence shares, the verdicts with
-the gate on and off, the route by which each verdict was reached and the variant comparisons of
-criterion~5, and \cref{tab:TabF7} the Constant arm's levels against CR's benchmark VAR together
+the gate on and off, MCS membership and the variant comparisons of criterion~5, and \cref{tab:TabF7} the Constant arm's levels against CR's benchmark VAR together
 with the compute record.
-The reading rules of \cref{sec:replication} apply to every number here.
+The reading rules below apply to every number here.
+Which numbers may move between the two runs was written down before the acceptance numbers
+existed. % [R] docs/paper/dossiers/06_empirical.md §9.5, OUTLINE §11.9 (paper worktree, untracked; no acceptance JSON existed then, OUTLINE §0.4)
+\begin{itemize}
+  \item[A.] \emph{Estimator:} every RB $\Delta$LPS and $\Delta$LPD at $h \geq 2$, the DM $p$-values
+    at $h \geq 2$, the RB/Gaussian sign disagreements, the criterion-4 cells, the variant
+    comparisons and the ordering spread at $h \geq 2$.
+  \item[B.] \emph{Monte Carlo noise only:} all $h = 1$ LPD numbers, CRPS and RMSE ratios, Gaussian
+    scores and $h = 1$ DM $p$-values (the two estimators coincide at $h = 1$).
+    Between the quick run ($4 \times 2000$) and the first full run, the full-sample $h = 1$
+    $\Delta$LPS of SV(rw) moved by at most \fullrun{$0.003$} per marginal cell and \fullrun{$0.002$}
+    joint, and over all arms and both samples by at most \fullrun{$0.0044$} per marginal cell and
+    \fullrun{$0.0122$} joint; this is the Monte Carlo yardstick of rule~B.
+    % [FULL]/[R] computed from clark_ravazzolo_quick.json and clark_ravazzolo.json (relative[sample][arm], h=1): SV(rw) full max 0.0027 marginal, 0.0019 joint; all arms and samples max 0.0044 marginal (pre_crisis SV(rw)), 0.0122 joint (full AR-SV(0.9)). The quick report predates f60d736 (OUTLINE risk 19): context only.
+  \item[C.] \emph{Budget:} converged shares, gate-on verdicts, criterion~6's gate-on count, the MC
+    standard errors of the totals and the run time.
+  \item[D.] \emph{Unchanged by design:} data checks, models, priors, origins, rules and fit seeds.
+\end{itemize}
+Reading rule~B is the check on the $h = 1$ numbers: they should differ from the first run's by
+Monte Carlo noise only.
 Under the expanding window, any ``better'' verdict can only come through the model confidence set
 \citep{hansen2011model}.
 In the first full run the pre-crisis GDP $h = 8$ cell, which criterion~4 needs to be positive, was
 \fullrun{$+0.108$} under the path-conditioned estimator and \fullrun{$-0.004$} under the Gaussian
-approximation; its acceptance values are \acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps} and
-\acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_gauss}.
+approximation; its acceptance values are
+\acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps} (path-integrated),
+\acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_conditioned} (path-conditioned) and
+\acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_gauss} (Gaussian).
 % [FULL] relative.pre_crisis['SV(rw)'] (551f181); [ACC]
 The fit-level diagnostic covered only SV(rw), and only three of the 24 orderings at the main-stage
 seeds, so the gate-on verdicts of SV, SV(rw,t10) and AR-SV(0.9) may stay inconclusive.
 % [PREREG] item 1
+The converged shares of every arm, in both samples, are in the last column of \cref{tab:TabF5}. % [ACC] converged.{full,pre_crisis} (the §11.7 sentence on the other arms' shares; its \acc keys are the cells of TabF5)
+Across arms and samples the RB and Gaussian $\Delta$LPS differ in sign in
+\acc{count(relative[*][*].variables[*][*].rb_gauss_disagree = true)} marginal and
+\acc{count(relative[*][*].joint[*].rb_gauss_disagree = true)} joint cells. % [ACC] (moved from §11.7)
+Across the $24$ orderings the joint $h = 1$ gain of SV(rw) over \code{Constant} runs from
+\acc{min(orderings.per_ordering[*].dlpd_h1)} to \acc{max(orderings.per_ordering[*].dlpd_h1)} nats. % [ACC] (moved from §11.7)
 
 \begin{table}[!htbp]
 \centering\small
@@ -2002,20 +2539,18 @@ Gaussian-approximation $\Delta$LPS and the number of RB-degenerate origins, with
 values.}
 \label{tab:TabF4}
 % [ACC] relative.pre_crisis['SV(rw)']; CR_PRE_DLPS (l.167); docs/paper/figures/tab_cr_precrisis.py
-\InputIfFileExists{figures/tab_cr_precrisis.tex}{}{\todo{Generate with \code{tab_cr_precrisis.py} from
-the acceptance JSON.}}
+\input{figures/tables/tab_cr_precrisis.tex}
 \end{table}
 
 \begin{table}[!htbp]
-\centering\small
-\caption{All SV arms against Constant: joint $\Delta$LPD by horizon, share of converged
-origins, the \code{compare()} verdict with the gate on and off and its route (DM or MCS), MCS
-membership; and the variant comparisons of criterion~5, full and pre-crisis samples.}
+\centering\footnotesize
+\caption{All SV arms against Constant, full and pre-crisis samples: joint $\Delta$LPD by horizon,
+converged share, the \code{compare()} verdict with the gate on and off, and MCS membership; and the
+variant comparisons of criterion~5 (full sample only).}
 \label{tab:TabF5}
 % [ACC] relative.{full,pre_crisis}[arm].joint, converged.{full,pre_crisis}, verdicts.{full,pre_crisis},
 % variants[variant][ref].joint; docs/paper/figures/tab_cr_arms.py
-\InputIfFileExists{figures/tab_cr_arms.tex}{}{\todo{Generate with \code{tab_cr_arms.py} from the
-acceptance JSON.}}
+\input{figures/tables/tab_cr_arms.tex}
 \end{table}
 
 \begin{table}[!htbp]
@@ -2027,8 +2562,7 @@ check, not a parity test.}
 \label{tab:TabF7}
 % [ACC] relative.full['SV(rw)'].variables[v]['1'].{lps_base,rmse_base}, seconds, versions, config;
 % CR levels from N08 section C5; docs/paper/figures/tab_cr_levels_compute.py
-\InputIfFileExists{figures/tab_cr_levels_compute.tex}{}{\todo{Generate with
-\code{tab_cr_levels_compute.py}; stage times must be written to the JSON or the report.}}
+\input{figures/tables/tab_cr_levels_compute.tex}
 \end{table}
 
 \begin{figure}[!htbp]
@@ -2071,7 +2605,9 @@ with 8 chains and at $4\times20{,}000$, for the identity ordering and the two wo
 first run, together with the main-stage against ordering-stage seed comparison.
 Its numbers are those of the pre-registration until the diagnostic is committed.
 \cref{fig:FigF2} compares the converged shares per ordering of the first full run and the
-acceptance run.
+acceptance run; across the $24$ orderings of the acceptance run, SV(rw) converged at
+\acc{min(orderings.per_ordering[*].converged_sv)} to
+\acc{max(orderings.per_ordering[*].converged_sv)} of origins. % [ACC] (moved from §11.7)
 The seed comparison is itself evidence of R-hat noise at the threshold: the same models in the same
 ordering converged at \fullrun{72} (main-stage seeds) and \fullrun{69} (ordering-stage seeds) of 106
 origins, with joint $h = 1$ $\Delta$LPD of \fullrun{$+0.809$} and \fullrun{$+0.838$}.
@@ -2086,8 +2622,7 @@ comparison.}
 \label{tab:TabF6}
 % [PREREG] benchmarks/reports/clark_ravazzolo_preregistration.md item 1 (c823d20); TODO 4;
 % docs/paper/figures/tab_cr_budget.py
-\InputIfFileExists{figures/tab_cr_budget.tex}{}{\todo{Generate with \code{tab_cr_budget.py}; the
-numbers stay [PREREG] until TODO 4 is done.}}
+\input{figures/tables/tab_cr_budget.tex}
 \end{table}
 
 \subsection{The first full run (history)}\label{app:cr-first-run}
@@ -2098,28 +2633,35 @@ the cells in which the RB and Gaussian $\Delta$LPS differ in sign.
 They were produced by the path-conditioned estimator with $4\times5000$ draws and 1000 forecast
 draws, and they are history, not results; \cref{sec:replication} summarises what they
 showed and why the acceptance run differs.
+In the failing criterion-4 cell (full sample, unemployment, $h = 8$) the median per-origin
+difference was \fullrun{$+0.099$}, and the Gaussian approximation gave \fullrun{$-0.499$}.
+% [FULL: criteria[id=4].detail; relative.full['SV(rw)'].variables.UR['8'].{dlps,dlps_median,dlps_top,rb_degenerate,dlps_gauss}; rb_gauss_disagree counts recomputed] (moved from §11.5)
 Across all SV arms and both samples, the RB and Gaussian $\Delta$LPS differed in sign in \fullrun{28}
 marginal and \fullrun{8} joint cells, all at $h \ge 2$.
 % [FULL] clark_ravazzolo.json rb_gauss_disagree (551f181); dossier 06 section 7.2 (fact-checked)
+In the report's example warning for each SV arm (main stage), a fit missed on one $\sigma$ quantity
+out of 13 primary quantities (random-walk arms) or 21 (AR arms), with $\hat R$
+\fullrun{1.012--1.020} and bulk ESS \fullrun{537--743}. With the gate off, all four SV arms were
+``better'' than \code{Constant} at $h = 1$ in the full sample through the MCS route (total
+$\Delta$LPD \fullrun{$+85.7$ to $+87.5$} nats, MCSEs \fullrun{1.00--1.06}). % [FULL: criteria[id=6].detail; orderings.per_ordering[*].converged_*; warnings[arm]['MCMC not converged'].example (SV(rw) 1 of 13, R-hat 1.015, ESS 618; SV 1 of 21, 1.013, 550; SV(rw,t10) 1 of 13, 1.020, 537; AR-SV(0.9) 1 of 21, 1.012, 743); verdicts.full (gate off, h=1: MCS25 model in, reference out)] (moved from §11.5)
+In the first run the joint $h = 1$ range across orderings was \fullrun{$0.083$} nats against a gain
+of \fullrun{$0.809$}, and the per-variable gains were \fullrun{2.2--7.8} times their ranges.
+% [FULL: orderings.results['SV(rw)'].joint_lpd_range['1'], .summary[horizon=1].lpd_range; relative.full['SV(rw)'].variables[*]['1'].dlps] (moved from §11.7)
 The order-invariant Constant arm was flagged ``material'' by the ordering diagnostic at two $h > 1$
 cells (joint $h = 2$ and UR $h = 8$), with a noise floor resting on one
 replicate; this is reported as a limitation of the diagnostic, and the acceptance run's flag is
 \acc{orderings.results.Constant.material}.
 % [FULL] orderings.results['Constant'].material = True; TODO 26
-Differences from CR's levels, such as inflation gains of \fullrun{1.6--3.2} times CR's, are not
-attributed to any single cause; final-vintage chain-type prices and the iw\_equivalent baseline are
-hypotheses only.
+Differences from CR's levels, such as inflation gains of \fullrun{1.6--3.2} times CR's (our RB score
+against their Gaussian one), are not attributed to any single cause; final-vintage chain-type prices
+and the iw\_equivalent baseline are hypotheses that we did not test. % [FULL: relative.full['SV(rw)'].variables.INFL[*].dlps vs CR_FULL]
 
 \begin{table}[!htbp]
-\centering\small
-\caption{First full run, for the record: code 4bb978a, report 551f181, path-conditioned RB
-estimator, $4\times5000$ kept draws, 1000 forecast draws. Headline, pre-crisis, all arms, variants,
-structural pair, RB-degenerate origins and the RB/Gaussian sign-disagreement cells. These numbers
-are history, not results.}
+\centering\footnotesize
+\caption{The first full run's tables, for the record: history, not results (the note names the run).}
 \label{tab:TabF8}
 % [FULL] benchmarks/reports/clark_ravazzolo.json (551f181); docs/paper/figures/tab_first_run.py
-\InputIfFileExists{figures/tab_first_run.tex}{}{\todo{Generate with \code{tab_first_run.py} from the
-first full run's JSON.}}
+\input{figures/tables/tab_first_run.tex}
 \end{table}
 
 \clearpage
@@ -2171,14 +2713,18 @@ FRED-QD 2026-09 & \texttt{a144b1547ddbad5c68fc934c90c0c0f9837a5139571ba8e64afcc2
 % [V] src/rai_bvar/datasets/fred.py l.71-74 (REGISTRY), unchanged between 62d15f6 and c823d20
 
 \emph{Regeneration.}
-The \code{Makefile} in \code{docs/paper} regenerates the figures from committed code and data
-(\code{make figures}) and builds the paper (\code{make}); each figure script names its data source
-in its header, and \cref{tab:TabG2} is to give the command for each float.
+The \code{Makefile} in \code{docs/paper} regenerates the figures and the generated table bodies
+from committed code and data (\code{make figures}, \code{make tables}) and builds the paper
+(\code{make}); each script names its data source in its header, and \cref{tab:TabG2} is to give the
+command for each float.
 The acceptance tables and figures need \code{benchmarks/reports/clark_ravazzolo_acceptance.json},
 and \cref{fig:FigF1,fig:FigF3} the per-origin export of TODO~5.
-\todo{TODO 20: the table generators named in the captions (\code{tab_*.py}) are not written yet;
-add them to the \code{Makefile}, then state the one command and its wall time on the release
-commit.}
+\todo{TODO 20: the 14 generators of the appendix tables run with \code{make tables}; the 11
+generators named only in comments of tables typed into the sources (\code{tab_components},
+\code{tab_resolution}, \code{tab_tiers}, \code{tab_mutation}, \code{tab_cr_criteria},
+\code{tab_cr_headline}, \code{tab_notation}, \code{tab_contract}, \code{tab_cr_data},
+\code{tab_cr_models}, \code{tab_reproducibility}) are not written: write them or drop the names,
+then state the one command and its wall time on the release commit.}
 
 \emph{What reproduces how.}
 \cref{tab:TabG1} states each guarantee with its scope.
@@ -2265,6 +2811,8 @@ children, which JAX's key-reuse checker cannot see, and the engine avoids this b
 consumer its own sub-key.
 % [V] src/rai_bvar/engines/mcmc/keys.py; tests/mcmc/runner/test_sweep.py::test_counter_must_be_uint32;
 % tests/mcmc/blocks/test_robust.py::test_ahead_and_transition_give_the_core_its_own_sub_key
+A test checks this for the volatility core's forecast draws, where a draw from the block key would
+reuse the words of the transitory sub-keys. % [R] DESIGN §3.1 rule 5, §5.6; [V] tests/mcmc/blocks/test_robust.py::test_ahead_and_transition_give_the_core_its_own_sub_key (moved from §4.6)
 
 \begin{table}[!htbp]
 \centering\small
@@ -2272,11 +2820,97 @@ consumer its own sub-key.
 \pkg{jaxlib}, \pkg{scoringrules} and the BLAS backend; the machines; the release commit; and the
 command that regenerates each table and figure.}
 \label{tab:TabG2}
-% [REL] docs/paper/data/release/env.json (written by docs/paper/figures/run_examples.py);
+% [REL] docs/paper/data/release/env.json (written by docs/paper/code/run_examples.py);
 % docs/paper/figures/tab_environment.py
-\InputIfFileExists{figures/tab_environment.tex}{}{\todo{Generate with \code{tab_environment.py} on the
-release commit.}}
+\input{figures/tables/tab_environment.tex}
 \end{table}
+
+% (moved from §6.7 in the page-budget pass; cited from §6)
+\subsection{Backtest seeding, caching and parallel runs}\label{app:backtest}
+
+Instead of a start date, an end date and a \code{step}, \code{backtest()} also accepts a given list
+of origins.
+% [V] src/rai_bvar/evaluation/backtest.py l.125-137 (Origins: start, end, step) at d58c9ef
+Each origin of a backtest has its own forecast generator and, for MCMC models, its own fit seed,
+both derived from the backtest seed and the origin; a data salt keeps chains independent across
+windows and orderings.
+% [V] src/rai_bvar/evaluation/backtest.py l.359-370 (fit_seed) and src/rai_bvar/engines/mcmc/keys.py l.189-193 (data_salt) at d58c9ef
+Scores are cached per origin under a key of spec, sample, outcomes, origin and settings, with
+tags for the MCMC seeding and a non-default estimator, so runs resume and adding a model fits only
+that model.
+% [V] tests/integration/test_backtest.py::test_cache_roundtrip_and_invalidation; tests/integration/test_backtest_lpd_integrated.py::test_cache_keys_are_tagged_only_for_another_estimator
+A pool of spawned workers reproduces the serial results to $10^{-12}$.
+% [V] tests/integration/test_backtest_mcmc.py::test_spawn_pool_matches_the_serial_backtest (slow; no bitwise claim across processes)
+Warm starts are opt-in and require strictly increasing origins.
+% [V] src/rai_bvar/evaluation/backtest.py l.267-271 at d58c9ef
+
+% (the full scripts and outputs of §7, moved in the page-budget pass; §7 cites app:walk-output,
+% lst:Lst1-out and lst:Lst2-out)
+\subsection{The walk-through scripts and their output}\label{app:walk-output}
+
+\cref{lst:Lst1-full,lst:Lst2-full} are the scripts of \cref{sec:walkthrough} and
+\cref{lst:Lst1-out,lst:Lst2-out} their standard output, verbatim; nothing was written to stderr by
+\code{ex\_a.py}.
+% [V] docs/paper/code/{ex_a,ex_b}.py, out/{ex_a,ex_b}.txt, out/env.json (d58c9ef, macOS arm64); identical to dossier 02 §13 outputs at 62d15f6; out/ex_a.stderr.txt is empty
+They were run with \code{docs/paper/code/run_examples.py}, which records the platform and the
+package versions; the MCMC numbers are platform-specific.
+
+\lstinputlisting[language=Python, firstline=6, firstnumber=6, numbers=left, numberstyle=\tiny,
+  basicstyle=\lstfontfamily\scriptsize, columns=fullflexible, keepspaces=true, breaklines=true,
+  showstringspaces=false, upquote=true,
+  caption={\code{ex\_a.py} in full (from line 6; lines 1--5 are comments naming the commit of the
+  run).},
+  label=lst:Lst1-full]{code/ex_a.py}
+\lstinputlisting[basicstyle=\lstfontfamily\scriptsize, columns=fullflexible, keepspaces=true,
+  breaklines=true, upquote=true, caption={Output of \cref{lst:Lst1-full} (stdout, verbatim).},
+  label=lst:Lst1-out]{code/out/ex_a.txt}
+
+The log difference (code 5) consumes the first period: 239 of the 240 raw rows remain.
+% [V] docs/paper/code/out/ex_a.txt line 1
+Line 35 prints the resolved engine, and lines 40--41 summarise the forecast on the transformed
+scale and, through the pathwise inverse, on the level scale.
+% [V] out/ex_a.txt line 3 ("analytic | BVAR(Minnesota(conjugate, eb, SOC+SUR), p=2)") and lines 8-14
+Empirical Bayes sets the tightness (printed as \code{lambda}; $\kappa$ in \cref{sec:framework})
+and the SOC and SUR weights.
+% [V] out/ex_a.txt lines 3-7 (kappa 0.268, soc 1.120, sur 1.177)
+The comparison runs 39 rolling-window origins at $h = 1$ and 36 at $h = 4$.
+% [V] out/ex_a.txt table, column origins
+A comparison that credits the prior would pair the BVAR with an arm that differs from it only in
+the prior.
+% [V] out/ex_a.txt verdict lines (the BVAR differs from RW along seven axes)
+
+\lstinputlisting[language=Python, firstline=8, firstnumber=8, numbers=left, numberstyle=\tiny,
+  basicstyle=\lstfontfamily\scriptsize, columns=fullflexible, keepspaces=true, breaklines=true,
+  showstringspaces=false, upquote=true,
+  caption={\code{ex\_b.py} in full (from line 8; lines 1--7 are comments).},
+  label=lst:Lst2-full]{code/ex_b.py}
+\lstinputlisting[basicstyle=\lstfontfamily\scriptsize, columns=fullflexible, keepspaces=true,
+  breaklines=true, upquote=true, caption={Output of \cref{lst:Lst2-full} (stdout, verbatim; MCMC
+  numbers are platform-specific).},
+  label=lst:Lst2-out]{code/out/ex_b.txt}
+
+Unlike \cref{lst:Lst1}, the default mean of \cref{lst:Lst2-full} has no dummy observations, and
+its Minnesota hyperparameters are the empirical-Bayes plug-in of the conjugate twin
+(\code{eb\_method: conjugate\_twin} in line 3 of the output).
+% [V] out/ex_b.txt lines 2-3
+The summary reports $\hat R$ and bulk ESS for every primary quantity.
+On the homoskedastic DGP of the walk-through the SV parameters mix slowly: $\phi_i$ and $\sigma_i$
+have bulk ESS between 110 and 362 from 4000 kept draws and $\hat R$ up to 1.042, so the fit is
+flagged as not converged; the library's warning (on stderr, not shown) reports that 7 of the 16
+primary quantities fail, which by the table are the six SV parameters $\phi_i$, $\sigma_i$ and the
+log-likelihood ($\hat R$ 1.031, bulk ESS 179).
+% [V] out/ex_b.txt summary table and "converged: False" (MCMCSettings(chains=4, draws=1000): 4 x 1000 kept draws); out/ex_b.stderr.txt ("7 of 16 primary quantities fail", naming the five worst; warning text not reproduced; a second warning names other packages, TODO 16)
+In the final comparison the axis labels of the two arms differ only in \code{vol}.
+% [V] out/ex_b.txt axes lines
+With the interest rate ordered last, a one-s.d.\ rate shock has no impact effect on output growth
+or inflation in the recursive identification (lines 52--54 of \cref{lst:Lst2-full}).
+% [V] out/ex_b.txt IRF table, horizon 0 (0.0000, 0.0)
+A longer chain is the first remedy for the unconverged SV fit of the walk-through.
+% [V] out/ex_b.txt reasons line ("converged at only 0% of origins")
+The \code{engine} attribute of the forecast records which engine produced it, and the MCMC
+forecast also carries the ordering, sampler metadata and accelerator variables
+(\cref{tab:TabC1}).
+% [V] out/ex_b.txt line "ForecastResult(...) | engine attr: mcmc"; tests/contract/test_forecast_contract_mcmc.py
 
 % -------------------------------------------------------------------------------------
 \section{Licensing and source-reading practice}\label{app:licensing}
@@ -2297,6 +2931,12 @@ the versions and the purpose each note records, and the notes in which none was 
 The versions in the table are those of the source that was read; the parity fixtures were produced
 with \pkg{stochvol} 3.2.1 and R \pkg{BVAR} 1.0.5 (\cref{app:parity}).
 % [R] tests/parity/SV_PARAMETRIZATION.md "Versions"; DESIGN section 9.9 names stochvol 3.2.9
+Not every package whose source was read is an oracle of this release: the notes also record
+reading the sources of \pkg{bayesianVARs}, \pkg{bvarsv}, \pkg{bvartools}, \pkg{factorstochvol}
+and \pkg{bsvars} to confirm published constants and observable behaviour.
+% [R] docs/phase2/01_omori_mixture.md l.9-11; docs/phase2/02_sv_sampler.md l.597-608 (moved from §2)
+The source of the MIT-licensed Bank of England package was read to document its conventions as
+an oracle. % [R] tests/parity/BOE_BVAR_NOTES.md header (moved from §2)
 
 \begin{table}[!htbp]
 \centering\footnotesize
