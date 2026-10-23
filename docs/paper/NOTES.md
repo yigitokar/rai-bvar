@@ -76,10 +76,13 @@ re-derived before it goes into the paper).
 13. **The dummy-augmented Mode II prior has a closed-form λ marginal,** `λ_i | d ~ IG(c + m/2,
     C + ½ r'(F_d P̃⁻¹F_dᵀ + I/w)⁻¹r)` with `r = y_d − F_dμ₀`, so the Geweke reference can sample
     the prior exactly (integrate θ, then condition θ on the rows by Matheron's rule). Under
-    `iw_equivalent` (only `a_i` λ-scaled, rows with fixed weight) `p(d | λ)` is not inverse-gamma
-    and there is no closed-form prior sampler; the log prior is still exact up to a constant.
-    Evidence: `validation/dummies.py`, `tests/validation/test_reference_dummies.py`. Status:
-    verified.
+    `iw_equivalent` (only `a_i` λ-scaled, rows with fixed weight) `p(d | λ) = N(r; 0, S₀ + λUUᵀ)`
+    is not inverse-gamma, but the IG base prior is an exact rejection envelope: `|S(λ)| ≥ |S₀|`
+    and `q(λ) = r'S(λ)⁻¹r ≥ q∞ = min_u (r − Uu)'S₀⁻¹(r − Uu)` (the GLS residual), so
+    `g(λ) = (|S₀|/|S(λ)|)^{½}exp(−½(q − q∞)) ≤ 1`; acceptance 0.6–1.0 on the test rows. The log
+    prior is exact up to the (intractable) evidence. Evidence: `validation/dummies.py`,
+    `tests/validation/test_reference_dummies.py` (KS against the quadrature CDF), Geweke row 205
+    (G-small max |z| 2.24, G-full 2.76), SBC row 205 (min p 0.018). Status: verified.
 14. **Dummy rows break the diagonal prior precision, but the O(q²) eigen fast path survives**: with
     `P = L_P L_Pᵀ` dense, `K = L_P(I + L_P⁻¹GL_P⁻ᵀ/λ)L_Pᵀ`, one per-fit eigendecomposition again
     gives every λ in O(q²), and storing `L_P⁻ᵀQ` keeps the per-sweep draw code unchanged. At

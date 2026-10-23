@@ -167,13 +167,62 @@ def test_reduced_log_density_and_sampler():
         assert np.max(np.abs(z_mean)) < 5.0 and np.max(np.abs(z_var)) < 5.0
 
 
-def test_iw_equivalent_prior_sampler_is_not_available():
-    from dataclasses import replace
+def test_iw_equivalent_rejection_sampler():
+    """``iw_equivalent`` with rows: the rejection draws of ``λ_i | d`` follow the exact density
+    ``∝ IG(λ; c, C) N(r; 0, S₀ + λUUᵀ)`` (CDF by numerical quadrature on a fine log-λ grid, KS
+    test), and ``θ_i | λ_i, d`` is the Gaussian posterior of the base prior given the rows with the
+    λ-scaled ``a`` block (standardised moments, ``|z| ≤ 5``)."""
+    spec = joint_spec("structural_iw_equivalent_dummies")
+    static, prior = spec.static, spec.prior
+    k = static.shapes.k
+    Yd, Xd = np.asarray(prior.shared.dummies.Y), np.asarray(prior.shared.dummies.X)
+    Mc = np.asarray(prior.shared.Mc)
+    for i in range(3):
+        prior_i = _slice(prior.eq, i)
+        c, C = float(prior_i.vol_core.shape), float(prior_i.vol_core.scale)
+        w = float(prior.eq.coef.dummy_w[i])
+        Fd = np.hstack([Xd, Xd @ Mc[:, :i] - Yd[:, :i]])
+        vd = 1.0 / np.asarray(prior.eq.coef.prec0)[i]
+        va = 1.0 / np.asarray(prior.eq.contemp.prec0)[i, :i]
+        mu0 = np.concatenate([np.asarray(prior.eq.coef.mean0)[i], np.zeros(i)])
+        r = Yd[:, i] - Fd @ mu0
+        m = Fd.shape[0]
 
-    from rai_bvar.validation.joint import JointSpec, reference_prior
+        def log_post(lam, Fd=Fd, vd=vd, va=va, r=r, w=w, c=c, C=C, m=m):
+            S = (Fd[:, :k] * vd) @ Fd[:, :k].T + lam * (Fd[:, k:] * va) @ Fd[:, k:].T
+            S = S + np.eye(m) / w
+            return stats.invgamma.logpdf(lam, c, scale=C) + stats.multivariate_normal.logpdf(
+                r, np.zeros(m), S
+            )
 
-    base = joint_spec("structural_iw_equivalent")
-    static = replace(base.static, mean=replace(base.static.mean, n_dummy=4))
-    spec = JointSpec("iw_eq+dummies", static, reference_prior(static), base.fixed)
-    with pytest.raises(NotImplementedError, match="iw_equivalent"):
-        spec.prior_sample(KEY)
+        grid = np.exp(np.linspace(np.log(1e-3), np.log(1e3), 20_001))
+        lp = np.array([log_post(x) for x in grid])
+        dens = np.exp(lp - lp.max()) * grid  # density of log λ on the uniform log grid
+        cdf = np.concatenate([[0.0], np.cumsum(0.5 * (dens[1:] + dens[:-1]))])
+        cdf /= cdf[-1]
+        core = ConstantEq(log_lam=jnp.zeros(()))
+        draw = jax.jit(
+            jax.vmap(
+                lambda key, i=i, prior_i=prior_i, core=core: structural_dummy_prior_sample_eq(
+                    key, jnp.int32(i), prior_i, prior.shared, static, core
+                )
+            )
+        )
+        core_s, a_s, d_s = draw(random.split(random.fold_in(KEY, 20 + i), N_MC))
+        lam_s = np.exp(np.asarray(core_s.log_lam))
+        pval = stats.kstest(
+            lam_s, lambda x, grid=grid, cdf=cdf: np.interp(np.log(x), np.log(grid), cdf)
+        ).pvalue
+        assert pval > 1e-4, (i, pval)
+        # θ | λ: Gaussian posterior of N(μ₀, diag(vd, λ va)) given the rows (noise 1/w)
+        th_s = np.hstack([np.asarray(d_s.delta), np.asarray(a_s.a)[:, :i]])
+        zs = []
+        for lam, th in zip(lam_s[:4000], th_s[:4000], strict=True):
+            P = np.diag(1.0 / np.concatenate([vd, lam * va])) + w * Fd.T @ Fd
+            mu = np.linalg.solve(P, P @ mu0 - w * Fd.T @ (Fd @ mu0) + w * Fd.T @ Yd[:, i])
+            Lp = np.linalg.cholesky(P)
+            zs.append(Lp.T @ (th - mu))  # ~ N(0, I)
+        zs = np.asarray(zs)
+        n_z = zs.shape[0]
+        assert np.max(np.abs(zs.mean(axis=0)) * np.sqrt(n_z)) < 5.0
+        assert np.max(np.abs(zs.var(axis=0) - 1.0) / np.sqrt(2.0 / n_z)) < 5.0

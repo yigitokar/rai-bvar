@@ -22,12 +22,22 @@ rows' noise variance ``R``, the prior *with* the rows is the conditional law giv
 * Mode II (``V₀ = λ Ṽ₀``, ``R = λ/w``): ``p(d | λ) = N(y_d; F_d μ₀, λ S̃)``, ``S̃ = F_d Ṽ₀ F_dᵀ + I/w``,
   so ``λ | d ~ IG(c + m/2, C + ½ r'S̃⁻¹r)`` with ``r = y_d − F_d μ₀`` and
   ``p(d) = Γ(c + m/2)/Γ(c) · C^c/(C + ½ r'S̃⁻¹r)^{c+m/2} · (2π)^{−m/2} |S̃|^{−½}``.
-* ``iw_equivalent`` (only ``a`` λ-scaled, rows with fixed weight): ``p(d | λ)`` is not of IG form,
-  so :func:`log_rows_evidence` is not available; the log prior is then exact **up to a constant**
-  (enough for every density-ratio identity) and the prior sampler raises.
+* ``iw_equivalent`` (only ``a`` λ-scaled, rows with fixed weight ``w``): ``p(d | λ) = N(r; 0,
+  S(λ))`` with ``S(λ) = S₀ + λUUᵀ``, ``S₀ = F_δV_δF_δᵀ + I/w``, ``U = F_aṼ_a^{½}``, which is not of IG
+  form: ``log p(d)`` has no closed form, so the log prior is exact **up to a constant** (enough for
+  every density-ratio identity and every Geweke/SBC statistic). ``λ | d`` is drawn exactly by
+  rejection from the base prior ``IG(c, C)`` with acceptance probability
+
+      g(λ) = (|S₀|/|S(λ)|)^{½} exp(−½(q(λ) − q∞)) ≤ 1,   q(λ) = r'S(λ)⁻¹r,
+      q∞ = lim_{λ→∞} q(λ) = min_u (r − Uu)'S₀⁻¹(r − Uu)
+
+  (``|S(λ)| ≥ |S₀|`` and ``q(λ) ≥ q∞`` because ``S(λ) ⪰ S₀`` grows with λ; ``p(λ | d) ∝ IG(λ; c,
+  C) g(λ)``). Proposals come in batches; the first accepted proposal of a batch is the sequential
+  rejection draw, so the sampler is exact.
 
 Draws use **Matheron's rule** (exact for Gaussian conditioning): ``θ₀ ~ N(μ₀, V₀)``, ``ε ~ N(0, R I)``,
-``θ = θ₀ + V₀F_dᵀ(F_d V₀ F_dᵀ + R I)⁻¹(y_d − F_d θ₀ − ε)``; Mode II first draws ``λ | d``.
+``θ = θ₀ + V₀F_dᵀ(F_d V₀ F_dᵀ + R I)⁻¹(y_d − F_d θ₀ − ε)``; Mode II and ``iw_equivalent`` first draw
+``λ | d``.
 """
 
 from __future__ import annotations
@@ -182,16 +192,16 @@ def structural_dummy_prior_sample_eq(
     core: Any,
 ) -> tuple[Any, RecursiveEq, LinearEq]:
     """``(core, a_i, δ_i)`` from the prior with the rows (module docstring): Mode II redraws
-    ``λ_i | d ~ IG(c + m/2, C + ½ r'S̃⁻¹r)`` (``core`` is replaced), then ``θ_i | λ_i, d`` by
-    Matheron's rule; Mode I keeps ``core`` (λ does not enter the rows' law)."""
+    ``λ_i | d ~ IG(c + m/2, C + ½ r'S̃⁻¹r)`` and ``iw_equivalent`` draws ``λ_i | d`` by rejection
+    (``core`` is replaced), then ``θ_i | λ_i, d`` by Matheron's rule; Mode I keeps ``core`` (λ does
+    not enter the rows' law)."""
     mode = _mode(static)
-    if mode == "iw_equivalent":
-        raise NotImplementedError(
-            "no closed-form reference prior sampler for iw_equivalent with dummy rows: λ | d is "
-            "not inverse-gamma there (validation/dummies.py)"
-        )
     k = static.shapes.k
-    if mode == "II":
+    if mode == "iw_equivalent":
+        base = structural_rows_eq(i, prior_i, shared, static, 0.0)
+        log_lam = _iweq_log_lambda(random.fold_in(key, 0), base, prior_i, k)
+        core = ConstantEq(log_lam=log_lam)
+    elif mode == "II":
         cp = prior_i.vol_core
         base = structural_rows_eq(i, prior_i, shared, static, 0.0)
         quad, _ = _quad_logdet(base["F"], base["y"], base["mu0"], base["v0_tilde"], 1.0 / base["w"])
@@ -207,6 +217,49 @@ def structural_dummy_prior_sample_eq(
     mask_a = prior_i.contemp.cmask
     a = jnp.where(mask_a > 0, theta[k:], 0.0)
     return core, RecursiveEq(a=a), LinearEq(delta=theta[:k])
+
+
+_REJECT_BATCH = 64  # rejection proposals per while-loop iteration (iw_equivalent λ | d)
+
+
+def _iweq_log_lambda(key: Array, base: dict[str, Array], prior_i: EqPrior, k: int) -> Array:
+    """``log λ`` with ``λ ~ p(λ | d) ∝ IG(λ; c, C)·N(r; 0, S₀ + λUUᵀ)`` by exact rejection from
+    ``IG(c, C)`` (module docstring). ``base`` is :func:`structural_rows_eq` at ``λ = 1`` (so its
+    ``v0`` holds the λ-free variances)."""
+    F, y, mu0, v0, w = base["F"], base["y"], base["mu0"], base["v0_tilde"], base["w"]
+    m = F.shape[0]
+    Fd, Fa = F[:, :k], F[:, k:]
+    S0 = (Fd * v0[None, :k]) @ Fd.T + jnp.eye(m, dtype=_F64) / w
+    L0 = jnp.linalg.cholesky(0.5 * (S0 + S0.T))
+    Ut = jax.scipy.linalg.solve_triangular(L0, Fa * jnp.sqrt(v0[None, k:]), lower=True)  # L0⁻¹U
+    rt = jax.scipy.linalg.solve_triangular(L0, y - F @ mu0, lower=True)  # L0⁻¹r
+    coef = jnp.linalg.lstsq(Ut, rt)[0]
+    q_inf = jnp.sum((rt - Ut @ coef) ** 2)  # min_u ‖r̃ − Ũu‖²
+    eye = jnp.eye(m, dtype=_F64)
+
+    def log_accept(lam: Array) -> Array:
+        # S(λ) = L0(I + λŨŨᵀ)L0ᵀ: |S(λ)|/|S₀| = |I + λŨŨᵀ|, q(λ) = r̃ᵀ(I + λŨŨᵀ)⁻¹r̃
+        Lm = jnp.linalg.cholesky(eye + lam * (Ut @ Ut.T))
+        v = jax.scipy.linalg.solve_triangular(Lm, rt, lower=True)
+        log_g = -jnp.sum(jnp.log(jnp.diag(Lm))) - 0.5 * (v @ v - q_inf)
+        return jnp.minimum(log_g, 0.0)  # q(λ) ≥ q∞ exactly; clip rounding above 0
+
+    cp = prior_i.vol_core
+
+    def body(carry: tuple[Array, Array, Array]) -> tuple[Array, Array, Array]:
+        key, log_lam, done = carry
+        key, k1, k2 = random.split(key, 3)
+        props = jnp.log(cp.scale) - random.loggamma(k1, cp.shape, (_REJECT_BATCH,), dtype=_F64)
+        log_u = jnp.log(random.uniform(k2, (_REJECT_BATCH,), dtype=_F64, minval=1e-300))
+        acc = log_u < jax.vmap(lambda lp: log_accept(jnp.exp(lp)))(props)
+        hit = jnp.any(acc)
+        log_lam = jnp.where(done | ~hit, log_lam, props[jnp.argmax(acc)])
+        return key, log_lam, done | hit
+
+    _, log_lam, _ = jax.lax.while_loop(
+        lambda c: ~c[2], body, (key, jnp.zeros((), _F64), jnp.zeros((), bool))
+    )
+    return log_lam
 
 
 def structural_dummy_log_factor_eq(

@@ -851,7 +851,9 @@ EVIDENCE: dict[str, str] = {
     "M14": "U 14.9 / 9e-15; G 325 / 3.03",
     "M15": "U 0.457 / 6e-17; B q 1.8e-14 / 1.0; G 50.5 / 2.34",
     "M16": "G 264 / 1.99 (λ ≈ 0.01, exact=False; control offset 1e-12)",
-    "M17": "U 0.060 / 2.4e-15; G 23.1 (eq0.mean.delta1^2) / 2.44 (2026-10-22, WP25, Apple M5 Max; x86-64 alike)",
+    "M17": "U 0.060 / 2.4e-15; G 23.1 (eq0.mean.delta1^2) / 1.94 (control on the dense eigen "
+    "path, stage 2 after a stage-1 q 0.0012; 2.44 on cholesky_const) (2026-10-23, WP25, Apple M5 "
+    "Max; x86-64 alike)",
     "M18": "U 0.405 / 2.9e-14; G 99.7 (glob.mean.Pi[1,0]) / 2.61 (2026-10-22, WP25, Apple M5 Max; x86-64 alike)",
 }
 MUTANTS: dict[str, Mutant] = {m.id: dataclasses.replace(m, evidence=EVIDENCE[m.id]) for m in _ALL}

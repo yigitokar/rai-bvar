@@ -638,8 +638,9 @@ within the §9.3 path-vs-path envelope and 0.46 vs 1.53 ms/sweep at `n = 20, p =
 (§6.5): the conjugate twin keeps `soc`, `sur`, `soc_scope`, so their EB values are plugged into the
 rows; `hierarchy="mh"` stays `NotImplementedError`. (5) Validation: the reference conditions the base
 prior on the rows (Bayes' rule, covariance form; Matheron draws; Mode II integrates θ for
-`λ | d ~ IG(c + m/2, ·)`); `iw_equivalent` with rows has no closed-form reference sampler (log prior
-exact up to a constant). Geweke rows 201–204 (§9.5), A1 extension (§9.8), mutants M17–M18 (§9.7).
+`λ | d ~ IG(c + m/2, ·)`; `iw_equivalent`, where `λ | d` is not IG, draws it by exact rejection from
+`IG(c, C)` with acceptance `(|S₀|/|S(λ)|)^{½}exp(−½(q(λ) − q∞))`, and its log prior is exact up to a
+constant). Geweke rows 201–205 (§9.5), A1 extension (§9.8), mutants M17–M18 (§9.7).
 
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 
@@ -1830,7 +1831,7 @@ within-block cross-products (`a_ij·γ_{i,(lag1,j)}`, `μφ`, `φσ`, `p·N_1`, 
 | 14–16 | structural × `SV(rw=True)`; × `SV(sigma2_prior=InvGamma)`; × `SV(h0=B₀)` | 2 | nightly |
 | 17 | `ZeroMean × SV`, `n = 1` | 1 | PR |
 | 18+ | rows 1–16 with `exact=False` | — | nightly, **recorded, not gating** (N06 §8; N01 §12.3(3)) |
-| 201–204 | SOC/SUR dummy rows (WP25): structural Mode I × `Constant("ig")`; Mode II × `Constant("iw")`; reduced × `Constant("ig")`; structural Mode I × `SV` | 2 / 3 (reduced 3) | PR + nightly |
+| 201–205 | SOC/SUR dummy rows (WP25): structural Mode I × `Constant("ig")`; Mode II × `Constant("iw")`; reduced × `Constant("ig")`; structural Mode I × `SV`; structural × `Constant("iw_equivalent")` | 2 / 3 (reduced, iw_equivalent 3) | PR + nightly |
 | blocks | the seven block-level configurations of §9.2 | — | PR |
 
 Sizes: G-small `C = 1000`, `M_c = 100`, `M₁ = 2·10⁵`, α = 1e-3; G-full `C = 4000`, `M_c = 500`, `M₁ = 10⁶`,
@@ -2807,7 +2808,7 @@ Dummy rows in structural form (fixed weights `1/σ̄_i²` in Mode I, `1/λ_i` in
 owners of WP6, WP10 and WP11 after Phase 2 exits (it touches their files), behind a new `FitCache`/`CoefPriorArrays`
 field added by the WP1 owner. **Delivered** (2026-10-22): contract and decisions in the WP25 amendments of §2.10;
 builders `priors/dummies.py`; reference `validation/dummies.py`; tests `tests/mcmc/blocks/test_dummies.py`,
-`tests/validation/test_reference_dummies.py`, Geweke rows 201–204, `test_a1_dummies_*`, mutants M17–M18.
+`tests/validation/test_reference_dummies.py`, Geweke rows 201–205, `test_a1_dummies_*`, mutants M17–M18.
 
 ### Exit-criteria map (SPEC §13 Phase 2)
 

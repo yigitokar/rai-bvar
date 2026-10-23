@@ -420,7 +420,7 @@ def test_joint_spec_builds_for_every_name(name, size):
     sh = spec.static.shapes
     assert spec.fixed.T_eff % 32 != 0 and sh.T_pad == 32 * -(-spec.fixed.T_eff // 32)
     assert len(spec.names) == len(set(spec.names)) > 0
-    assert J.composition_id(name) in (*range(1, 18), *range(101, 108), *range(201, 205))
+    assert J.composition_id(name) in (*range(1, 18), *range(101, 108), *range(201, 206))
 
     def run(keys):  # the JointModel methods, batched over chains (one compile)
         sts = jax.vmap(spec.prior_sample)(keys)
@@ -442,14 +442,15 @@ def test_joint_spec_builds_for_every_name(name, size):
 
 
 def test_composition_table_matches_design():
-    assert len(J.COMPOSITIONS) == 21 and len(J.BLOCK_CONFIGS) == 7
-    assert [J.composition_id(c) for c in J.COMPOSITIONS] == [*range(1, 18), *range(201, 205)]
+    assert len(J.COMPOSITIONS) == 22 and len(J.BLOCK_CONFIGS) == 7
+    assert [J.composition_id(c) for c in J.COMPOSITIONS] == [*range(1, 18), *range(201, 206)]
     # WP25 dummy rows: (n_dummy small, const_path, coef_scaling)
     for name, (m, path, cs) in {
         "structural_constant_dummies": (3, "eigen", "none"),
         "structural_mode2_constant_dummies": (3, "fixed_factor", "lambda"),
         "reduced_constant_dummies": (4, "weighted", "none"),
         "structural_sv_dummies": (3, "weighted", "none"),
+        "structural_iw_equivalent_dummies": (4, "cholesky_const", "none"),
     }.items():
         st = J.joint_spec(name).static
         assert (st.mean.n_dummy, st.mean.const_path, st.mean.coef_scaling) == (m, path, cs), name
@@ -483,7 +484,7 @@ def test_composition_table_matches_design():
     n_by_row = {1: (2, 3), 2: (2, 3), 3: (2, 3), 4: (2, 3), 5: (2, 3), 6: (3, 3), 7: (3, 3),
                 8: (3, 3), 9: (3, 3), 10: (3, 3), 11: (3, 3), 12: (3, 3), 13: (3, 3), 14: (2, 2),
                 15: (2, 2), 16: (2, 2), 17: (1, 1),
-                201: (2, 3), 202: (2, 3), 203: (3, 3), 204: (2, 3)}  # fmt: skip
+                201: (2, 3), 202: (2, 3), 203: (3, 3), 204: (2, 3), 205: (3, 3)}  # fmt: skip
     for name in J.COMPOSITIONS:
         ns = tuple(J.joint_spec(name, size).static.shapes.n for size in ("small", "full"))
         assert ns == n_by_row[J.composition_id(name)], name

@@ -160,7 +160,8 @@ def scipy_log_prior(spec, st):
 def scipy_dummy_factor(spec, st, pr) -> float:
     """SOC/SUR rows (WP25): ``log p(d | θ, λ) − log p(d)`` by Bayes' rule, the evidence from scipy
     (Mode I and reduced: multivariate normal; Mode II: multivariate t with ``2c`` degrees of
-    freedom and shape ``(C/c)(F_dṼ₀F_dᵀ + I/w)``)."""
+    freedom and shape ``(C/c)(F_dṼ₀F_dᵀ + I/w)``; ``iw_equivalent``: no closed-form evidence, the
+    reference is exact up to that constant, so it is left out here too)."""
     static = spec.static
     Yd, Xd = pr.shared.dummies.Y, pr.shared.dummies.X
     w = pr.eq.coef.dummy_w
@@ -174,6 +175,7 @@ def scipy_dummy_factor(spec, st, pr) -> float:
             total -= stats.multivariate_normal.logpdf(Yd[:, j], Xd @ pr.eq.coef.mean0[j], S)
         return total
     mode2 = static.mean.coef_scaling == "lambda"
+    iweq = not mode2 and static.struct.contemp_scaling == "lambda"
     for i in range(n):
         Fd = np.hstack([Xd, Xd @ pr.shared.Mc[:, :i] - Yd[:, :i]])
         theta = np.concatenate([st.eq.mean.delta[i], st.eq.struct.a[i, :i]])
@@ -182,6 +184,8 @@ def scipy_dummy_factor(spec, st, pr) -> float:
         lam = math.exp(st.eq.vol.core.log_lam[i]) if mode2 else 1.0
         total += np.sum(stats.norm.logpdf(Yd[:, i], Fd @ theta, math.sqrt(lam / w[i])))
         S = (Fd * v0) @ Fd.T + np.eye(m) / w[i]
+        if iweq:
+            continue
         if mode2:
             c, C = pr.eq.vol_core.shape[i], pr.eq.vol_core.scale[i]
             total -= stats.multivariate_t.logpdf(Yd[:, i], Fd @ mu0, (C / c) * S, df=2.0 * c)

@@ -16,7 +16,7 @@ cross lag s.d. ``0.05/ℓ`` (explosive mass ≤ 2e-4); Constant ``λ ~ IG(5, 4)`
 ``μ ~ N(0, 0.5²)``, ``(φ+1)/2 ~ Beta(10, 2)``, ``B_σ = 0.1`` (``InvGamma``: ``IG(5, 0.4)``; fixed
 ``B₀ = 2``); RW ``h_0 ~ N(0, 1)``; outliers ``p ~ Beta(2, 18)``, ``K = 20``; t on the static grid
 ``ν ∈ {5..12}`` uniform, standardized ``τ``; offset ``c = 1e-12`` (ψ ≡ 1, R9 recomputation off).
-SOC/SUR dummy rows (WP25; compositions ``*_dummies``, ids 201–204): the Phase 1 rows
+SOC/SUR dummy rows (WP25; compositions ``*_dummies``, ids 201–205): the Phase 1 rows
 (``priors.dummies.dummy_rows``) of a fixed ``ȳ₀ = (1.5, −1.0, 0.8)`` (the PR presample is zero),
 SOC rows for every variable and the SUR row, ``μ = δ = 0.5`` (rows of size ~2–3, enough to move the
 intercept and contemporaneous priors), weight 1 (``= 1/E[λ]`` under ``IG(5, 4)``; Mode II: the
@@ -474,6 +474,9 @@ _COMPOSITIONS: dict[str, _Def] = {
     "structural_mode2_constant_dummies": _Def(202, _S, "constant", mode="II", dummies=True),
     "reduced_constant_dummies": _Def(203, _R, "constant", n=(3, 3), dummies=True),
     "structural_sv_dummies": _Def(204, _S, dummies=True),
+    "structural_iw_equivalent_dummies": _Def(
+        205, _S, "constant", mode="iw_equivalent", n=(3, 3), dummies=True
+    ),
 }
 
 # DESIGN §9.2 block-level configurations.
@@ -497,7 +500,7 @@ BLOCK_CONFIGS: tuple[str, ...] = tuple(_BLOCKS)
 
 def composition_id(name: str) -> int:
     """Stable id for ``keys.validation_key``: the DESIGN §9.5 row (1–17), 101–107 (blocks) or
-    201–204 (SOC/SUR dummy rows, WP25)."""
+    201–205 (SOC/SUR dummy rows, WP25)."""
     return _definition(name).number
 
 

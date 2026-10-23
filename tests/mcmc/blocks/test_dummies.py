@@ -498,19 +498,18 @@ def _equation_identity(spec: JointSpec, rep: int, state_spec: JointSpec | None =
 
 @pytest.mark.parametrize(
     "name",
-    ["structural_constant_dummies", "structural_mode2_constant_dummies", "structural_sv_dummies",
-     "iw_equivalent"],
-)  # fmt: skip
+    [
+        "structural_constant_dummies",
+        "structural_mode2_constant_dummies",
+        "structural_sv_dummies",
+        "structural_iw_equivalent_dummies",
+    ],
+)
 def test_density_ratio_equation_step_with_dummies(name):
     """Equation step ``θ_i | λ_eff,i`` with the rows vs the independent ``log_joint`` (Bayes'
     rule with the rows; for ``iw_equivalent`` exact up to a constant), 20 states, 1e-8."""
-    if name == "iw_equivalent":  # its prior sampler with rows does not exist: states without rows
-        base = joint_spec("structural_iw_equivalent")
-        spec = _with_dummies(base)
-        state_spec = base
-    else:
-        spec, state_spec = joint_spec(name, n=3), None
-    worst = max(_equation_identity(spec, rep, state_spec) for rep in range(20))
+    spec = joint_spec(name, n=3)
+    worst = max(_equation_identity(spec, rep) for rep in range(20))
     assert worst <= 1e-8, worst
 
 

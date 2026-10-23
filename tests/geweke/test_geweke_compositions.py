@@ -16,12 +16,12 @@ fresh run with ``C`` and ``M₁`` four times larger instead of a red build (fami
 Test                       Sizes                                              Tier
 =========================  =================================================  ==================
 ``test_g_small``           rows 1–5, 7–10, 17 and the SOC/SUR dummy rows       PR
-                           201–204 (WP25); ``size="small"``;
+                           201–205 (WP25); ``size="small"``;
                            ``C = 1000, M_c = 100, M₁ = 2·10⁵, α = 1e-3``
 ``test_g_small_block``     the seven block configurations of §9.2 through     nightly (``slow``)
                            ``JointSpec.step`` (their PR-tier G-small runs
                            live with the kernel owners, see below)
-``test_g_full``            rows 1–17, 201–204; ``size="full"``;               nightly (``slow``)
+``test_g_full``            rows 1–17, 201–205; ``size="full"``;               nightly (``slow``)
                            ``C = 4000, M_c = 500, M₁ = 10⁶, α = 1e-2``
 ``test_g_full_inexact``    rows 18+: the SV rows of 1–16 with                 nightly (``slow``),
                            ``exact=False``, G-full sizes                       recorded, not gating
@@ -87,9 +87,10 @@ SEED_FULL = 20261023
 SEED_INEXACT = 20261024
 SEED_BLOCK = 20261025
 
-#: WP25: SOC/SUR dummy rows — structural Mode I × Constant (cholesky_const) and × SV (weighted),
-#: Mode II × Constant("iw") (fixed_factor, coupled λ), reduced × Constant (CCCM)
-DUMMY_ROWS = frozenset({201, 202, 203, 204})
+#: WP25: SOC/SUR dummy rows — structural Mode I × Constant (eigen, dense prior precision) and × SV
+#: (weighted), Mode II × Constant("iw") (fixed_factor, coupled λ), reduced × Constant (CCCM) and
+#: structural × Constant("iw_equivalent") (cholesky_const, λ-scaled a; rejection reference for λ | d)
+DUMMY_ROWS = frozenset({201, 202, 203, 204, 205})
 #: DESIGN §9.5 and the WP19 acceptance: rows 1–5, 7–10 and 17 at G-small on every PR, plus the
 #: WP25 dummy rows (3–6 s each)
 PR_ROWS = frozenset({1, 2, 3, 4, 5, 7, 8, 9, 10, 17}) | DUMMY_ROWS
@@ -148,7 +149,7 @@ def run_geweke(name: str, size: str, sizes: dict[str, Any], seed: int, **overrid
 
 def test_pr_rows_are_the_design_rows():
     """The PR G-small set is rows 1–5, 7–10 and 17 of DESIGN §9.5, resolved by row to the
-    compositions the table names, plus the WP25 dummy rows 201–204."""
+    compositions the table names, plus the WP25 dummy rows 201–205."""
     assert {composition_id(n) for n in PR_COMPOSITIONS} == PR_ROWS
     by_row = {composition_id(n): n for n in COMPOSITIONS}
     assert [by_row[r] for r in (7, 8, 9, 10, 17)] == [
