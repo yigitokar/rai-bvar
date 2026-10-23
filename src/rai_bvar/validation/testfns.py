@@ -17,6 +17,8 @@ Contents, by source:
   (DESIGN §9.6; ``M'`` = ``prior.eq.coef.mean0``, so under D3 it equals ``Σ_i ‖δ_i − m_i‖²``;
   structural means);
 * cross-equation products ``π_{l,j1}π_{l,j2}`` (reduced form; in the ``linear_reduced`` reference);
+* with SOC/SUR dummy rows (WP25), their squared residuals ``Σ_d (y_d − F_dθ_i)²`` per structural
+  equation (``eq{i}.joint.dummy_ss``) or per column of ``Π`` (``glob.mean.dummy_ss[j]``);
 * the exact log-likelihood, ``log p(θ)``, per-equation ``Σ_t e²/λ_eff`` and, with a transitory
   scale, the transitory-marginal log-likelihood ``Σ_t log p(e_t | h_t, p, ν)`` (N03 §2.2, §7.2);
 * data functions on the log scale or bounded only (``mean_t log y²``, first autocorrelations of
@@ -41,6 +43,7 @@ import jax.numpy as jnp
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (float64 before any computation)
 from rai_bvar.engines.mcmc.config import StaticConfig
 from rai_bvar.engines.mcmc.state import ChainState, EngineData, PriorArrays
+from rai_bvar.validation.dummies import has_dummies, structural_rows_eq
 from rai_bvar.validation.log_joint import log_prior, loglik_terms, residuals
 from rai_bvar.validation.reference import (
     PriorTails,
@@ -95,6 +98,30 @@ def _data_functions(data: EngineData, raw_moments: bool, log_ok: bool, raw_ok: b
             out[f"data.acov1_y[{i}]"] = (jnp.sum(Y[1:, i] * Y[:-1, i]) / T, raw_ok)
             for j in range(i + 1, n):
                 out[f"data.mean_yy[{i},{j}]"] = (jnp.sum(Y[:, i] * Y[:, j]) / T, raw_ok)
+    return out
+
+
+def _dummy_functions(
+    st: ChainState, prior: PriorArrays, static: StaticConfig, tails: PriorTails
+) -> TestFns:
+    """Squared residuals of the SOC/SUR dummy rows (WP25): the rows' own statistic, sensitive to a
+    dropped or mis-weighted row. Structural: ``Σ_d (y_{d,i} − F_dθ_i)²`` with ``θ_i = [δ_i | a_i]``
+    (a λ-scaled block puts ``√λ_i`` in it: finite variance needs ``E λ² < ∞``); reduced form:
+    ``Σ_d (Y_d[d, j] − x_d'π_j)²`` (Gaussian, every moment finite)."""
+    n = static.shapes.n
+    out: TestFns = {}
+    if static.mean.kind == "linear_structural":
+        scaled = static.mean.coef_scaling == "lambda" or static.struct.contemp_scaling == "lambda"
+        for i in range(n):
+            p = structural_rows_eq(jnp.int32(i), _slice(prior.eq, i), prior.shared, static, 0.0)
+            theta = jnp.concatenate([st.eq.mean.delta[i], st.eq.struct.a[i]])
+            r = p["y"] - p["F"] @ theta
+            out[f"eq{i}.joint.dummy_ss"] = (jnp.sum(r * r), not scaled or tails.lam > 2.0)
+    else:
+        d = prior.shared.dummies
+        R = d.Y - d.X @ st.glob.mean.Pi
+        for j in range(n):
+            out[f"glob.mean.dummy_ss[{j}]"] = (jnp.sum(R[:, j] ** 2), True)
     return out
 
 
@@ -155,6 +182,9 @@ def test_functions(
             out[f"eq{i}.joint.B_own1"] = (B[n_det + i, i], lam1)
         dev = gamma - A @ prior.eq.coef.mean0  # Γ − AM' (D3: row i is δ_i − m_i)
         out["joint.gamma_minus_AM_sq"] = (jnp.sum(dev**2), not sd or tails.lam > 2.0)
+
+    if has_dummies(static):
+        out.update(_dummy_functions(st, prior, static, tails))
 
     terms = loglik_terms(st, data, prior, static)
     out["loglik"] = (jnp.sum(terms), h_ok)

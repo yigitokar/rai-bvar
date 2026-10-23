@@ -61,6 +61,7 @@ from rai_bvar.engines.mcmc.state import (
     ConstantPrior,
     ContempPriorArrays,
     Coupling,
+    DummyRows,
     Empty,
     EqContext,
     EqPrior,
@@ -833,14 +834,25 @@ def toy_prior(static: StaticConfig, *, tight: bool = False) -> PriorArrays:
         for j in range(n - 1):
             Mc[n_det + j, j] = 0.3
     del lags
+    m = static.mean.n_dummy  # SOC/SUR dummy rows (WP25): deterministic toy rows, weight 1
+    dummies = (
+        DummyRows(Y=np.linspace(0.5, 1.5, m * n).reshape(m, n), X=np.full((m, k), 0.4))
+        if m
+        else Empty()
+    )
     return PriorArrays(
         eq=EqPrior(
-            coef=CoefPriorArrays(mean0=mean0, prec0=prec0, group=np.zeros((n, k), np.int32)),
+            coef=CoefPriorArrays(
+                mean0=mean0,
+                prec0=prec0,
+                group=np.zeros((n, k), np.int32),
+                dummy_w=np.ones(n) if m else Empty(),
+            ),
             contemp=contemp,
             vol_core=core,
             transitory=trans,
         ),
-        shared=SharedPrior(Mc=Mc),
+        shared=SharedPrior(Mc=Mc, dummies=dummies),
     )
 
 

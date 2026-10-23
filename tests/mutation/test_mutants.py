@@ -1,4 +1,4 @@
-"""Tier M: every mutant M1–M16 must fail some tier (DESIGN §9.7, §9.10, §13 WP19; N06 §9.5).
+"""Tier M: every mutant M1–M18 must fail some tier (DESIGN §9.7, §9.10, §13 WP19; N06 §9.5).
 
 The mutants, their injection seams, controls and tier checks live in ``mutants.py``.
 ``test_mutant_caught`` runs each confirmed catching tier of each mutant (``MUTANTS[id].catchers``)
@@ -34,8 +34,9 @@ def record(payload: dict) -> None:
 
 
 def test_registry():
-    """M1–M16 are registered, each with at least one confirmed catching tier that has a check."""
-    assert list(MUTANTS) == [f"M{i}" for i in range(1, 17)]
+    """M1–M18 are registered (M17–M18: the WP25 dummy-row mutants), each with at least one
+    confirmed catching tier that has a check."""
+    assert list(MUTANTS) == [f"M{i}" for i in range(1, 19)]
     for m in MUTANTS.values():
         assert m.catchers, f"{m.id} is caught by no tier"
         assert set(m.catchers) == set(available_tiers(m)) and set(m.catchers) <= set(TIERS), m.id

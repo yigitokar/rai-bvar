@@ -69,6 +69,7 @@ from rai_bvar.engines.mcmc.state import (
     TEq,
     VolEq,
 )
+from rai_bvar.validation.dummies import reduced_dummy_log_factor, reduced_dummy_prior_sample
 
 Array = jax.Array
 PyTree = Any
@@ -519,16 +520,22 @@ class LinearStructuralRef(_Base):
 @register_reference("linear_reduced")
 class LinearReducedRef(_Base):
     """Reduced form (CCCM 2022; N04 §3.1): ``π_j ~ N(m_j, diag(1/P̃_j))`` independent over ``j``;
-    global state ``Π`` (``k × n``), no per-equation mean state."""
+    global state ``Π`` (``k × n``), no per-equation mean state. With SOC/SUR dummy rows (WP25)
+    each ``π_j`` is conditioned on its rows (``validation.dummies``)."""
 
     def prior_sample_global(self, key, prior, static):
+        if static.mean.n_dummy:  # π_j conditioned on the SOC/SUR rows (WP25; N04 §3.1)
+            return reduced_dummy_prior_sample(key, prior)
         cp = prior.eq.coef
         z = _normal(key, cp.mean0.shape)
         return CCCMGlobal(Pi=(cp.mean0 + jnp.sqrt(1.0 / cp.prec0) * z).T)
 
     def log_prior_global(self, part, prior, static):
         cp = prior.eq.coef
-        return jnp.sum(log_normal(part.Pi.T, cp.mean0, 1.0 / cp.prec0))
+        out = jnp.sum(log_normal(part.Pi.T, cp.mean0, 1.0 / cp.prec0))
+        if static.mean.n_dummy:  # + log p(d | Π) − log p(d) (Bayes' rule; WP25)
+            out = out + reduced_dummy_log_factor(part.Pi, prior)
+        return out
 
     def test_functions_global(self, part, *, tails=_NO_TAILS):
         Pi = part.Pi  # Gaussian prior, never λ-scaled (CCCM 2022): every moment finite

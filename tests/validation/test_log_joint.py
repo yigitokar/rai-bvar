@@ -152,7 +152,42 @@ def scipy_log_prior(spec, st):
     if static.mean.kind == "linear_reduced":
         sd = 1 / np.sqrt(pr.eq.coef.prec0.T)
         total += np.sum(stats.norm.logpdf(st.glob.mean.Pi, pr.eq.coef.mean0.T, sd))
+    if static.mean.n_dummy:
+        total += scipy_dummy_factor(spec, st, pr)
     return float(total)
+
+
+def scipy_dummy_factor(spec, st, pr) -> float:
+    """SOC/SUR rows (WP25): ``log p(d | θ, λ) − log p(d)`` by Bayes' rule, the evidence from scipy
+    (Mode I and reduced: multivariate normal; Mode II: multivariate t with ``2c`` degrees of
+    freedom and shape ``(C/c)(F_dṼ₀F_dᵀ + I/w)``)."""
+    static = spec.static
+    Yd, Xd = pr.shared.dummies.Y, pr.shared.dummies.X
+    w = pr.eq.coef.dummy_w
+    m, n = Yd.shape
+    total = 0.0
+    if static.mean.kind == "linear_reduced":
+        for j in range(n):
+            pi, v = st.glob.mean.Pi[:, j], 1.0 / pr.eq.coef.prec0[j]
+            total += np.sum(stats.norm.logpdf(Yd[:, j], Xd @ pi, 1.0 / math.sqrt(w[j])))
+            S = (Xd * v) @ Xd.T + np.eye(m) / w[j]
+            total -= stats.multivariate_normal.logpdf(Yd[:, j], Xd @ pr.eq.coef.mean0[j], S)
+        return total
+    mode2 = static.mean.coef_scaling == "lambda"
+    for i in range(n):
+        Fd = np.hstack([Xd, Xd @ pr.shared.Mc[:, :i] - Yd[:, :i]])
+        theta = np.concatenate([st.eq.mean.delta[i], st.eq.struct.a[i, :i]])
+        mu0 = np.concatenate([pr.eq.coef.mean0[i], np.zeros(i)])
+        v0 = np.concatenate([1.0 / pr.eq.coef.prec0[i], 0.49 * np.ones(i)])
+        lam = math.exp(st.eq.vol.core.log_lam[i]) if mode2 else 1.0
+        total += np.sum(stats.norm.logpdf(Yd[:, i], Fd @ theta, math.sqrt(lam / w[i])))
+        S = (Fd * v0) @ Fd.T + np.eye(m) / w[i]
+        if mode2:
+            c, C = pr.eq.vol_core.shape[i], pr.eq.vol_core.scale[i]
+            total -= stats.multivariate_t.logpdf(Yd[:, i], Fd @ mu0, (C / c) * S, df=2.0 * c)
+        else:
+            total -= stats.multivariate_normal.logpdf(Yd[:, i], Fd @ mu0, S)
+    return total
 
 
 ALL_NAMES = J.COMPOSITIONS + J.BLOCK_CONFIGS

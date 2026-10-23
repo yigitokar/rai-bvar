@@ -240,11 +240,23 @@ def test_lenza_primiceri_with_sv_outliers_is_a_double_treatment():
 
 
 @pytest.mark.parametrize("dummies", [{"soc": 1.0}, {"sur": 1.0}, {"soc": 1.0, "sur": 2.0}])
-@pytest.mark.parametrize("form", ["structural", "reduced"])
-def test_soc_sur_dummies_are_rejected_on_mcmc(form, dummies):
-    with pytest.raises(NotImplementedError, match="dummies on the MCMC engine arrive in Phase 3"):
-        bvar(form, rb.Constant("ig"), **dummies)
-    bvar("conjugate", **dummies)  # still fine on the analytic engine
+@pytest.mark.parametrize(
+    ("form", "vol"),
+    [("structural", rb.Constant("ig")), ("structural", rb.Constant("iw")),
+     ("structural", rb.SV()), ("reduced", rb.Constant("ig")),
+     ("reduced", rb.Constant("iw_equivalent"))],
+)  # fmt: skip
+def test_soc_sur_dummies_run_on_mcmc(form, vol, dummies):
+    """WP25: SOC/SUR dummies are accepted on the MCMC engine (every form and volatility), with
+    their label; the analytic engine is unchanged; ``hierarchy="mh"`` is still rejected."""
+    model = bvar(form, vol, **dummies)
+    assert model.engine == "mcmc"
+    label = "+".join(d.upper() for d in ("soc", "sur") if d in dummies)
+    assert label in model.axes["prior"]
+    assert rb.BVAR.from_spec(model.spec()) == model
+    assert bvar("conjugate", **dummies).engine == "analytic"
+    with pytest.raises(NotImplementedError, match="hierarchical Minnesota inside MCMC"):
+        bvar(form, vol, hierarchy="mh", **dummies)
 
 
 def test_structural_eb_over_psi_with_cross_shrinkage_is_rejected():

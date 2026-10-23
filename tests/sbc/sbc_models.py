@@ -229,27 +229,35 @@ def cccm_column_draws(spec: JointSpec, j: int) -> Callable[..., ChainState]:
     fresh noise; the scan draws column 0 first, given the current ``Π``); a later column would be
     drawn given the scan's new earlier columns, so columns ``j ≥ 1`` come from the exposed exact
     conditional ``cccm_conditional_j`` and ``precision_draw``. The weights ``m_t exp(−log λ_eff)``
-    come from the reference ``effective_log_var``."""
+    come from the reference ``effective_log_var``. SOC/SUR dummy rows (WP25) are handed over as the
+    production step does (``dummy=`` from the production ``prepare``'s ``FitCache.dummy``)."""
     from rai_bvar.components.mean.linear_reduced import cccm_conditional_j
     from rai_bvar.engines.mcmc.linalg import precision_draw
+    from rai_bvar.validation.joint import production_sweep
 
     static = spec.static
     core = program_for(static, spec.overrides).global_pre[0].impl("cccm_core")
     n, k = static.shapes.n, static.shapes.k
     coef = spec.prior.eq.coef
+    prepare = production_sweep(static, spec.overrides)[0]
 
     def draw(key: Array, st: ChainState, data: EngineData) -> ChainState:
         lv = effective_log_var(st.eq.vol, static)
         live = data.tmask[None, :] > 0
         inv_lam = jnp.where(live, jnp.exp(-jnp.where(live, lv, 0.0)), 0.0)
         Pi, a = st.glob.mean.Pi, st.eq.struct.a
+        kw: dict[str, Any] = {}
+        if static.mean.n_dummy:
+            d = prepare(data, spec.prior).dummy
+            kw["dummy"] = (d.G, d.FtY, d.w)
         if j == 0:
             Z = random.normal(key, (n, k), dtype=_F64)
             new, _ = core(Pi, a, inv_lam, data.X, data.Y, Empty(), coef.mean0, coef.prec0, Z,
-                          gram="batched", precompute=True)  # fmt: skip
+                          gram="batched", precompute=True, **kw)  # fmt: skip
             col = new[:, 0]
         else:
-            cond = cccm_conditional_j(Pi, a, inv_lam, data.X, data.Y, coef.mean0, coef.prec0, j)
+            cond = cccm_conditional_j(Pi, a, inv_lam, data.X, data.Y, coef.mean0, coef.prec0, j,
+                                      **kw)  # fmt: skip
             col, _ = precision_draw(cond.K, cond.b, random.normal(key, (k,), dtype=_F64))
         P = Pi.at[:, j].set(col)
         return dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=CCCMGlobal(Pi=P)))
