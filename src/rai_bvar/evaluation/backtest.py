@@ -34,6 +34,19 @@ MCMC models (DESIGN §11.6, WP23):
 * **Cache keys.** Analytic models keep the Phase 1 keys. Models with ``uses_fit_seed`` add
   ``"seeding": "fit_seed-v1"``, so scores cached before the per-origin fit seeds (fit with
   ``MCMCSettings.seed`` at every origin) are never served as results of the current seeding.
+* **LPD estimator** (``lpd_method``, DESIGN §7.3, D-34): passed to
+  :func:`~rai_bvar.evaluation.scores.score_forecast` at every origin (a plain string, so it
+  pickles for the worker pool). The default ``"conditioned"`` is the SPEC §7 estimator and leaves
+  the scores, the score layout and the cache keys exactly as before. Any other value adds
+  ``"lpd": "<method>-v1"`` to the cache key of every model (the estimator changes the scores,
+  not the fit) and ``attrs["lpd_method"]`` to the scores; ``"integrated"`` scores also carry the
+  default estimator next to it (``score_forecast``). At ``h > 1`` the integrated estimator needs
+  the ``lag_coefs`` of MCMC forecasts: an analytic or benchmark model raises ``ValueError`` at
+  its first origin, after that origin's fit, with the model's name and the origin in the message
+  (``compare`` runs its backtests one after another, so list such a model first or pass a
+  cache). Changing ``lpd_method`` on an existing cache refits every origin (and every warm
+  chain), although fits and forecasts do not depend on it; ``"integrated"`` stores the default
+  estimator too, so one run gives both.
 """
 
 from __future__ import annotations
@@ -53,7 +66,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -62,9 +75,11 @@ import xarray as xr
 from rai_bvar._version import __version__
 from rai_bvar.data.dataset import VARData
 from rai_bvar.evaluation.scores import score_forecast
+from rai_bvar.forecast.result import LPD_METHODS
 from rai_bvar.models.base import Model
 
 DataSource = VARData | Callable[[pd.Period], VARData]
+DEFAULT_LPD = "conditioned"  # the SPEC §7 estimator: Phase 1 / WP23 scores and cache keys
 
 
 @dataclass(frozen=True)
@@ -207,6 +222,7 @@ def backtest(
     name: str | None = None,
     axes: dict[str, str] | None = None,
     warm_start: bool = False,
+    lpd_method: Literal["conditioned", "integrated"] = DEFAULT_LPD,
 ) -> BacktestResult:
     """Fit and score ``model`` at every origin.
 
@@ -220,7 +236,11 @@ def backtest(
     ``warm_start=True`` (models that declare ``supports_warm_start`` only) runs the origins in
     order and starts each fit from the previous origin's final state (module docstring); results
     then depend on the previous origins, which the cache key records.
+
+    ``lpd_method`` selects the LPD estimator of the scores (``"conditioned"``, the default, or
+    ``"integrated"``; module docstring, DESIGN §7.3, D-34).
     """
+    _check_lpd_method(lpd_method)
     if not isinstance(warm_start, bool | np.bool_):
         raise TypeError(f"warm_start must be a bool, got {warm_start!r}")
     if warm_start and not getattr(model, "supports_warm_start", False):
@@ -238,7 +258,10 @@ def backtest(
         else [pd.Period(o, freq=realized.index.freq) for o in origins]
     )
     cache = Cache(cache) if cache is not None and not isinstance(cache, Cache) else cache
-    tasks = [(model, data, realized, o, window, horizon, draws, seed, cache) for o in origin_list]
+    tasks = [
+        (model, data, realized, o, window, horizon, draws, seed, cache, lpd_method)
+        for o in origin_list
+    ]
 
     start = time.perf_counter()
     if warm_start:
@@ -252,7 +275,9 @@ def backtest(
                 UserWarning,
                 stacklevel=2,
             )
-        outputs = _run_warm(model, data, realized, origin_list, window, horizon, draws, seed, cache)
+        outputs = _run_warm(
+            model, data, realized, origin_list, window, horizon, draws, seed, cache, lpd_method
+        )
     elif n_jobs == 1:
         outputs = [_run_origin(*task) for task in tasks]
     else:
@@ -302,8 +327,10 @@ def estimate_cost(
     horizon: int = 8,
     draws: int = 1000,
     realized: VARData | None = None,
+    lpd_method: Literal["conditioned", "integrated"] = DEFAULT_LPD,
 ) -> dict[str, float]:
     """Time one origin (the last, usually the largest sample) and extrapolate to all origins."""
+    _check_lpd_method(lpd_method)
     realized = realized if realized is not None else data
     if not isinstance(realized, VARData):
         raise ValueError("pass realized= when data is a callable")
@@ -319,6 +346,7 @@ def estimate_cost(
         draws,
         0,
         None,
+        lpd_method,
     )
     per_origin = time.perf_counter() - start
     return {
@@ -341,6 +369,17 @@ def fit_seed(seed: int, origin: pd.Period | str) -> int:
     return int(np.random.default_rng([seed, crc, FIT_SEED_SALT]).integers(2**31))
 
 
+def _check_lpd_method(lpd_method: Any) -> None:
+    if lpd_method not in LPD_METHODS:  # up front: a worker would only fail at its first h > 1
+        raise ValueError(f"lpd_method must be one of {LPD_METHODS}, got {lpd_method!r}")
+
+
+def _lpd_kwargs(lpd_method: str) -> dict[str, str]:
+    """``lpd_method=`` for :func:`_fit_and_score` only when it is not the default, so the default
+    call stays the WP23 one."""
+    return {} if lpd_method == DEFAULT_LPD else {"lpd_method": lpd_method}
+
+
 def _run_origin(
     model: Model,
     data: DataSource,
@@ -351,12 +390,17 @@ def _run_origin(
     draws: int,
     seed: int,
     cache: Cache | None,
+    lpd_method: str = DEFAULT_LPD,
 ) -> tuple[xr.Dataset, bool, list]:
     sample, truth = _origin_inputs(data, realized, origin, window, horizon)
-    key = _cache_key(model, sample, truth, origin, window, horizon, draws, seed)
+    key = _cache_key(
+        model, sample, truth, origin, window, horizon, draws, seed, lpd_method=lpd_method
+    )
     if cache is not None and (hit := cache.get(key)) is not None:
         return hit, True, []
-    scores, passthrough, _ = _fit_and_score(model, sample, truth, origin, horizon, draws, seed)
+    scores, passthrough, _ = _fit_and_score(
+        model, sample, truth, origin, horizon, draws, seed, **_lpd_kwargs(lpd_method)
+    )
     if cache is not None:
         cache.put(key, scores)
     return scores, False, passthrough
@@ -378,11 +422,15 @@ def _fit_and_score(
     draws: int,
     seed: int,
     init: Any = None,
+    lpd_method: str = DEFAULT_LPD,
 ) -> tuple[xr.Dataset, list, Any]:
     """Fit on ``sample``, forecast and score one origin; returns ``(scores, passthrough, fit)``.
 
     Models without ``uses_fit_seed`` are called exactly as in Phase 1, ``fit(sample)``. The
     forecast generator ``default_rng([seed, crc32(origin)])`` is the Phase 1 one for every model.
+    ``lpd_method`` goes to ``score_forecast`` (it uses no random numbers, so every other score is
+    the same whatever the estimator). A ``ValueError`` from scoring is re-raised with the model's
+    name and the origin in front of its message (a plain string: it pickles from a worker).
     """
     rng = np.random.default_rng([seed, zlib.crc32(str(origin).encode())])
     uses_seed = bool(getattr(model, "uses_fit_seed", False))
@@ -403,7 +451,11 @@ def _fit_and_score(
                 messages.append(str(w.message))
         else:
             passthrough.append((w.category, str(w.message), w.filename, w.lineno))
-    scores = score_forecast(forecast, truth, rng=rng)
+    try:
+        scores = score_forecast(forecast, truth, rng=rng, lpd_method=lpd_method)
+    except ValueError as e:  # e.g. an integrated LPD without lag_coefs: say which model and origin
+        name = getattr(model, "name", type(model).__name__)
+        raise ValueError(f"{name} at origin {origin}: {e}") from e
     scores["converged"] = float(forecast.dataset.attrs.get("converged", 1))
     scores = scores.expand_dims(origin=[str(origin)])
     scores.attrs = {
@@ -412,6 +464,8 @@ def _fit_and_score(
         "n_obs": len(sample),
         "warnings": "\n".join(messages),
     }
+    if lpd_method != DEFAULT_LPD:  # the cached scores say which estimator they hold
+        scores.attrs["lpd_method"] = lpd_method
     if uses_seed:
         scores.attrs["fit_seed"] = fit_seed(seed, origin)
         scores.attrs["warm_start"] = int(init is not None)
@@ -428,6 +482,7 @@ def _run_warm(
     draws: int,
     seed: int,
     cache: Cache | None,
+    lpd_method: str = DEFAULT_LPD,
 ) -> list[tuple[xr.Dataset, bool, list]]:
     """Warm-started origins, in order (DESIGN §11.6; module docstring).
 
@@ -444,8 +499,9 @@ def _run_warm(
     def refit(j: int, init: Any) -> tuple[xr.Dataset, list, Any]:
         sample, truth = inputs[j]
         scores, passthrough, fit = _fit_and_score(
-            model, sample, truth, origins[j], horizon, draws, seed, init=init
-        )
+            model, sample, truth, origins[j], horizon, draws, seed, init=init,
+            **_lpd_kwargs(lpd_method),
+        )  # fmt: skip
         if cache is not None:  # the state first: cached scores then imply a cached state
             cache.put_state(keys[j], fit.final_state)
             cache.put(keys[j], scores)
@@ -474,9 +530,11 @@ def _run_warm(
         sample, truth = _origin_inputs(data, realized, origin, window, horizon)
         inputs.append((sample, truth))
         init_tag = None if i == 0 else f"warm:{keys[i - 1]}"
-        keys.append(
-            _cache_key(model, sample, truth, origin, window, horizon, draws, seed, init=init_tag)
-        )
+        key = _cache_key(
+            model, sample, truth, origin, window, horizon, draws, seed, init=init_tag,
+            lpd_method=lpd_method,
+        )  # fmt: skip
+        keys.append(key)
         if cache is not None and (hit := cache.get(keys[i])) is not None:
             outputs.append((hit, True, []))
             continue
@@ -487,7 +545,9 @@ def _run_warm(
     return outputs
 
 
-def _cache_key(model, sample, truth, origin, window, horizon, draws, seed, init=None) -> str:
+def _cache_key(
+    model, sample, truth, origin, window, horizon, draws, seed, init=None, lpd_method=DEFAULT_LPD
+) -> str:
     payload = {
         "spec": model.spec(),
         "sample": sample.fingerprint(),
@@ -503,6 +563,8 @@ def _cache_key(model, sample, truth, origin, window, horizon, draws, seed, init=
         payload["seeding"] = "fit_seed-v1"  # scores cached before it used MCMCSettings.seed
     if init is not None:  # warm starts only: cold keys stay the Phase 1 keys (DESIGN §11.6)
         payload["init"] = init
+    if lpd_method != DEFAULT_LPD:  # another estimator, other scores (D-34); default keys unchanged
+        payload["lpd"] = f"{lpd_method}-v1"
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 

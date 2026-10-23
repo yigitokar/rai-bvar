@@ -53,12 +53,44 @@ re-derived before it goes into the paper).
 8b. **The path-conditioned RB log score breaks down in the tails at h > 1.** SPEC §7's estimator
    averages p(y_{T+h} | θ_s, simulated path_s up to T+h−1). For outcomes far in the predictive's tail
    (US unemployment 2008–10 at h = 8) one draw carries all the weight: Constant's UR h = 8 score at
-   2008Q2 was −93.6 (1000 draws), −46 to −63 (8000), −36 (64,000) against −19.1 for the exact
-   path-integrated mixture, while the delta-method MCSE stayed at ≈ 1. It inflated the quick
+   2008Q2 was −93.6 (1000 draws), −46 to −63 (8000), −36 (64,000) against −19.1 for the
+   path-integrated mixture over the same 1000 draws (exact given those draws; itself a Monte Carlo
+   estimate, see the residual error below), while the delta-method MCSE stayed at ≈ 1. It inflated the quick
    Clark–Ravazzolo UR h = 8 ΔLPS about 8× (+1.92 vs ≈ +0.23 converged). A methods point worth a
    section: integrate the path out (Gaussian given θ and the volatility path) instead of conditioning
    on it. Evidence: WP23 review (2026-10-23), `benchmarks/clark_ravazzolo.py` RELIABILITY_NOTE.
    Status: recorded (review computations; re-run with the library fix before publishing).
+   **Library fix (D-34, 2026-10-23):** `log_pred_density(…, lpd_method="integrated")` (opt-in; the
+   SPEC §7 default is unchanged) conditions each draw on its parameters and drawn volatility path
+   only: `y_{T+h} | θ_s, λ_s ~ N(m_h, M_h M_hᵀ)` with `m_h` the zero-shock mean (recovered from the
+   contract fields as `cond_mean_h − Σ_{k<h} Φ_{h−k} u_k`) and `M_h = [Φ_{h−1}L_1 | … | Φ_0 L_h]`,
+   factored by QR. What it fixes: the weights no longer depend on where a draw's simulated path went,
+   so the tail estimate is no longer carried by one path. Exactness: with one parameter draw and a
+   constant volatility it is the exact predictive density (1e-10 against a companion-form oracle at
+   h = 2..8, 6-s.d. tails, zero MCSE); under SV it is exact given each drawn volatility path; on
+   MCMC fits each draw's density matches the moments from `jax.jacfwd` of the
+   forecast core to 1e-10 (1e-13 against exact rational arithmetic in a one-off check). A
+   synthetic persistent VAR reproduces the pathology: at h = 8 and 6 s.d. the conditioned
+   estimator gives −35.2 with MCSE 1.0 against the exact −22.3
+   (`tests/unit/test_lpd_integrated.py`). Scope: MCMC forecasts of linear or zero means (they carry
+   the new `lag_coefs` variable); analytic, benchmark and ordering-pooled forecasts raise at h > 1;
+   no closed form with the transitory Rao-Blackwellisation at h > 1. Residual Monte Carlo error:
+   it uses no extra random numbers but is still an average over the forecast's parameter and
+   volatility-path draws, whose weights still concentrate in the tails. At the acceptance budget
+   (4 × 20,000) and 2008Q2, UR h = 8, with 1000 forecast draws: Constant's weight ESS is 2–6 draws
+   and its estimate −19.0 against −17.8 with 8000 (fit seed 1); over thinning offsets the
+   1000-draw estimate has sd ≈ 0.75–1.06 and a downward log-of-mean bias of ≈ 0.3–0.6 nats
+   (SV(rw): ≈ 0.4–0.7), and SV(rw)'s spread over forecast seeds (sd 1.4) exceeds its delta-method
+   MCSE (0.45–0.94). The heaviest weights sit on consecutive draws of one chain, so more forecast
+   draws remove the thinning error, not the MCMC error (80,000-draw values still differ by
+   ≈ 1.3 nats across fit seeds). Evidence: D-34 review (2026-10-23, finding math-2). The
+   pre-registered CR acceptance config keeps 1000 forecast draws. Status: estimator verified
+   (tests); the Clark–Ravazzolo numbers above still to be re-run with it. Plumbing:
+   `score_forecast`, `backtest`, `compare` and `ordering_sensitivity` take `lpd_method`; integrated
+   backtest scores also carry the conditioned estimator on the same forecast (so the paper can show
+   both from one run) and have their own cache keys. The pre-registered CR `acceptance` config
+   (`benchmarks/clark_ravazzolo.py --config acceptance`, 4 × 20,000 draws) scores with it in every
+   stage and reports the conditioned ΔLPS for the criterion-4 cells as a secondary number.
 
 ## C. Engineering lessons
 

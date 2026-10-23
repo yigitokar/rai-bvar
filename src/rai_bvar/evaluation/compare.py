@@ -13,7 +13,7 @@ import itertools
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -79,8 +79,13 @@ def compare(
     cache: Cache | str | os.PathLike | None = None,
     n_jobs: int = 1,
     realized: VARData | None = None,
+    lpd_method: Literal["conditioned", "integrated"] = "conditioned",
 ) -> CompareResult:
-    """Backtest every model on identical origins, windows and outcomes."""
+    """Backtest every model on identical origins, windows and outcomes.
+
+    ``lpd_method`` is the LPD estimator of every backtest (DESIGN §7.3, D-34; ``"integrated"``
+    needs MCMC models at ``h > 1``); the verdict then uses that estimator's LPD and MCSE.
+    """
     entries = _entries(models)
     names = [e.name for e in entries]
     baseline = baseline or names[0]
@@ -101,6 +106,7 @@ def compare(
             realized=realized,
             name=e.name,
             axes=dict(e.axes),
+            lpd_method=lpd_method,
         )
         for e in entries
     }

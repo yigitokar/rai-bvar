@@ -33,6 +33,16 @@ forecasts agree and recomputing the moments reproduces ``o_{T+h}``, ``τ_{T+h}``
 ``d + r·D_kept`` (``D_kept`` kept draws per chain), which no kept draw has. A fit with a matching
 ``FitPlan`` returns its in-loop forecasts (DESIGN §5.8).
 
+**Accelerator variables** (DESIGN §7.3; never contract fields), from each slot's parameter draw
+(replicate slots and in-loop forecasts included): ``cond_A``, ``cond_scale``, with a transitory
+scale ``cond_scale_persistent`` and ``log_p``/``log1m_p``/``nu``, and (D-34) ``lag_coefs[c, d,
+l−1, i, j] = A_l[i, j] = B[n_det + (l−1)·n + j, i]`` with ``B`` as below (linear structural,
+CCCM and zero means; other mean kinds attach none) for ``log_pred_density(lpd_method=
+"integrated")``. An in-loop forecast whose draws are not all stored carries none of them.
+``lag_coefs`` is attached to every such forecast (the default estimator never reads it) and
+costs ``S·p·n²·8`` bytes, ``(p/H)·nbytes(cond_chol)``, with each draw's ``A_l`` repeated for its
+replicate slots; for ``p > H`` it is the largest variable of the dataset.
+
 **Parameters and IRFs** (DESIGN §7.4; N03 §5.4). ``coefs = B = (A⁻¹Γ)'`` (``structure.
 reduced_form``) or ``Π``; ``chol = structure.chol(a, log λ_date) = A⁻¹ diag(exp(½ log λ))``.
 ``date=None`` is the last in-sample period (``h_T`` of the stored ``VolDraw``); other dates, and
@@ -80,6 +90,7 @@ S_CHUNK = 1024  # forecast draws per compiled chunk (DESIGN §7.2)
 _HIGHEST = lax.Precision.HIGHEST
 _U32 = 2**32
 _WHICH = ("persistent", "effective")
+_LAG_MEANS = frozenset(("linear_structural", "linear_reduced", "zero"))  # kinds with lag_coefs
 # fit metadata keys renamed fit_* in forecast attrs (``seed`` and ``draws`` describe the forecast)
 _FIT_KEYS = frozenset(
     ("seed", "salt", "chains", "draws", "burn", "thin", "chunk", "warm_start", "it_first",
@@ -330,16 +341,36 @@ def _unit_lower(a: np.ndarray) -> np.ndarray:
     return A
 
 
-def _extras(params: Any, out: Any) -> dict[str, tuple[tuple[str, ...], np.ndarray]]:
-    """Accelerator variables (DESIGN §7.3): ``cond_A``, ``cond_scale`` and, with a transitory
-    scale, ``cond_scale_persistent`` and ``log_p``/``log1m_p``/``nu``. ``params`` holds the
-    parameter draw of every ``(chain, draw)`` slice (leaves ``(C, D', …)``)."""
+def _lag_coefs(fit: Any, params: Any) -> np.ndarray | None:
+    """``lag_coefs[c, d, l−1, i, j] = A_l[i, j] = B[n_det + (l−1)·n + j, i]`` (DESIGN §7.3, D-34)
+    of every ``(chain, draw)`` slice, with ``B`` (k, n) from :func:`_param_maps` (``structure.
+    reduced_form(a, Γ)``, the CCCM ``Π`` or zeros); ``None`` for a mean kind outside
+    :data:`_LAG_MEANS`, which has no lag matrices to attach."""
+    if fit.static.mean.kind not in _LAG_MEANS:
+        return None
+    s = fit.static.shapes
+    lead = np.shape(jax.tree.leaves(params)[0])[:2]
+    S = int(np.prod(lead))  # explicit: reshape(-1, …) fails on empty leaves (n = 1: a (C, D, 1, 0))
+    flat = jax.tree.map(lambda x: np.asarray(x).reshape(S, *np.shape(x)[2:]), params)
+    B, _ = _coefs_chol(fit, flat, np.zeros((S, s.n)))
+    blocks = B[:, s.n_det :, :].reshape(*lead, s.lags, s.n, s.n)  # [c, d, l−1, j, i]
+    return np.swapaxes(blocks, -1, -2)
+
+
+def _extras(fit: Any, params: Any, out: Any) -> dict[str, tuple[tuple[str, ...], np.ndarray]]:
+    """Accelerator variables (DESIGN §7.3): ``cond_A``, ``cond_scale``, ``lag_coefs`` (linear or
+    zero means, :func:`_lag_coefs`) and, with a transitory scale, ``cond_scale_persistent`` and
+    ``log_p``/``log1m_p``/``nu``. ``params`` holds the parameter draw of every ``(chain, draw)``
+    slice (leaves ``(C, D', …)``, replicate slots included)."""
     extra: dict[str, tuple[tuple[str, ...], np.ndarray]] = {
         "cond_scale": (("chain", "draw", "horizon", "variable"), _get(out, "cond_scale"))
     }
     struct = getattr(params, "struct", None)
     if struct is not None and hasattr(struct, "a"):
         extra["cond_A"] = (("chain", "draw", "variable", "variable_"), _unit_lower(struct.a))
+    lag = _lag_coefs(fit, params)
+    if lag is not None:
+        extra["lag_coefs"] = (("chain", "draw", "lag", "variable", "variable_"), lag)
     trans = params.vol.trans
     if not isinstance(trans, Empty):
         pers = np.exp(0.5 * _get(out, "log_lam_pers"))
@@ -366,7 +397,7 @@ def _result(fit: Any, out: Any, params: Any, label: str, extra_attrs: dict) -> A
         variables=list(fit.ordering),
         origin=_origin(fit),
         attrs=_attrs(fit, label, extra_attrs),
-        extra=None if params is None else _extras(params, out),
+        extra=None if params is None else _extras(fit, params, out),
     )
 
 

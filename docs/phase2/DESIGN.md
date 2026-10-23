@@ -77,6 +77,7 @@ numerical oracles only, run offline by `tools/make_r_fixtures.R` (SPEC §2.1, §
 | D-31 | `import rai_bvar` imports no JAX; `engines.mcmc` is imported lazily and enables x64 then | N07 §11 | subprocess test |
 | D-32 | Backtest warm starts are opt-in in Phase 2 | SPEC §9.1 | open question Q6 |
 | D-33 | `converged` is decided by a **primary** monitor set (log-likelihood, own first lag of `B`, SV parameters, `h_T`, `log λ`); every `a_ij`, `h_1`, `h_mid`, `p`, `ν` are secondary (reported, never gating) | performance §8.1; judges | avoids multiplicity false alarms |
+| D-34 | **Opt-in path-integrated LPD** (`log_pred_density(…, lpd_method="integrated")`; the default `"conditioned"` is the SPEC §7 estimator, unchanged): draw `s` is conditioned on its parameters and its drawn latent scale path only, and `y_{T+1..T+h−1}` is integrated out analytically, `y_{T+h} | θ_s, λ_s ~ N(m_h, M_h M_hᵀ)` with `m_h = cond_mean_h − Σ_{k<h} Φ_{h−k} u_k`, `M_h = [Φ_{h−1} L_1 | … | Φ_0 L_h]`; subset factors by QR of `M_h[idx]ᵀ`. Needs the new accelerator variable `lag_coefs` (MCMC forecasts of linear or zero means); `h = 1` runs the conditioned code (bitwise); `rb_transitory` at `h > 1` and forecasts without `lag_coefs` raise. **Plumbing:** `score_forecast`, `backtest`, `estimate_cost`, `compare` and `ordering_sensitivity` take `lpd_method` (default `"conditioned"`: scores, layout and cache keys unchanged); `"integrated"` adds `"lpd": "integrated-v1"` to backtest cache keys and the conditioned estimator's columns to the scores (§11.6); the Clark–Ravazzolo `acceptance` config (4 × 20,000 draws) uses it in every stage. Review amendments (2026-10-23) in §7.3, §11.6 and §13 WP23 | WP23 review (2026-10-23); `docs/paper/NOTES.md` 8b; `benchmarks/reports/clark_ravazzolo_preregistration.md` | the conditioned estimator degenerates in the tails at `h > 1` (Constant UR h = 8 at 2008Q2: −93.6 with 1000 draws vs −19.1 path-integrated on 1000 draws) while its MCSE stays ≈ 1; the integrated one is exact given each draw's parameters and volatility path but still a Monte Carlo average over the draws (§7.3); contract fields and SPEC §7 unchanged; analytic, benchmark and ordering-pooled forecasts carry no `lag_coefs` (§7.3) |
 
 ### 0.2 Errata: every judge finding and its resolution
 
@@ -199,8 +200,9 @@ src/rai_bvar/
 ├── forecast/result.py                   [WP17] ESS-adjusted LPD MCSE, leading-block fast path, optional extra
 │                                                 variables, opt-in transitory RB
 ├── diagnostics.py                       [WP15] + ess_tail, ess_mean, mcse_mean, mcse_quantile, *_many
-├── evaluation/compare.py                [WP2]  grid() calls factory.harmonise_grid when present
+├── evaluation/compare.py                [WP2]  grid() calls factory.harmonise_grid when present  [D-34] lpd_method
 ├── evaluation/backtest.py               [WP23] MCMC fit seeds, opt-in warm starts, spawn context, n_jobs warning
+│                                        [D-34] lpd_method (cache tag "lpd"; scores.py layout)
 ├── models/base.py                       [WP2]  docstring of optional fit keywords (protocol unchanged)
 ├── structural/ordering.py         new   [WP22] ordering_sensitivity (N08 §B4)
 └── validation/                    new
@@ -212,7 +214,7 @@ tools/make_r_fixtures.R                  [WP8]  stochvol + bayesianVARs sections
 tools/make_sv_parity_data.py       new   [WP8]  NumPy generator of the parity datasets
 benchmarks/pilot/                  new   [WP3]  clean-room pilot prototypes (timing only)
 benchmarks/phase2_perf.py          new   [WP24] BENCH-P2 driver
-benchmarks/clark_ravazzolo.py      new   [WP23] replication report (N08 §C)
+benchmarks/clark_ravazzolo.py      new   [WP23] replication report (N08 §C)  [D-34] acceptance config, --lpd
 docs/phase2/09_pilot.md            new   [WP3]  pilot measurements and frozen defaults
 pyproject.toml                           [WP1]  pytest markers only
 .github/workflows/ci.yml                 [WP24] PR / nightly / weekly tiers
@@ -237,7 +239,8 @@ tests/mcmc/unit/          [WP1] test_keys, test_state, test_config, test_import_
                           [WP4] test_linalg, test_random      [WP5] test_data
 tests/priors/             [WP6] test_scales, test_structural_prior, test_reduced_prior, test_sv_arrays
 tests/unit/               [WP2] test_specs_phase2, test_phase1_hash_golden, test_api_resolution, test_grid_harmonise,
-                                test_spec_roundtrip_mcmc      [WP18] test_fit_mcmc_api
+                                test_spec_roundtrip_mcmc      [WP18] test_fit_mcmc_api   [D-34] test_lpd_integrated,
+                                test_scores_lpd_method, test_clark_ravazzolo_script
 tests/validation/         [WP7] test_uniformity, test_geweke_selftest, test_sbc_selftest, test_sequential, test_identities_toy
                           [WP9] test_reference_moments, test_simulate, test_log_joint, test_mixture_transcription
 tests/mcmc/blocks/        [WP10] test_recursive, test_linear_structural, test_linear_fastpaths, test_zero_mean
@@ -247,12 +250,12 @@ tests/mcmc/runner/        [WP14] toys.py, test_plan, test_sweep, test_runner, te
                                  test_failures, test_storage, test_warmstart, test_devices_bitwise
 tests/mcmc/diagnostics/   [WP15] test_monitor, test_diagnostics_ext
 tests/analytic/           [WP16] test_structural_nig     [WP18] test_eb_mcmc     [WP20] test_mcmc_twin, test_mode1_quadrature
-tests/mcmc/forecast/      [WP17] test_forecast_core, test_irf_mcmc, test_lpd_mcmc
+tests/mcmc/forecast/      [WP17] test_forecast_core, test_irf_mcmc, test_lpd_mcmc   [D-34] test_lpd_integrated_mcmc
 tests/contract/           [WP17] test_forecast_contract_mcmc.py (new file; the Phase 1 file is untouched)
 tests/geweke/ tests/sbc/ tests/mutation/   [WP19]
 tests/parity/             [WP21] test_stochvol, test_bayesianvars, SV_PARAMETRIZATION.md
                           [WP8] fixtures/*.nc, fixtures/data/*.csv, test_fixture_schema
-tests/integration/        [WP22] test_ordering      [WP23] test_backtest_mcmc
+tests/integration/        [WP22] test_ordering      [WP23] test_backtest_mcmc   [D-34] test_backtest_lpd_integrated
 tests/bench/              [WP24] test_perf_phase2, bench_kernels, baseline.json
 ```
 
@@ -613,7 +616,7 @@ is the plug-in at `λ_i = exp(b_μ)` (RW: `exp(m_0)`) and says so in a `vol_mean
 importance-sampling SV-t oracle (4 observations, max |z| ≈ 1.8): stochvol 3.2.1's Student-t sampler does not
 target the standardized-t SV posterior (`tests/parity/SV_PARAMETRIZATION.md` §3.2), so the `stochvol_v_t5` row
 stays a strict xfail (`raises=OracleDeviation`) until a fixture from stochvol ≥ 3.2.5 (ideally 3.2.9) is built.
-(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it. (3) WP23 review: backtest cache keys of `uses_fit_seed` models carry `"seeding": "fit_seed-v1"` (analytic keys stay the Phase 1 keys), so scores cached before the per-origin fit seeds are never served; `warm_start=True` requires strictly increasing origins (a warm start from a later origin would carry later data into an earlier fit, R9). (4) Known limitation, not changed here: the SPEC §7 RB log predictive density for h > 1 conditions on the simulated path to T + h − 1; for outcomes far in a predictive's tail its weights collapse onto one draw, the estimate is biased low by up to tens of nats and the delta-method MCSE saturates near 1 (Clark–Ravazzolo crisis origins at h ≥ 4). The replication report flags such cells; a path-integrated estimator is an open SPEC-level decision.
+(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it. (3) WP23 review: backtest cache keys of `uses_fit_seed` models carry `"seeding": "fit_seed-v1"` (analytic keys stay the Phase 1 keys), so scores cached before the per-origin fit seeds are never served; `warm_start=True` requires strictly increasing origins (a warm start from a later origin would carry later data into an earlier fit, R9). (4) Known limitation, not changed here: the SPEC §7 RB log predictive density for h > 1 conditions on the simulated path to T + h − 1; for outcomes far in a predictive's tail its weights collapse onto one draw, the estimate is biased low by up to tens of nats and the delta-method MCSE saturates near 1 (Clark–Ravazzolo crisis origins at h ≥ 4). The replication report flags such cells; a path-integrated estimator is an open SPEC-level decision. (Superseded 2026-10-23: D-34 adds it as an opt-in, `lpd_method="integrated"`, with the SPEC §7 default unchanged.)
 
 **WP25 amendments (2026-10-22; SOC/SUR dummy rows on the MCMC engine, N05 §7.7, N04 §3.1):**
 (1) Contract: `MeanStatic.n_dummy: int = 0` (the row count `m`, shape-defining; `> 0` forbids the
@@ -1614,6 +1617,61 @@ moments reproduces the same `o_{T+h}`, `τ_{T+h}` and `ε` (N03 §5.3 requiremen
   `cond_scale_persistent`, `log_p`, `nu`; evaluates `log p(y_{1:j}) = Σ_{i≤j}[−½ log λ^{pers}_{i,T+h} + log f_i(η_i)]`,
   `η_i = e^{−½ log λ^{pers}}(A(y − m))_i` (N03 §5.3 item 2, CCMM S.11–S.16) for the full vector or a leading block,
   with `f_i` from `TransitoryScale.log_density`; other subsets warn and fall back. Default off; open question Q7.
+- **Opt-in path-integrated estimator** (`lpd_method="integrated"`, D-34; default `"conditioned"`, the SPEC §7
+  estimator above, whose values do not change). The conditioned estimator averages `p(y_{T+h} | θ_s,
+  path_s up to T+h−1)`; for `h > 1` and an outcome in the predictive's tail one draw whose simulated path wandered
+  towards it carries all the weight (Constant UR h = 8 at 2008Q2: −93.6 with 1000 draws against −19.1 for the
+  path-integrated estimator on 1000 draws, MCSE ≈ 1). The integrated estimator conditions draw `s` only on its parameters and its drawn latent scale path (SV
+  log-volatilities and transitory scales of `T+1..T+h`, already inside `L_k = cond_chol_{s,k} = A⁻¹ diag(cond_scale_k)`)
+  and integrates `y_{T+1..T+h−1}` out: with `Φ_0 = I`, `Φ_j = Σ_{l=1}^{min(j,p)} A_l Φ_{j−l}` and the simulated
+  shocks `u_k = paths_k − cond_mean_k`,
+  `y_{T+h} | θ_s, λ_s ~ N(m_h, M_h M_hᵀ)`, `m_h = cond_mean_h − Σ_{k=1}^{h−1} Φ_{h−k} u_k` (the zero-shock mean;
+  deterministic terms cancel), `M_h = [Φ_{h−1} L_1 | Φ_{h−2} L_2 | … | Φ_0 L_h]` (`n × hn`). Every subset (leading
+  or not) gets the lower factor of `(M_h M_hᵀ)[idx, idx]` from the QR of `M_h[idx, :]ᵀ` (`linalg.marginal_chol`;
+  `M_h M_hᵀ` is never formed), then `mvn_logpdf_chol`; the MCSE is the same delta-method formula (ESS-adjusted for
+  MCMC). No additional random numbers, but still a Monte Carlo average over the forecast's parameter and
+  volatility-path draws: exact given those draws (the exact predictive density only with one parameter draw and a
+  constant volatility; under SV, exact given each drawn volatility path), and for tail outcomes its weights can still
+  concentrate on a few draws, where the delta-method MCSE understates the spread (numbers in NOTES 8b). At `h = 1`
+  the estimators coincide and the conditioned code runs (bitwise; `lag_coefs`
+  not needed). For `h > 1` a forecast without `lag_coefs`, or with other dims, raises `ValueError` (no
+  warn-and-fall-back: warnings are swallowed on the backtest path), and so does `rb_transitory=True` (the
+  transitory scales of `T+1..T+h−1` would have to be integrated jointly; no closed form), whatever the
+  `transitory` attribute. **Data:** MCMC forecasts attach the accelerator variable `lag_coefs (chain, draw, lag,
+  variable, variable_)`, `lag_coefs[c, d, l−1, i, j] = A_l[i, j] = B[n_det + (l−1)·n + j, i]` with `B` the
+  reduced-form `(k, n)` coefficients of the slot's parameter draw (replicate slots `R > 1` and in-loop forecasts
+  included): `structure.reduced_form(a, Γ)` (linear structural), the CCCM `Π` (reduced) or zeros (zero mean), via
+  the same map as `draw_parameters` (§7.4); other mean kinds attach nothing. The jitted core, `ForecastOut` and
+  the in-loop storage stream are unchanged; an in-loop forecast whose draws are not all stored carries no
+  accelerator variables. Analytic-engine, benchmark and ordering-pooled forecasts carry no `lag_coefs` in this
+  change, so the integrated estimator raises for them at `h > 1`. **Size:** `lag_coefs` is attached to every such
+  forecast and costs `S·p·n²·8` bytes, `(p/H)·nbytes(cond_chol)`, with each draw's `A_l` repeated for its replicate
+  slots; the default estimator and `h = 1` never read it, and for `p > H` it is the largest variable of the dataset
+  (a monthly `n = 7`, `p = 13`, `H = 12` forecast of 1000 draws: 5.1 MB against 4.7 MB of `cond_chol`). Storing
+  it once per parameter draw, or only on request, was not done (the always-on attachment is the D-34 decision).
+  Tested: exact against a companion-form oracle
+  (one draw, constant `Σ`, `h = 2..8`, joint/leading/non-leading subsets, 6-s.d. tails; 1e-10) and against the
+  mixture of exact densities (heterogeneous draws, time-varying factors), unit equivariance at 1e±6 scales, and on
+  MCMC fits per slot against `jax.jacfwd` of `simulate_paths` at `ε = 0` (1e-10; `tests/unit/test_lpd_integrated.py`,
+  `tests/mcmc/forecast/test_lpd_integrated_mcmc.py`).
+  **Scoring** (`evaluation/scores.py`): `score_forecast(…, lpd_method=…)` passes it to the joint call (with MCSE)
+  and to every per-variable call. The default output is the Phase 1 layout (`tests/unit/test_scores.py` pins the
+  variable set). With `"integrated"`, `lpd`, `lpd_mcse` and `lpd_marginal` hold the integrated estimator, and the
+  dataset also has `lpd_marginal_mcse (horizon, variable)` (its per-variable MCSE), the conditioned estimator on the
+  same forecast (`lpd_conditioned`, `lpd_mcse_conditioned (horizon)`, `lpd_marginal_conditioned (horizon,
+  variable)`) and `attrs["lpd_method"] = "integrated"`; the NaN pattern of missing outcomes is the default one and
+  every non-LPD score is unchanged (no random numbers). An unknown method raises before anything is scored. The
+  backtest plumbing is in §11.6; `ordering_sensitivity` forwards `lpd_method` in forecast and backtest modes
+  (recorded in attrs) and rejects a non-default value in prior mode (no LPD there).
+  **Review amendments (2026-10-23):** (1) `_lag_coefs` flattened the parameter leaves with `reshape(-1, …)`,
+  which fails on the empty `a (C, D, 1, 0)` leaf of a univariate model, so every univariate MCMC forecast (post-hoc,
+  in-loop and in backtests, whatever the estimator) raised; it now reshapes to the explicit `C·D` slots (tests:
+  univariate fits, post-hoc with `R = 1, 3` and in-loop, against scalar recursions; synthetic `n = 1` draws).
+  (2) `log_pred_density` raises `ValueError` for an empty or repeated `variables` subset, for either estimator (a
+  repeated variable makes the subset covariance singular; the estimators returned NaN or finite nonsense, and an
+  empty subset an `IndexError`); valid subsets are unchanged. (3) The residual Monte Carlo error of the integrated
+  estimator at tail origins is stated in its docstring, NOTES 8b, the CR reliability note and the
+  pre-registration; the CR acceptance config keeps 1000 forecast draws (raising them is an owner decision).
 
 ### 7.4 Parameters and IRFs
 
@@ -2230,7 +2288,22 @@ class MCMCFit:
 - **Warm starts** (opt-in `warm_start=False` default): origins of an MCMC model run sequentially in one process;
   each fit gets `init=<previous final_state>`; final states are cached next to the scores (`<key>.state.npz`) so
   a resumed backtest continues warm; the cache key gains `"init": "warm:<previous origin key>"`.
-- `estimate_cost` is unchanged (it times one origin).
+- `estimate_cost` is unchanged (it times one origin) apart from forwarding `lpd_method`.
+- **LPD estimator** (D-34): `backtest(…, lpd_method="conditioned")` validates the value up front and threads the
+  plain string (picklable for the `spawn` pool) through `_run_origin`, `_run_warm` and `_fit_and_score` to
+  `score_forecast` (§7.3). The default leaves scores, layout and cache keys exactly as before: `_cache_key` adds
+  `"lpd": "<method>-v1"` only for another method, for every model (the estimator changes the scores, not the fit;
+  precedent: `"seeding"`), so the two estimators never share cached scores, and a warm key carries both tags.
+  `_fit_and_score` receives `lpd_method=` only when it is not the default, so the default call is the WP23 one;
+  it re-adds `attrs["lpd_method"]` after replacing the attrs, so cached scores record their estimator. The
+  integrated estimator at `h > 1` needs MCMC forecasts: an analytic or benchmark model raises `ValueError` at its
+  first origin (no fallback), after that origin's fit; `_fit_and_score` re-raises any scoring `ValueError` with
+  `"<model name> at origin <origin>: "` in front (the cause chained; a plain string, so it pickles from a worker),
+  because `compare` runs its backtests one after another and the failing model need not be the last one fitted.
+  No up-front check: whether a forecast carries `lag_coefs` is known only after fitting in general (wrappers such as
+  the CR `MomentsProbe` have no engine attribute). `compare` forwards it to every backtest. Changing `lpd_method` on
+  an existing cache refits every origin (and every warm chain), although fits and forecasts do not depend on it;
+  `"integrated"` stores the conditioned estimator too, so one run gives both.
 
 ---
 
@@ -2809,6 +2882,20 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
   provenance; spawn context; one compile per `T` bucket.
 - **Acceptance (exit criterion)**: tests green; the replication report meets N08 §C5 criteria 1–6 (including all 24
   orderings) or documents each failure.
+- **Acceptance run (D-34, 2026-10-23)**: `--config acceptance` (4 × 20,000 draws, `lpd_method="integrated"`,
+  `benchmarks/reports/clark_ravazzolo_preregistration.md`); the criteria rules are unchanged. Review amendments to
+  `benchmarks/clark_ravazzolo.py`: the report records the commit and whether tracked files differ from it (`git
+  status --porcelain --untracked-files=no`, with the SHA-256 of `git diff HEAD`), the cache directory and the
+  origins it served per backtest (`rep["cached"]`; cache keys do not change with the code, so the documented command
+  uses a commit-suffixed cache and writes `clark_ravazzolo_acceptance.{md,json}` next to the full run's report); it
+  is labelled the acceptance run only for the registered config, estimator and backtest seed 0 with the structural
+  pair and all 24 orderings run on a clean tree at a known commit (`acceptance_gaps`, listed in the banner
+  otherwise); the main-stage report written before the ordering stage is labelled pending (title, banner, and
+  criterion 6's detail text "pending" instead of "skipped"; `criteria()` itself is unchanged); `--note` text is
+  printed for every config; the acceptance report cites the pre-registration and its two departures from the
+  full run, and the header says how the stored draws are thinned; the startup log and the `--only-ordering`
+  completion line name the config, estimator, budget, seed and cache; the Gaussian-moments store is written to a
+  temporary file and renamed (two runs sharing a store never read a partial file).
 
 #### WP24 — Performance benchmark and CI tiers
 
