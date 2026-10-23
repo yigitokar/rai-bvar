@@ -118,7 +118,11 @@ class StructStatic:
 @dataclass(frozen=True)
 class MeanStatic:
     """Conditional mean. ``coef_scaling="lambda"`` scales the δ_i prior by λ_i (Mode II only);
-    ``const_path`` and ``gram`` are resolved values (DESIGN §3.7.2, §10.5), never ``"auto"``."""
+    ``const_path`` and ``gram`` are resolved values (DESIGN §3.7.2, §10.5), never ``"auto"``.
+
+    ``n_dummy`` (WP25) is the number ``m`` of SOC/SUR dummy rows of the coefficient prior (shape
+    defining: ``SharedPrior.dummies``, ``CoefPriorArrays.dummy_w`` and ``FitCache.dummy`` exist
+    iff ``m > 0``); 0, the default, keeps every pre-WP25 program unchanged."""
 
     kind: MeanKind
     coef_scaling: Scaling = "none"
@@ -126,6 +130,7 @@ class MeanStatic:
     gram: GramKind = "packed"
     gram_tile: int = 0  # packed_tiled: columns of P per tile
     cccm_precompute: bool = True  # reduced form: every L_j before the j-loop (shape rule)
+    n_dummy: int = 0  # SOC/SUR dummy rows of the coefficient prior (0 = none; WP25)
 
     def __post_init__(self) -> None:
         _choice("MeanStatic", "kind", self.kind, MeanKind)
@@ -134,10 +139,13 @@ class MeanStatic:
         _choice("MeanStatic", "gram", self.gram, GramKind)
         _int(self, "gram_tile", 0)
         _bool(self, "cccm_precompute")
+        _int(self, "n_dummy", 0)
         if (self.gram == "packed_tiled") != (self.gram_tile > 0):
             raise ValueError(
                 "gram_tile > 0 is required by, and only allowed with, gram='packed_tiled'"
             )
+        if self.n_dummy and self.kind == "zero":
+            raise ValueError("dummy rows belong to a coefficient prior; the zero mean has none")
 
 
 @dataclass(frozen=True)
@@ -285,7 +293,8 @@ def validate_composition(
     4. ``coupled`` needs the Constant core, and holds exactly when some prior block is λ-scaled;
     5. a constant-path other than ``weighted`` belongs to ``linear_structural`` and needs
        time-constant weights (Constant core, no transitory scale);
-    6. ``eigen`` needs Mode I and a non-varying coefficient prior;
+    6. ``eigen`` needs Mode I, a non-varying coefficient prior and no dummy rows (SOC/SUR rows make
+       the prior precision dense, N05 §7.7; WP25 routes them to ``cholesky_const``);
     7. ``fixed_factor`` needs Mode II and a non-varying coefficient prior;
     8. ``rw`` and ``zero_offset`` are SV options (``rw`` ignores ``h0``);
     9. outliers need ``outlier_K >= 2``;
@@ -327,6 +336,11 @@ def validate_composition(
             )
     if mean.const_path == "eigen" and (mode != "I" or COEF_VARIES[coef.kind]):
         raise ValueError("const_path='eigen' needs Mode I and a non-varying coefficient prior")
+    if mean.const_path == "eigen" and mean.n_dummy:
+        raise ValueError(
+            "const_path='eigen' needs a diagonal prior precision; SOC/SUR dummy rows make it dense "
+            "(N05 §7.7): use 'cholesky_const'"
+        )
     if mean.const_path == "fixed_factor" and (mode != "II" or COEF_VARIES[coef.kind]):
         raise ValueError(
             "const_path='fixed_factor' needs Mode II and a non-varying coefficient prior"

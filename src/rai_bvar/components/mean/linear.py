@@ -34,6 +34,16 @@ On the Constant paths the weights are ``m_t/λ_i``, so ``1/λ_i = w_0`` (row 0 i
 Coupling (D-30, DESIGN §4.7): Mode II returns ``Coupling(k + i, ½ Σ_active P̃θ(θ − meanθ)²)`` with
 the λ-free ``P̃θ``; ``iw_equivalent`` the same sums over the active ``a``-slots; Mode I zeros.
 
+SOC/SUR dummy rows (WP25; ``MeanStatic.n_dummy = m > 0``; N05 §7.7): ``m`` prior rows with the
+δ-design ``F_d = [X_d | X_d M_c − Y_d[:, :n−1]]`` (``FitCache.dummy``) and targets ``y_{d,i} =
+Y_d[:, i]`` join every equation's regression, ``K += w_d (cθ⊗cθ ⊙ F_dᵀF_d)``,
+``b += w_d cθ ⊙ F_dᵀy_{d,i}``, on every path (``fixed_factor``: in ``K̃``, λ-free); the weight is
+the fixed ``w_d = dummy_w_i = 1/σ̄_i²`` in Mode I and ``iw_equivalent`` (the rows are part of the
+Gaussian prior), and ``w_d = dummy_w_i/λ_i`` in Mode II, where the rows are like data rows and the
+coupling counts them: ``n_active += m``, ``quad += ½ dummy_w_i Σ_d (y_{d,i} − F_dθ_i)²``. The
+``eigen`` path needs a diagonal prior precision, so Mode I with rows resolves to ``cholesky_const``.
+Without rows (``m = 0``) none of this is traced.
+
 Overridable internals (DESIGN §4.9): ``structural_gamma(δ, a, M_c) -> γ`` and
 ``linear_conditional(ctx, pm, cm, cache, shared) -> GaussianPrec``. Overriding either switches the
 draw to the Cholesky path through ``linear_conditional``; overriding ``structural_gamma`` (which must
@@ -193,18 +203,23 @@ class LinearStructural(KernelBase):
         """``γ_i = δ_i + M_c a_i`` (D3; N05 §4.1)."""
         return delta + jnp.matmul(Mc, a, precision=_HIGHEST)
 
+    def _gamma_jacobian(self, shared: SharedPrior) -> Array:
+        """``∂γ/∂a`` (k × n−1) of the (overridden) ``structural_gamma``; ``M_c`` for the D3 map."""
+        k, m = shared.Mc.shape
+        sg = self.impl("structural_gamma")
+        return jax.jacfwd(lambda a: sg(jnp.zeros((k,), jnp.float64), a, shared.Mc))(
+            jnp.zeros((m,), jnp.float64)
+        )
+
     def _design(
         self, ctx: EqContext, cache: FitCache, shared: SharedPrior, *, batched: bool = False
     ) -> tuple[Array, Array | None, str, int]:
         """``(F, FF, gram mode, tile)``: the cached δ-design, or the in-kernel design
         ``[X | X·∂γ/∂a + cols]`` when ``structural_gamma`` is overridden (``cols = −ỹ_{<}``)."""
         if self._overridden("structural_gamma"):
-            k, m = shared.Mc.shape
+            k = shared.Mc.shape[0]
             X = cache.F[:, :k]
-            sg = self.impl("structural_gamma")
-            J = jax.jacfwd(lambda a: sg(jnp.zeros((k,), jnp.float64), a, shared.Mc))(
-                jnp.zeros((m,), jnp.float64)
-            )
+            J = self._gamma_jacobian(shared)
             F = jnp.concatenate([X, jnp.matmul(X, J, precision=_HIGHEST) + ctx.cols], axis=1)
             return F, None, "batched", 0
         if batched or self.static.gram != "packed":
@@ -234,9 +249,72 @@ class LinearStructural(KernelBase):
             F, FF, mode, tile = self._design(ctx, cache, shared, batched=batched)
             G = weighted_gram(w, F=F, FF=FF, mode=mode, q=F.shape[1], tile=tile)
             fty = jnp.matmul(F.T, w * ctx.target, precision=_HIGHEST)
+        if self.static.n_dummy:  # SOC/SUR prior rows (WP25); closed path without dummies
+            Gd, fty_d = self.dummy_terms(ctx, cache, shared)
+            G = G + Gd
+            fty = fty + fty_d
         # exactly symmetric: the packed Gram is v[pos] and G_const is mirrored (WP4, WP5)
         K = c[:, None] * G * c[None, :] + jnp.diag(pr.prec)
         return GaussianPrec(K=K, b=pr.prec * pr.mean + c * fty)
+
+    # ----------------------------------------------------------------- SOC/SUR dummy rows (WP25)
+
+    def _dummy_rows(
+        self, ctx: EqContext, cache: FitCache, shared: SharedPrior
+    ) -> tuple[Array, Array, Array]:
+        """``(F_d, y_d, w_d)`` of equation ``ctx.i``: the rows' δ-design (``m × q``; rebuilt as
+        ``[X_d | X_d·∂γ/∂a − Y_d[:, :n−1]]`` when ``structural_gamma`` is overridden), their
+        targets ``Y_d[:, i]`` and the weight in use: the λ-free ``dummy_w_i``, divided by
+        ``λ_i = exp(log_scale)`` in Mode II (N05 §7.7)."""
+        d = cache.dummy
+        if isinstance(d, Empty) or isinstance(shared.dummies, Empty):
+            raise ValueError(
+                f"MeanStatic.n_dummy = {self.static.n_dummy} needs FitCache.dummy and "
+                "SharedPrior.dummies (prepare with the prior's dummy rows)"
+            )
+        Yd = shared.dummies.Y
+        if self._overridden("structural_gamma"):
+            J = self._gamma_jacobian(shared)
+            Xd = shared.dummies.X
+            Fd = jnp.concatenate(
+                [Xd, jnp.matmul(Xd, J, precision=_HIGHEST) - Yd[:, : self.n - 1]], axis=1
+            )
+        else:
+            Fd = d.F
+        w = jnp.take(d.w, ctx.i)
+        if self.coef_scaled:
+            w = w * jnp.exp(-ctx.log_scale)
+        return Fd, jnp.take(Yd, ctx.i, axis=1), w
+
+    def dummy_terms(
+        self, ctx: EqContext, cache: FitCache, shared: SharedPrior
+    ) -> tuple[Array, Array]:
+        """The dummy rows' contribution ``(w_d F_dᵀF_d, w_d F_dᵀy_d)`` to the Gram and to
+        ``Fᵀ(w ⊙ y_i)`` of equation ``ctx.i`` (unmasked, like the data part). Fixed weight
+        ``1/σ̄_i²`` in Mode I and ``iw_equivalent``, ``1/λ_i`` in Mode II (N05 §7.7)."""
+        if self._overridden("structural_gamma"):
+            Fd, yd, w = self._dummy_rows(ctx, cache, shared)
+            G = jnp.matmul(Fd.T, Fd, precision=_HIGHEST)
+            return w * G, w * jnp.matmul(Fd.T, yd, precision=_HIGHEST)
+        _, _, w = self._dummy_rows(ctx, cache, shared)
+        return w * cache.dummy.G, w * jnp.take(cache.dummy.FtY, ctx.i, axis=1)
+
+    def dummy_log_density_eq(
+        self,
+        ms: LinearEq,
+        a_i: Array,
+        ctx: EqContext,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> Array:
+        """``Σ_d log N(y_{d,i}; F_d θ_i, 1/w_d)``: the dummy rows' factor of the prior of
+        ``θ_i = [δ_i | a_i]`` (with ``λ_i`` in Mode II), up to its normalising constant; 0 without
+        dummies. The monitor adds it to ``log_prior_eq`` (DESIGN §8.1)."""
+        if not self.static.n_dummy:
+            return jnp.zeros((), jnp.float64)
+        Fd, yd, w = self._dummy_rows(ctx, cache, shared)
+        r = yd - jnp.matmul(Fd, jnp.concatenate([ms.delta, a_i]), precision=_HIGHEST)
+        return 0.5 * jnp.sum(jnp.log(w) - _LOG_2PI - w * r * r)
 
     def linear_conditional(
         self,
@@ -262,6 +340,8 @@ class LinearStructural(KernelBase):
             return base
         n = self.n
         G = base.G_const
+        if path == "eigen" and self.static.n_dummy:
+            raise ValueError("the eigen path needs a diagonal prior precision: no dummy rows")
 
         def one(i: Array, prior_i: EqPrior) -> PyTree:
             pr = theta_prior_arrays(prior_i, i, n)
@@ -269,7 +349,13 @@ class LinearStructural(KernelBase):
             fty = jnp.take(base.FtY, i, axis=1)
             if path == "eigen":
                 return eigen_prepare(G, pr.prec, pr.mean, fty, c)
-            K_tilde = c[:, None] * G * c[None, :] + jnp.diag(pr.prec)
+            Gi = G
+            if self.static.n_dummy:  # Mode II: λ-free rows (weight w_i/λ_i like the data; WP25)
+                d = base.dummy
+                w = jnp.take(d.w, i)
+                Gi = G + w * d.G
+                fty = fty + w * jnp.take(d.FtY, i, axis=1)
+            K_tilde = c[:, None] * Gi * c[None, :] + jnp.diag(pr.prec)
             return fixed_factor_prepare(K_tilde, pr.prec * pr.mean + c * fty)
 
         eq = jax.vmap(one)(jnp.arange(n, dtype=jnp.int32), prior.eq)
@@ -345,7 +431,7 @@ class LinearStructural(KernelBase):
             raise ValueError("LinearStructural fuses the contemporaneous step: cm is required")
         theta, info = self.draw_core(self._noise(key, pm, cm), ctx, pm, cm, cache_i, cache, shared)
         new, a = self._split(theta, pm, cm)
-        return new, a, self.coupling(new.delta, a, ctx, pm, cm), info
+        return new, a, self.coupling(new.delta, a, ctx, pm, cm, cache=cache, shared=shared), info
 
     def conditional_eq(
         self,
@@ -364,9 +450,21 @@ class LinearStructural(KernelBase):
         return self.impl("linear_conditional")(ctx, pm, cm, cache, shared)
 
     def coupling(
-        self, delta: Array, a: Array, ctx: EqContext, pm: GaussianDiag, cm: GaussianDiag
+        self,
+        delta: Array,
+        a: Array,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag,
+        *,
+        cache: FitCache | None = None,
+        shared: SharedPrior | None = None,
     ) -> Coupling:
-        """DESIGN §4.7: λ-free quadratic forms over the λ-scaled active coordinates."""
+        """DESIGN §4.7: λ-free quadratic forms over the λ-scaled active coordinates.
+
+        Mode II with SOC/SUR dummy rows (WP25; N05 §7.7): the rows are weighted ``w_i/λ_i`` like
+        data rows, so the ``λ_i`` conditional counts them too: ``n_active += m`` and ``quad +=
+        ½ w_i Σ_d (y_{d,i} − F_d θ_i)²`` (``cache`` and ``shared`` are then required)."""
         if not (self.coef_scaled or self.contemp_scaled):
             return Coupling.zeros()
         prec_a = cm.prec * jnp.exp(ctx.log_scale)  # λ-free P̃ of the a-slots
@@ -375,6 +473,13 @@ class LinearStructural(KernelBase):
         if self.coef_scaled:
             quad = quad + jnp.sum(jnp.where(pm.cmask > 0, pm.prec * (delta - pm.mean) ** 2, 0.0))
             n_active = n_active + jnp.sum(pm.cmask)
+            if self.static.n_dummy:
+                if cache is None or shared is None:
+                    raise ValueError("Mode II coupling with dummy rows needs cache and shared")
+                Fd, yd, _ = self._dummy_rows(ctx, cache, shared)
+                r = yd - jnp.matmul(Fd, jnp.concatenate([delta, a]), precision=_HIGHEST)
+                quad = quad + jnp.take(cache.dummy.w, ctx.i) * jnp.sum(r * r)
+                n_active = n_active + self.static.n_dummy
         return Coupling(n_active=n_active, quad=0.5 * quad)
 
     # ----------------------------------------------------------------- views and densities

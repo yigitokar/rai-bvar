@@ -8,8 +8,9 @@ sees the calendar):
 * EB plug-in hyperparameters (``engines.mcmc.eb``, DESIGN §6.5) or the fixed values;
 * ψ, own-lag means and the frequency (``priors.scales.window_scales``);
 * the prior arrays of §2.6 from the WP6 builders: Mode I / Mode II δ arrays with the D3 centring
-  columns ``M_c`` (``priors.structural``) or the CCCM arrays (``priors.reduced``), the ``a_i``
-  arrays at the composition's ``contemp_scaling``, and the volatility arrays
+  columns ``M_c`` (``priors.structural``) or the CCCM arrays (``priors.reduced``), the SOC/SUR
+  dummy rows from the window's first ``p`` observations and their weights (``priors.dummies``,
+  WP25), the ``a_i`` arrays at the composition's ``contemp_scaling``, and the volatility arrays
   (``priors.sv_arrays``: IG ``λ``, data-centred SV levels ``log(ψ_i/ι)``, offsets ``c_i = c_rel ψ_i``,
   the outlier ``Beta`` from the frequency, the ν weights);
 * the padded window (``data.engine_data_from_vardata``) and the static configuration.
@@ -22,8 +23,9 @@ data)`` always resolves the same way, E14):
                tile (a multiple of 512 packed columns) such that T_pad·tile·8 ≤ 64 MiB;
                P = q(q+1)/2 (structural δ-design) or k(k+1)/2 (reduced form, packed X)
     const_path "auto" → structural Linear × Constant without a transitory scale and with a
-               non-varying coefficient prior: Mode I "eigen", Mode II "fixed_factor",
-               iw_equivalent "cholesky_const"; anything else "weighted" (§3.7.2).
+               non-varying coefficient prior: Mode I "eigen" ("cholesky_const" with SOC/SUR
+               dummy rows, which make the prior precision dense; N05 §7.7, WP25), Mode II
+               "fixed_factor", iw_equivalent "cholesky_const"; anything else "weighted" (§3.7.2).
                "cholesky" → "cholesky_const" where weights are time-constant, else "weighted"
                (the general Cholesky path): the fast paths are off either way
     cccm_precompute ⇔ n·k²·8·C ≤ 512 MiB
@@ -36,6 +38,7 @@ window (§5.5) and calls ``fit_mcmc``.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -67,6 +70,7 @@ from rai_bvar.engines.mcmc.state import (
     EqPrior,
     PriorArrays,
 )
+from rai_bvar.priors.dummies import dummy_arrays, dummy_hyper
 from rai_bvar.priors.reduced import reduced_arrays
 from rai_bvar.priors.scales import WindowScales, window_scales
 from rai_bvar.priors.structural import contemp_arrays, structural_arrays
@@ -151,12 +155,15 @@ def resolve_gram(setting: str, T_pad: int, P: int) -> tuple[str, int]:
     return setting, 0
 
 
-def resolve_const_path(setting: str, static_parts: Any) -> str:
+def resolve_const_path(setting: str, static_parts: Any, *, dummies: bool = False) -> str:
     """``MeanStatic.const_path`` from ``MCMCSettings.const_path`` (DESIGN §3.7.2 path rule).
 
     ``static_parts`` is ``api.static_parts(model)``. The fast paths need the structural ``Linear``
     mean, time-constant weights (Constant core, no transitory scale) and a non-varying
-    coefficient prior; ``"cholesky"`` turns them off.
+    coefficient prior; ``"cholesky"`` turns them off. ``dummies`` (WP25): SOC/SUR rows make the
+    Mode I prior precision dense, so the diagonal ``eigen`` path gives way to ``cholesky_const``
+    (exact; the dense-``P₀^{−½}`` eigen variant of N05 §7.7 is not implemented). Mode II keeps
+    ``fixed_factor``: its rows are λ-free like the data.
     """
     if setting not in ("auto", "cholesky"):
         raise ValueError(f"unknown const_path setting {setting!r}")
@@ -168,6 +175,8 @@ def resolve_const_path(setting: str, static_parts: Any) -> str:
         return "weighted"
     mean = MeanStatic(kind=static_parts.mean_kind, coef_scaling=static_parts.coef_scaling)
     mode = scaling_mode(static_parts.struct, mean)
+    if mode == "I" and dummies:
+        return "cholesky_const"
     return {"I": "eigen", "II": "fixed_factor", "iw_equivalent": "cholesky_const"}[mode]
 
 
@@ -215,17 +224,26 @@ def resolve(
     # window and static configuration
     engine_data, periods = engine_data_from_vardata(data, lags, det, settings.t_bucket)
     n, n_det = data.n_vars, n_deterministic(det)
+    structural = parts.mean_kind == "linear_structural"
+    mode = scaling_mode(
+        parts.struct, MeanStatic(kind=parts.mean_kind, coef_scaling=parts.coef_scaling)
+    )
+    dummies, dummy_w = dummy_arrays(
+        data.values, scales, prior, None if outcome is None else outcome.hyper,
+        lags=lags, n_det=n_det, mode=mode if structural else "reduced",
+    )  # fmt: skip
+    n_dummy = 0 if isinstance(dummies, Empty) else int(dummies.Y.shape[0])
     T_eff = int(np.asarray(engine_data.T_eff))
     shapes = Shapes.of(n, lags, n_det, bucket(T_eff, settings.t_bucket))
-    structural = parts.mean_kind == "linear_structural"
     gram, tile = resolve_gram(settings.gram, shapes.T_pad, shapes.P if structural else shapes.P_x)
     mean_static = MeanStatic(
         kind=parts.mean_kind,
         coef_scaling=parts.coef_scaling,
-        const_path=resolve_const_path(settings.const_path, parts),
+        const_path=resolve_const_path(settings.const_path, parts, dummies=n_dummy > 0),
         gram=gram,
         gram_tile=tile,
         cccm_precompute=resolve_cccm_precompute(n, shapes.k, settings.chains),
+        n_dummy=n_dummy,
     )
     static = StaticConfig(
         shapes=shapes,
@@ -243,12 +261,14 @@ def resolve(
     # prior arrays (DESIGN §2.6) from the WP6 builders
     values = {"lambda": lam, "alpha": alpha}
     if structural:
-        mode = "II" if parts.coef_scaling == "lambda" else "I"
         coef, shared = structural_arrays(
-            scales, prior, values, n=n, lags=lags, n_det=n_det, mode=mode
+            scales, prior, values, n=n, lags=lags, n_det=n_det, mode="II" if mode == "II" else "I"
         )
     else:
         coef, shared = reduced_arrays(scales, prior, values, n=n, lags=lags, n_det=n_det)
+    if n_dummy:  # SOC/SUR prior rows (WP25)
+        coef = dataclasses.replace(coef, dummy_w=dummy_w)
+        shared = dataclasses.replace(shared, dummies=dummies)
     contemp = contemp_arrays(scales, prior, n, scaling=parts.struct.contemp_scaling)
     if parts.vol.persistent == "constant":
         core, trans = constant_prior(scales, n), Empty()
@@ -260,6 +280,9 @@ def resolve(
     )
 
     hyper = _hyper(model, scales, lam, alpha, outcome, core)
+    if n_dummy:  # the SOC/SUR weights in use (EB values when free) and the row count (WP25)
+        hyper.update(dummy_hyper(prior, None if outcome is None else outcome.hyper))
+        hyper["n_dummy"] = n_dummy
     notes = () if outcome is None or outcome.note is None else (outcome.note,)
     messages = tuple(scales.notes) + (() if outcome is None else outcome.warnings)
     return Resolved(

@@ -20,10 +20,10 @@ engine rules then apply (first match wins):
 * ``reduced`` × ``Constant("iw_equivalent")``: MCMC, CCCM + Chan ``(a, λ)`` (order-invariant);
 * ``reduced`` × ``Constant("iw")``: ``ValueError``;
 
-and finally the MCMC-only rules (Lenza–Primiceri scaling, SOC/SUR dummies and ``hierarchy="mh"``
-arrive in Phase 3; ψ cannot be estimated by EB with ``cross ≠ 1`` in structural form) and the
-JAX-free legality check ``engines.mcmc.config.validate_composition`` (DESIGN §3.8). Every error
-is raised at construction.
+and finally the MCMC-only rules (Lenza–Primiceri scaling and ``hierarchy="mh"`` arrive in Phase 3;
+ψ cannot be estimated by EB with ``cross ≠ 1`` in structural form) and the JAX-free legality check
+``engines.mcmc.config.validate_composition`` (DESIGN §3.8). Every error is raised at construction.
+SOC/SUR dummies run on both engines (MCMC: DESIGN §13 WP25; N05 §7.7, N04 §3.1).
 """
 
 from __future__ import annotations
@@ -165,11 +165,6 @@ class BVAR:
             raise NotImplementedError(
                 "Lenza-Primiceri scaling runs on the analytic engine only; on the MCMC engine it "
                 f"arrives in Phase 3{double}. Use SV(outliers=True) for outlier-robust MCMC models"
-            )
-        if prior.soc is not None or prior.sur is not None:
-            raise NotImplementedError(
-                "sum-of-coefficients / single-unit-root dummies on the MCMC engine arrive in "
-                "Phase 3; drop soc/sur, or use form='conjugate' with Constant()"
             )
         if prior.hierarchy == "mh":
             raise NotImplementedError(

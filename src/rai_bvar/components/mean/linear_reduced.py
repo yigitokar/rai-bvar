@@ -28,6 +28,13 @@ so the scan is block Gauss–Seidel on the joint precision of ``vec Π`` (N04 §
 ``packed`` reads the packed products ``XX`` of the fit cache (one GEMM ``(n, T_pad) × (T_pad, P_x)``
 for all ``j``; D-25), ``packed_tiled`` and ``batched`` form them from ``X``.
 
+**SOC/SUR dummy rows** (WP25; ``MeanStatic.n_dummy > 0``; N04 §3.1): ``m`` prior rows
+``Y_d[:, j] = X_d π_j + ε``, ``ε ~ N(0, ψ_j)`` in equation ``j`` of ``Π`` only — a Gaussian prior
+independent across ``j`` and correlated within ``j``, which the CTA supports — give
+``K_j += w_j X_dᵀX_d`` and ``b_j += w_j X_dᵀY_d[:, j]`` with the fixed ``w_j = 1/ψ_j``
+(``FitCache.dummy``). They are never scaled by ``Σ_t`` (that would make the ``Π`` prior depend on
+``A``), never enter ``U``, ``E``, ``W`` or the likelihood, and leave ``K_j`` free of ``Π``.
+
 **The rest of the reduced-form sweep** (DESIGN §4.3) lives elsewhere: ``a_j | Π, λ_j`` is
 ``Recursive.contemp_step`` on ``ỹ = U`` (the regression of ``u_j`` on ``−u_{<j}``; N04 §6.2), and
 the volatility blocks receive ``e_j = (UAᵀ)_j``. :class:`ReducedEq` is the per-equation mean of
@@ -167,6 +174,7 @@ def cccm_core(
     gram: str,
     precompute: bool,
     tile: int = 0,
+    dummy: tuple[Array, Array, Array] | None = None,
 ) -> tuple[Array, StepInfo]:
     """One CTA scan ``j = 0..n−1`` (module docstring; N04 §5.3, §6.1, §6.4) with injected noise.
 
@@ -175,7 +183,11 @@ def cccm_core(
     the packed products of ``X`` (``gram="packed"``; ``Empty`` otherwise); ``mean0``, ``prec0``
     (n, k) the moments of ``π_j`` (row ``j``); ``Z`` (n, k) standard normals. ``precompute``: every
     ``(L_j, s_j)`` before the loop (``n·k²`` floats) or inside it (identical algebra, less memory;
-    DESIGN §10.5). ``tile``: columns per tile for ``gram="packed_tiled"``.
+    DESIGN §10.5). ``tile``: columns per tile for ``gram="packed_tiled"``. ``dummy`` (WP25):
+    ``(G_d, FtY_d, w)`` = ``(X_dᵀX_d (k, k), X_dᵀY_d (k, n), w (n,))`` of the SOC/SUR prior rows,
+    which enter equation ``j`` of ``Π`` with fixed weight ``w_j = 1/ψ_j`` (N04 §3.1):
+    ``K_j += w_j G_d``, ``b_j += w_j FtY_d[:, j]``. They are not time steps: never in ``U``/``E``,
+    ``W`` or ``inv_lam``, and ``K_j`` stays free of ``Π``. ``None`` (no dummies) traces none of it.
 
     Returns ``(Π_new, info)``: ``info.ok`` iff every factorisation succeeded and ``Π_new`` is
     finite; ``info.min_pivot`` the smallest pivot of the Jacobi-scaled ``K_j`` (in ``(0, 1]``).
@@ -191,10 +203,14 @@ def cccm_core(
 
     def factor(j: Array) -> tuple[Array, Array, StepInfo]:
         K = _gram(W[:, j], X, xx, gram, tile) + jnp.diag(prec0[j])
+        if dummy is not None:
+            K = K + dummy[2][j] * dummy[0]
         return precision_factor(K)
 
     if precompute:
         Ks = cccm_precisions(W, X, xx, prec0, gram=gram, tile=tile)
+        if dummy is not None:
+            Ks = Ks + dummy[2][:, None, None] * dummy[0][None]
         Ls, ss, infos = jax.vmap(precision_factor)(Ks)
         info0 = StepInfo(jnp.all(infos.ok), jnp.min(infos.min_pivot))
     else:
@@ -212,6 +228,8 @@ def cccm_core(
         f = X @ pi_old
         G = (E * WI) @ A_j
         b = prec0[j] * mean0[j] + X.T @ (G + W[:, j] * f)
+        if dummy is not None:
+            b = b + dummy[2][j] * dummy[1][:, j]
         pi_new = precision_draw_factored(L, s, b, Z[j])
         d = X @ (pi_new - pi_old)
         E = E - d[:, None] * A_j[None, :]
@@ -231,10 +249,13 @@ def cccm_conditional_j(
     mean0: Array,
     prec0: Array,
     j: int | Array,
+    *,
+    dummy: tuple[Array, Array, Array] | None = None,
 ) -> GaussianPrec:
     """The exact full conditional ``π_j | π_{−j}, A, Λ, y = N(K_j⁻¹b_j, K_j⁻¹)`` at the current
     ``Π`` (N04 §5.3; DESIGN §3.1 rule 3), from scratch: ``E = (Y − XΠ)Aᵀ``,
-    ``K_j = Xᵀ diag(W_·j) X + diag(p_j)``, ``b_j = p_j ⊙ m_j + Xᵀ((E ⊙ inv_lamᵀ)A_·j + W_·j ⊙ Xπ_j)``.
+    ``K_j = Xᵀ diag(W_·j) X + diag(p_j)``, ``b_j = p_j ⊙ m_j + Xᵀ((E ⊙ inv_lamᵀ)A_·j + W_·j ⊙ Xπ_j)``,
+    plus ``w_j G_d`` and ``w_j FtY_d[:, j]`` with SOC/SUR rows (``dummy``, WP25).
     ``j`` may be traced. Arguments as in :func:`cccm_core`."""
     k = X.shape[1]
     A = unit_lower(a)
@@ -243,6 +264,9 @@ def cccm_conditional_j(
     w = W[:, j]
     K = weighted_gram(w, F=X, mode="batched", q=k) + jnp.diag(prec0[j])
     b = prec0[j] * mean0[j] + X.T @ ((E * inv_lam.T) @ A[:, j] + w * (X @ Pi[:, j]))
+    if dummy is not None:
+        K = K + dummy[2][j] * dummy[0]
+        b = b + dummy[2][j] * dummy[1][:, j]
     return GaussianPrec(K=K, b=b)
 
 
@@ -319,11 +343,23 @@ class CCCMStep(KernelBase):
         return cls(static.mean, vol=vol, coef=coef)
 
     # ----------------------------------------------------------------- helpers
-    def _core_kwargs(self) -> dict[str, Any]:
+    def _core_kwargs(self, cache: FitCache | None = None) -> dict[str, Any]:
         kw: dict[str, Any] = {"gram": self.static.gram, "precompute": self.static.cccm_precompute}
         if self.static.gram == "packed_tiled":
             kw["tile"] = self.static.gram_tile
+        if self.static.n_dummy:  # SOC/SUR prior rows (WP25); closed path without dummies
+            kw["dummy"] = self.dummy_terms(cache)
         return kw
+
+    def dummy_terms(self, cache: FitCache | None) -> tuple[Array, Array, Array]:
+        """``(X_dᵀX_d, X_dᵀY_d, w)`` of the SOC/SUR rows from ``cache.dummy`` (WP25)."""
+        d = None if cache is None else cache.dummy
+        if d is None or isinstance(d, Empty):
+            raise ValueError(
+                f"MeanStatic.n_dummy = {self.static.n_dummy} needs FitCache.dummy (prepare with "
+                "the prior's dummy rows)"
+            )
+        return d.G, d.FtY, d.w
 
     def moments(
         self, st: ChainState, prior: PriorArrays, eq_map: EqMap | None = None
@@ -352,14 +388,15 @@ class CCCMStep(KernelBase):
         return masked_inv_lam(log_lam, tmask)
 
     def _draw(
-        self, key: Key, Pi: Array, a: Array, inv_lam: Array, data: EngineData, XX: Any,
+        self, key: Key, Pi: Array, a: Array, inv_lam: Array, data: EngineData, cache: FitCache,
         pm: GaussianDiag,
     ) -> tuple[Array, StepInfo]:  # fmt: skip
         n, k = data.Y.shape[1], data.X.shape[1]
         Z = cccm_noise(key, n, k)
         return self.impl("cccm_core")(
-            Pi, a, inv_lam, data.X, data.Y, XX, pm.mean, pm.prec, Z, **self._core_kwargs()
-        )
+            Pi, a, inv_lam, data.X, data.Y, cache.XX, pm.mean, pm.prec, Z,
+            **self._core_kwargs(cache),
+        )  # fmt: skip
 
     # ----------------------------------------------------------------- GlobalStep
     def init(
@@ -372,9 +409,7 @@ class CCCMStep(KernelBase):
         log_lam0 = _prior_log_lam(prior.eq.vol_core, _vol_rw(self.vol))
         inv_lam = masked_inv_lam(jnp.broadcast_to(log_lam0[:, None], (n, T_pad)), data.tmask)
         pm = self.moments(st, prior)
-        Pi, _ = self._draw(
-            key, jnp.zeros((k, n)), jnp.zeros((n, n - 1)), inv_lam, data, cache.XX, pm
-        )
+        Pi, _ = self._draw(key, jnp.zeros((k, n)), jnp.zeros((n, n - 1)), inv_lam, data, cache, pm)
         return dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=CCCMGlobal(Pi=Pi)))
 
     def sample(
@@ -384,7 +419,7 @@ class CCCMStep(KernelBase):
         data = ctx.data
         inv_lam = self.inv_lam(st, data.tmask, eq_map)
         pm = self.moments(st, ctx.prior, eq_map)
-        Pi, info = self._draw(key, st.glob.mean.Pi, st.eq.struct.a, inv_lam, data, ctx.cache.XX, pm)
+        Pi, info = self._draw(key, st.glob.mean.Pi, st.eq.struct.a, inv_lam, data, ctx.cache, pm)
         st = dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=CCCMGlobal(Pi=Pi)))
         return st, info
 
@@ -394,16 +429,25 @@ class CCCMStep(KernelBase):
         """The exact conditional of ``π_j`` at the state (:func:`cccm_conditional_j`)."""
         data = ctx.data
         pm = self.moments(st, ctx.prior, eq_map)
+        dummy = self.dummy_terms(ctx.cache) if self.static.n_dummy else None
         return cccm_conditional_j(
             st.glob.mean.Pi, st.eq.struct.a, self.inv_lam(st, data.tmask, eq_map), data.X,
-            data.Y, pm.mean, pm.prec, j,
+            data.Y, pm.mean, pm.prec, j, dummy=dummy,
         )  # fmt: skip
 
     def log_prior(self, glob: GlobalState, prior: PriorArrays) -> Array:
-        """``Σ_j log N(π_j; m_j, diag(1/p_j))`` from ``prior.eq.coef`` (fixed moments)."""
+        """``Σ_j log N(π_j; m_j, diag(1/p_j))`` from ``prior.eq.coef`` (fixed moments); with SOC/SUR
+        rows (WP25) plus their factor ``Σ_j Σ_d log N(y_{d,j}; x_d'π_j, 1/w_j)``, i.e. the log
+        prior up to the rows' normalising constant."""
         c = prior.eq.coef
         r = glob.mean.Pi.T - c.mean0
-        return 0.5 * jnp.sum(jnp.log(c.prec0) - _LOG_2PI - c.prec0 * r * r)
+        out = 0.5 * jnp.sum(jnp.log(c.prec0) - _LOG_2PI - c.prec0 * r * r)
+        if self.static.n_dummy:
+            d = prior.shared.dummies
+            w = jnp.asarray(c.dummy_w, jnp.float64)[None, :]
+            rd = d.Y - d.X @ glob.mean.Pi  # (m, n)
+            out = out + 0.5 * jnp.sum(jnp.log(w) - _LOG_2PI - w * rd * rd)
+        return out
 
     def future(self, key: Key, gd: GlobDraw, H: int) -> Empty:
         """``Empty()``: ``Π`` is constant over the forecast horizon."""

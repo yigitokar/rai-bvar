@@ -380,7 +380,12 @@ def _prepare_fn(program: Program) -> Callable[..., FitCache]:
 
     def prepare_one(data: EngineData, prior: PriorArrays) -> FitCache:
         Mc = prior.shared.Mc if static.mean.kind == "linear_structural" else None
-        base = data_mod.base_cache(data, Mc, static)
+        if static.mean.n_dummy:  # SOC/SUR dummy rows (WP25); closed path otherwise
+            base = data_mod.base_cache(
+                data, Mc, static, dummies=prior.shared.dummies, dummy_w=prior.eq.coef.dummy_w
+            )
+        else:
+            base = data_mod.base_cache(data, Mc, static)
         return program.mean.prepare(data, prior, base)
 
     return prepare_one

@@ -2,15 +2,18 @@
 E25; N05 §9). NumPy only: this module imports no JAX.
 
 Minnesota hyperparameters are fixed during MCMC. With ``hierarchy="eb"`` (the default) the mode of
-the free set (``lambda``; optionally ``alpha`` and ``psi``) is computed per window before sampling:
+the free set (``lambda``; optionally ``alpha``, ``psi`` and, with SOC/SUR dummies, ``soc``/``sur``)
+is computed per window before sampling:
 
 1. **Conjugate twin.** ``BVAR(Linear(Minnesota(form="conjugate", cross=1, contemp=1, <same
-   lambda_, alpha, psi, mean, var_const, hyper, hyperpriors, soc_scope>, hierarchy="eb")),
-   Constant("iw"), lags, deterministic)`` is fitted by the Phase 1 ``AnalyticFit`` on the same
-   window (ψ default, multistart, stationarity test: all unchanged). At ``κ_c = κ_a = 1`` its NIW
-   marginal likelihood is exactly the marginal likelihood of the Mode II Constant model (N05 §4.2),
-   so the mode is true type-II ML for the twin and a documented plug-in for Mode I and SV
-   (N05 §9 "Phase 2 shortcut").
+   lambda_, alpha, psi, mean, var_const, soc, sur, soc_scope, hyper, hyperpriors>,
+   hierarchy="eb")), Constant("iw"), lags, deterministic)`` is fitted by the Phase 1
+   ``AnalyticFit`` on the same window (ψ default, multistart, stationarity test: all unchanged).
+   At ``κ_c = κ_a = 1`` its NIW marginal likelihood is exactly the marginal likelihood of the
+   Mode II Constant model (N05 §4.2), with the same SOC/SUR rows as the MCMC prior (WP25; N05
+   §7.7), so the mode is true type-II ML for the twin and a documented plug-in for Mode I, the
+   reduced form and SV (N05 §9 "Phase 2 shortcut"; the fixed-weight dummy rows of Mode I and of
+   the reduced form are part of that plug-in).
 2. ``form="structural"``, ``cross ≠ 1``: Chan's (2022) per-equation NIG log ML (eq. 11) plus the
    GLP log hyperprior, maximised over the free set with ``cross`` (and ``contemp``) fixed, starting
    from the twin's mode (``engines.structural_nig.eb_structural``, WP16). ``psi`` cannot be free
@@ -65,7 +68,8 @@ class EBOutcome:
 def conjugate_twin(model: BVAR) -> BVAR:
     """The analytic twin of an MCMC ``model`` (DESIGN §6.5 step 1): the same Minnesota settings at
     ``form="conjugate"``, ``cross = contemp = 1``, ``hierarchy="eb"``, with ``Constant("iw")``,
-    the same lags and deterministic terms. SOC/SUR dummies and Lenza–Primiceri scaling are
+    the same lags and deterministic terms. SOC/SUR dummies (``soc``, ``sur``, ``soc_scope``) are
+    kept, so their weights are estimated with λ when free (WP25); Lenza–Primiceri scaling is
     rejected on the MCMC engine (D-21), so the twin has none."""
     from rai_bvar.api import BVAR
 
@@ -75,8 +79,6 @@ def conjugate_twin(model: BVAR) -> BVAR:
         cross=1.0,
         contemp=1.0,
         hierarchy="eb",
-        soc=None,
-        sur=None,
     )
     return BVAR(
         mean=Linear(prior=prior),
@@ -124,11 +126,16 @@ def eb_hyper(model: BVAR, data: VARData) -> EBOutcome:
 
 
 def _values(hyper: dict[str, Any], method: str, free: tuple[str, ...]) -> dict[str, Any]:
-    """``lambda``, ``alpha`` and ``psi`` of a Phase 1 (or structural NIG) hyperparameter dict."""
-    return {
+    """``lambda``, ``alpha`` and ``psi`` of a Phase 1 (or structural NIG) hyperparameter dict, and
+    ``soc``/``sur`` when the dummies are on (``None`` entries are dropped)."""
+    out: dict[str, Any] = {
         "lambda": float(hyper["lambda"]),
         "alpha": float(hyper["alpha"]),
         "psi": np.array(hyper["psi"], dtype=np.float64),
         "eb_method": method,
         "eb_free": free,
     }
+    for name in ("soc", "sur"):
+        if hyper.get(name) is not None:
+            out[name] = float(hyper[name])
+    return out
