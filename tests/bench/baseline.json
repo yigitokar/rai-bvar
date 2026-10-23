@@ -1,0 +1,285 @@
+{
+ "benchmark": "BENCH-P2",
+ "reference": false,
+ "label": "x86 cloud, loaded (load avg ~10 on 4 cores), provisional, not the reference",
+ "note": "PROVISIONAL, not the DESIGN \u00a710.1 reference machine (an idle Apple M-series or x86 laptop): a regression reference for the same machine class only; the 120 s target is not asserted against it. Replace it with the reference command in benchmarks/phase2_perf.py's docstring.",
+ "tolerance": {
+  "time": 0.2,
+  "ess_per_s": 0.3
+ },
+ "settings": {
+  "n": 20,
+  "lags": 4,
+  "T": 300,
+  "chains": 4,
+  "burn": 1000,
+  "draws": 10000,
+  "thin": 1,
+  "devices": 1,
+  "data_seed": 0,
+  "sweep_block": 1000,
+  "sweep_reps": 3
+ },
+ "machine": {
+  "date": "2026-10-23T01:07:58",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "simd": [
+   "avx",
+   "avx2",
+   "avx512f",
+   "fma"
+  ],
+  "physical_cores": 4,
+  "logical_cpus": 4,
+  "mem_bytes": 16872808448,
+  "platform": "Linux-6.18.44-fc-v140-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "python": "3.13.16",
+  "numpy": "2.5.4",
+  "xla_flags": "",
+  "loadavg": [
+   11.7353515625,
+   11.09033203125,
+   10.0478515625
+  ],
+  "commit": "1093932",
+  "jax": "0.12.0.1",
+  "jaxlib": "0.12.0.1"
+ },
+ "summary": {
+  "repeats": 3,
+  "compile_cold_s": 29.803504705429077,
+  "compile_warm_s": 3.9371049404144287,
+  "wall_cold_s": 310.96789127400007,
+  "wall_warm_s": 284.81355025799985,
+  "run_s": 281.15116516869466,
+  "post_runner_s": 14.597025117999692,
+  "runner_ms_per_sweep": 24.407991269322977,
+  "sweep_ms_min3x1000": 21.294099709999955,
+  "peak_rss_mb": 1972.45703125,
+  "loadavg_1min": [
+   5.8037109375,
+   7.42626953125,
+   8.91064453125,
+   10.4990234375,
+   6.541015625,
+   11.15966796875
+  ],
+  "converged": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false
+  ],
+  "ess": {
+   "loglik": {
+    "ess_min": 1693.0097141346212,
+    "ess_per_s_min": 5.9442737629617675,
+    "ess_per_s_median": 5.9442737629617675
+   },
+   "h_T": {
+    "ess_min": 2168.839514693715,
+    "ess_per_s_min": 7.614944979721156,
+    "ess_per_s_median": 25.166572613133354
+   },
+   "mu": {
+    "ess_min": 4400.156375145207,
+    "ess_per_s_min": 15.449252225392023,
+    "ess_per_s_median": 29.10755584228489
+   },
+   "sigma": {
+    "ess_min": 446.41460904415806,
+    "ess_per_s_min": 1.5673924525001393,
+    "ess_per_s_median": 2.2888118055712376
+   },
+   "phi": {
+    "ess_min": 566.8146274901752,
+    "ess_per_s_min": 1.9901252134132073,
+    "ess_per_s_median": 3.0116941566740683
+   },
+   "B_own1": {
+    "ess_min": 20983.26020602728,
+    "ess_per_s_min": 73.67367243243689,
+    "ess_per_s_median": 89.71431217216062
+   },
+   "primary": {
+    "ess_min": 446.41460904415806,
+    "ess_per_s_min": 1.5673924525001393,
+    "ess_per_s_median": 19.559530209267677
+   },
+   "cross_lag": {
+    "quantity": "B[y1.L1, y0]",
+    "ess": 8754.989579267605,
+    "ess_per_s": 30.7393716743352
+   }
+  },
+  "pass_120s_cold": false,
+  "pass_120s_warm": false
+ },
+ "kernels": {
+  "gram_packed": {
+   "ms_min": 2.821078000124544,
+   "ms_median": 4.523559000517707,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.1219746810002107,
+   "cost": {
+    "flops": 258560000.0,
+    "bytes accessed": 26036800.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 204800,
+    "output_size_in_bytes": 6400000,
+    "temp_size_in_bytes": 3232000
+   }
+  },
+  "gram_batched": {
+   "ms_min": 6.8914559997210745,
+   "ms_median": 12.760231999891403,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.10360643500007427,
+   "cost": {
+    "flops": 516980096.0,
+    "bytes accessed": 60876800.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 204800,
+    "output_size_in_bytes": 6400000,
+    "temp_size_in_bytes": 26880000
+   }
+  },
+  "precision_draw": {
+   "ms_min": 5.0381359997118125,
+   "ms_median": 6.494702999589208,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.30442917900018074,
+   "cost": {
+    "flops": 4928577.0,
+    "transcendentals": 8000.0,
+    "bytes accessed": 39525052.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 6528000,
+    "output_size_in_bytes": 64744,
+    "temp_size_in_bytes": 12928848
+   }
+  },
+  "sv_indicators": {
+   "ms_min": 1.1865340002259472,
+   "ms_median": 2.172358000279928,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.1454453910000666,
+   "cost": {
+    "flops": 6016000.0,
+    "transcendentals": 281600.0,
+    "bytes accessed": 14643696.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 615040,
+    "output_size_in_bytes": 307216,
+    "temp_size_in_bytes": 4096000
+   }
+  },
+  "sv_awol": {
+   "ms_min": 0.41582699941500323,
+   "ms_median": 0.544380000064848,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.25730215099974885,
+   "cost": {
+    "flops": 515446.0,
+    "transcendentals": 80.0,
+    "bytes accessed": 8218754.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 514560,
+    "output_size_in_bytes": 205440,
+    "temp_size_in_bytes": 1435144
+   }
+  },
+  "sv_exact": {
+   "ms_min": 1.0054499998659594,
+   "ms_median": 1.3841209993188386,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 0.157125695999639,
+   "cost": {
+    "flops": 2303920.0,
+    "transcendentals": 332800.0,
+    "bytes accessed": 11139480.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 615680,
+    "output_size_in_bytes": 640,
+    "temp_size_in_bytes": 2867840
+   }
+  },
+  "sv_core": {
+   "ms_min": 5.2165619999868795,
+   "ms_median": 6.504318999759562,
+   "reps": 50,
+   "per_call_units": 1,
+   "compile_s": 3.8121654789993045,
+   "cost": {
+    "flops": 26167360.0,
+    "transcendentals": 1028640.0,
+    "bytes accessed": 63804892.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 828800,
+    "output_size_in_bytes": 623480,
+    "temp_size_in_bytes": 6156232
+   }
+  },
+  "sweep": {
+   "ms_min": 23.02660668000499,
+   "ms_median": 24.037236849999317,
+   "reps": 5,
+   "per_call_units": 200,
+   "compile_s": 8.04376038800001,
+   "cost": {
+    "flops": 307481568.0,
+    "transcendentals": 1103840.0,
+    "bytes accessed": 145901120.0
+   },
+   "memory": {
+    "argument_size_in_bytes": 687456,
+    "output_size_in_bytes": 687584,
+    "temp_size_in_bytes": 17526472
+   }
+  }
+ },
+ "kernel_machine": {
+  "date": "2026-10-23T01:08:52",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "simd": [
+   "avx",
+   "avx2",
+   "avx512f",
+   "fma"
+  ],
+  "physical_cores": 4,
+  "logical_cpus": 4,
+  "mem_bytes": 16872808448,
+  "platform": "Linux-6.18.44-fc-v140-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "python": "3.13.16",
+  "numpy": "2.5.4",
+  "xla_flags": "",
+  "loadavg": [
+   9.5458984375,
+   10.658203125,
+   9.9638671875
+  ],
+  "commit": "1093932",
+  "jax": "0.12.0.1",
+  "jaxlib": "0.12.0.1",
+  "backend": "cpu",
+  "devices": 1
+ }
+}
