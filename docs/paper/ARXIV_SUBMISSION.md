@@ -218,8 +218,8 @@ exclusive transfer of copyright, choose arXiv's non-exclusive distribution licen
 5. Check arXiv's PDF:
    - 106 pages;
    - the title-page footnote reads "Appendix J states what the agents did ...";
-   - Listing 1 is on p. 18;
-   - App. A starts on p. 36;
+   - Listing 1 on p. 18 and App. A starting on p. 36, as in the TeX Live 2026 test (if arXiv's
+     TeX Live differs, a shift of a page is not an error; see Section 4, item 2);
    - no "??" or "[?]" anywhere (search the PDF for "??").
    If arXiv's log shows a missing file or package, compare it with Section 2 before changing
    anything.
