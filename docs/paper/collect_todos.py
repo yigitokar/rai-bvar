@@ -85,6 +85,35 @@ STATUS = {
     31: "Not needed under tectonic (XeTeX, TU encoding prints < and >); `main.tex` loads T1 only "
         "under pdfTeX, which is untested here. arXiv compiles with pdfLaTeX, so test that branch "
         "before submitting (`make arxiv` packages the sources; its --test build uses tectonic).",
+    11: "Partly done (literature pass, 2026-10-23): the searches for the path-integrated RB "
+        "multi-step LPD (C3), the ASIS + exact-correction ratio, the excess-pivot recursion and "
+        "mutation testing of MCMC samplers found close prior work for each (Hiraki-Chib-Omori 2026, "
+        "Krueger et al., Warne et al.; Hosszejni-Kastner 2019, delayed acceptance; Demmel et al. 2008, "
+        "O'Cinneide 1996; Hook-Kelly 2009, Jarma et al. 2026, Geweke 2004), so the text credits them "
+        "and makes no novelty or 'to our knowledge' claim; the TODO 11 marks are gone. Not covered by "
+        "that pass: composition and one-axis verdict designs in other BVAR software, the collapsed "
+        "standardised-t nu step, and whether stochvol's JSS paper uses Geweke-type unit tests.",
+    12: "Names re-verified on PyPI, CRAN and GitHub (2026-10-23; URLs in the P2 comment of "
+        "02_related.tex); bvhar is now described as R with a Python version in development (it is "
+        "not on PyPI). The TODO 12 mark is gone. srvar-toolkit's first release date was not checked "
+        "(0.4.0, uploaded 2026-09-27, is the current release).",
+    15: "Partly done (2026-10-23): the concern of Talts et al. (Section 3) is cited in Section 8 and "
+        "App. D; the Modrak et al. theorem numbers (Theorems 4, 5 and 7) were checked against the PMC "
+        "accepted manuscript and arXiv v2/v3 (the typeset PDF was not seen); the Geweke M3 error is "
+        "described, not numbered; the Sims-Zha 1998 centring was checked in FRB Atlanta WP 96-13 (IER "
+        "numbering not seen). The TODO 15 marks are gone. Open: the Alfa-Xue-Ye page range and the "
+        "chan2024bvars arXiv v1 section numbers.",
+    21: "Paper side done (2026-10-23): App. F gives the benchmark codes of the four replication "
+        "series (McCracken and Ng 2021, Table A1) and the walk-through (sec:walk-data) says where the "
+        "'rai' defaults differ; the TODO 21 marks are gone. Open in the main repository: "
+        "`src/rai_bvar/datasets/fred.py` l.1 still cites 'McCracken & Ng 2016, 2020'; change it to 2021.",
+    22: "Partly done (2026-10-23): the JAE article is closed access (Wiley 403), so the paper says "
+        "throughout that the working-paper numbers are used; the count is 56 (48 in CR_FULL, 8 in "
+        "CR_PRE_DLPS; N08's 40 is its own count). Section 11 and App. F now state CR's unit "
+        "lower-triangular A without a variable order and their t+h-1 target convention, and cite the "
+        "JAE data archive (clark2015macroeconomicdata). Open: add the one-quarter target offset to "
+        "DEVIATIONS in benchmarks/clark_ravazzolo.py (main repository); the CCM (2016) +0.967 and the "
+        "ARRS/CKY ordering magnitudes stay out unless verified.",
 }
 
 ASSEMBLY_NOTES = r"""

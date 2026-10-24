@@ -29,14 +29,19 @@ malformed input and uses the column order as the recursive ordering of every tri
 \code{upto}, \code{tail}, \code{select} and \code{realized} give the data available at an origin,
 rolling windows, reorderings and future outcomes (\cref{app:data}).
 % [V] tests/unit/test_dataset.py::test_interior_missing_value_raises; dossier 02 §9.1; src/rai_bvar/data/dataset.py l.215-237 at d58c9ef
-The transformation codes 1--7 are those of FRED-MD and FRED-QD \citep{mccracken2016fredmd}, each
+The transformation codes 1--7 are those of FRED-MD and FRED-QD \citep{mccracken2016fredmd,mccracken2021fredqd}, each
 with a pathwise inverse, and they set the own-first-lag prior mean (1 for levels and log levels,
 0 for differences).
 \code{rb.datasets.load("fred-qd", vintage="2026-09")} downloads a pinned vintage of FRED-QD
 \citep{mccracken2021fredqd}, checks its SHA-256 checksum and caches it; the files are not bundled.
 % [V] src/rai_bvar/datasets/fred.py module docstring and load() (l.169-179) at d58c9ef; dossier 02 §9.5
-\todo{Q11/TODO 21: confirm the official FRED-QD 2026-09 transformation codes against the
-\code{"rai"} codes before the paper states them.}
+% [R] codes 1-7 defined identically in McCracken & Ng FRED-QD (Review 103(1), p. 6 and Appendix p. 26) and FRED-MD (WP 2015-012B, data appendix): https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/publications/review/pdfs/2021/01/14/fred-qd-a-quarterly-database-for-macroeconomic-research.pdf; https://files.stlouisfed.org/files/htdocs/wp/2015/2015-012.pdf
+The named FRED-QD variable sets load with the package's own codes by default
+(\code{tcodes="rai"}), which differ from the benchmark codes
+\citep[Table~A1]{mccracken2021fredqd} for price indices (5, log first differences, instead of 6),
+for interest rates and the unemployment rate (1, levels, instead of 2) and for housing starts (4
+instead of 5); \code{tcodes="official"} uses the codes in the file.
+% [R] McCracken & Ng (2021) Appendix Table A1 (https://doi.org/10.20955/r.103.1-44; PDF above): GDPCTPI, PCECTPI, CPIAUCSL 6 (A1F, pp. 33-34); FEDFUNDS, GS1, GS10 2 (A1H, p. 36); UNRATE 2 (A1C, p. 29); HOUST 5 (A1D, p. 31); the transform row of the cached, checksum-verified 2026-09 file has the same codes; rai codes: src/rai_bvar/datasets/fred.py l.170-173 (default variables="small", tcodes="rai")
 
 \subsection{An analytic BVAR, a forecast and a comparison}\label{sec:walk-analytic}
 

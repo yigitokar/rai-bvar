@@ -78,10 +78,13 @@ conditionally on the contemporaneous row,
   \tilde a_i = (a_{i1}, \dots, a_{i,i-1}, 1, 0, \dots, 0)',
 \end{equation}
 with $M$ the reduced-form prior mean $b$, so that $\mathrm{E}[B' \mid A] = M'$ for every $A$ (D3 in
-the design documents; \cref{app:niw-structural}); \citet{sims2006were} use the same linear
-conditional centring under a normalisation with unit-variance structural shocks and attribute it to
-earlier work of theirs. % [R] docs/phase2/05_structural_equation_sampler.md §4.2 and §13 item 3 (2006: NBER SI 2004 draft, eq. 7, A_+ = D + S A_0; the AER numbering was not seen, so no equation number is cited)
-\todo{Confirm that their ``Sims and Zha (1998a)'' is \citet{sims1998bayesian} and that the conditional centring is in its text, then cite it here: N05 did not obtain the 1998 paper (form confirmed only via the MSBVAR documentation and the 2006 NBER draft).}
+the design documents; \cref{app:niw-structural}). With $M$ the random-walk mean (identity on the
+first lag, zeros elsewhere), this is the conditional centring of the structural prior of
+\citet{sims1998bayesian}, who normalise the structural shocks to unit variance and leave the
+diagonal of $A$ free; a linear centring is unchanged when $a_i$ and $\gamma_i$ are rescaled
+together. \citet{sims2006were} write it, in their notation, as $A_+ = D + SA_0$ with a zero-mean
+prior on $D$ (in ours, column $i$ of $D$ is $\gamma_i - M\tilde a_i$ up to the scale of the row).
+% [R] D3: docs/phase2/05_structural_equation_sampler.md §4.2 and §13 item 3. Sims & Zha, FRB Atlanta WP 96-13 (Oct. 1996; WP version of the IER article per IDEAS, https://ideas.repec.org/p/fip/fedawp/96-13.html): unit-variance shocks in the likelihood, eqs. (3)-(6), p. 3; prior form eq. (7), p. 4; E[A_+|A_0] eq. (14), 'A Base: The Random Walk Prior', p. 8 (https://fraser.stlouisfed.org/files/docs/historical/frbatl/wp/frbatl_wp_1996-13.pdf); IER numbering not seen. S&Z 2006: NBER SI draft (Apr. 14, 2004), sec. II, eq. (7), p. 9, whose 'Sims and Zha (1998a)' is IER 39(4) 949-968 (https://conference.nber.org/confer/2004/si2004/me/sims.pdf); CEPS WP 110 (rev. Mar. 27, 2005), sec. III, eq. (7), p. 9 (https://gceps.princeton.edu/wp-content/uploads/2017/01/110sims.pdf); AER numbering not seen. S&Z's zero-mean D is not our delta_i (which has mean m_i)
 In the coordinates $\delta_i = \gamma_i - M_{<i}a_i$ ($M_{<i}$ the first $i-1$ columns of $M$;
 unit Jacobian), $a_i$ and $\delta_i$ are independent a priori with diagonal precisions
 (\cref{alg:C-structural}). % [V] src/rai_bvar/priors/structural.py (module docstring)
@@ -134,7 +137,15 @@ the stationary law, or $\mathrm{N}(\log(\psi_i/\iota), 4)$ for the random walk. 
 The replication's primary arm (\cref{sec:replication}), reduced form $\times$ \code{SV(rw=True)}, is
 validation row 18; its Student-$t$ variant has no row of its own
 (\cref{sec:validation-coverage}). % [V] at 7f410dc: src/rai_bvar/validation/joint.py _COMPOSITIONS ("reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3)); rows 1-18 and 201-205, 23 in all; rw only in rows 14 and 18); benchmarks/clark_ravazzolo.py::models (reduced SV(rw), SV(rw,t10)), PRIMARY_SV = "SV(rw)". Release inclusion of 7f410dc: orchestrator decision (a), resolving TODO 3 for this section.
-\todo{Credit the triangular VAR-SV form \eqref{eq:structural} with \eqref{eq:sv} (\cref{sec:intro} cites \citet{cogley2005drifts,primiceri2005time,clark2011realtime}); check each paper's specification first.}
+The factorisation $\Sigma_t = A^{-1}\Lambda_t A^{-1\prime}$ with a constant unit lower-triangular
+$A$ and independent univariate log-variances is the volatility model of \citet{cogley2005drifts},
+who combine it with drifting coefficients and random-walk log-variances; \citet{primiceri2005time}
+uses the same triangular factorisation but lets $A$ drift and leaves the covariance of the
+log-volatility innovations unrestricted. With constant coefficients and \code{rw=True}, the
+volatility specification is that of the BVAR with stochastic volatility of
+\citet{clark2011realtime} (constant $A$, independent random-walk log-variances), who takes it from
+\citet{cogley2005drifts} and writes the VAR in mean-adjusted form with a steady-state prior.
+% [R] Cogley & Sargent, FRB Atlanta WP 2003-25 (Oct. 2003; version of RED 8(2) per IDEAS), sec. 2, eqs. (10)-(15): https://fraser.stlouisfed.org/files/docs/historical/frbatl/wp/frbatl_wp_2003-25.pdf, https://ideas.repec.org/a/red/issued/v8y2005i2p262-302.html; Primiceri, author final (July 2004), sec. 2 eqs. (2)-(8), sec. 4.1 p. 13 (W ~ IW, unrestricted): https://faculty.wcas.northwestern.edu/gep575/tvsvar_final_july_04.pdf; Clark, KC Fed RWP 09-08 (rev. July 2010; not linked to the JBES article on IDEAS), sec. 3.2 eq. (1), Phi diagonal: https://www.kansascityfed.org/documents/5319/pdf-rwp09-08.pdf; journal numbering not seen for any of the three. The package's AR(1) default is in none of them
 
 \paragraph{Robust SV.} Outliers and Student-$t$ errors are transitory scales of the structural
 residual,
@@ -145,7 +156,10 @@ residual,
 and $\lambda_{i,t}$ in \eqref{eq:loglik} is then this effective variance. With \code{outliers=True},
 as in \citet{carriero2024addressing}, $o_{i,t} \in \{1, \dots, 20\}$ is 1 with probability $1 - p_i$
 and otherwise uniform on $\{2, \dots, 20\}$, with a Beta prior on $p_i$. % [V] src/rai_bvar/priors/sv_arrays.py::outlier_beta; src/rai_bvar/components/specs.py (outlier_max=20, _default_outlier); src/rai_bvar/components/vol/transitory.py (w_k = p/(K-1)); [R] docs/phase2/03_sv_outliers_t.md §0 table (CCMM REStat §III.A "U(2,20)", online appendix II.iv fn. 8, code grid 1:20)
-\todo{Check the outline's credit of the outlier grid to \citet{stock2016core} against its REStat text.}
+The two-part outlier distribution and the Beta prior on $p_i$ follow the unobserved-components
+model of \citet{stock2016core}, whose outlier scale is uniform on $[2, 10]$; the discrete grid
+follows \citet{carriero2024addressing}, who describe it as a tractable approximation.
+% [R] Stock & Watson REStat 98(4), sec. II.A, eq. (3) and text p. 771 (U[2,10]); sec. II.C pp. 772-773 (Beta prior on p): https://www.princeton.edu/~mwatson/papers/core_and_trend_inflation_restat_2016.pdf; online appendix not accessed (403, https://www.mitpressjournals.org/doi/suppl/10.1162/REST_a_00608), so whether SW's numerics discretise U[2,10] is unverified (Chan, arXiv 2208.13255v1 sec. 6.3, secondary, says they do: https://arxiv.org/pdf/2208.13255v1); NBER WP 21282 (June 2015) fixed s_t in {1,5,10}: https://www.nber.org/papers/w21282.pdf. CCMM REStat 106(5): intro p. 1403 (adopt SW's discrete mixture), sec. III.A p. 1406 (U(2,20), discrete grid as approximation), sec. III.B p. 1406 (SW's Beta prior): https://cris.unibo.it/retrieve/84935685-6fb6-40ab-bcf0-3a25062471b7/rest_a_01213.pdf
 With \code{tails="t"}, $\tau_{i,t} \sim \mathrm{IG}(\nu_i/2, (\nu_i - 2)/2)$, a standardised $t$
 ($\mathrm{E}\,\tau_{i,t} = 1$; unit scale in \cref{app:prior-details}), and $\nu_i$ is uniform on
 $\{3, \dots, 40\}$; the two components can be combined. % [V] src/rai_bvar/components/specs.py (_NU_PRIOR, t_scale)

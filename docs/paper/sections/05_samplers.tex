@@ -100,15 +100,19 @@ approximation: with $g$ the mixture density and
   w(h) = \sum_t \bigl[\log N(\tilde e_t; 0, e^{h_t}) - \log g(y^*_t - h_t)\bigr],
 \end{equation}
 the path proposal is accepted with probability $\min\{1, e^{w(h') - w(h)}\}$
-\citep[Algorithm~3]{delnegro2015time}, an idea with a precedent in
-\citet{stroud2003nonlinear}.\todo{N01 marks \citet{stroud2003nonlinear} ``not opened'': confirm its eq.~(11), or drop the citation.}\todo{N01 read Del Negro--Primiceri as NY Fed Staff Report 619 (rev.\ Oct.\ 2014) with its online appendix (App.~B.2, eq.~7); confirm that ``Algorithm~3'' is numbered so in the cited RES corrigendum, or cite the staff report.}
+\citep[Algorithm~3]{delnegro2015time}; this acceptance probability has the form of eq.~(11) of
+\citet{stroud2003nonlinear}. % [R] Stroud, M\"uller & Polson, undated author manuscript (19 pp.), sec. 2.3 step 3, eq. (11), p. 7: https://jrs390.georgetown.domains/papers/nonlinear.pdf; DNP (2015) sec. 4 cite eq. (11) of the JASA version. DNP RES corrigendum, author final (Feb. 2015): Algorithm 3 named in sec. 4 (https://faculty.wcas.northwestern.edu/gep575/ErrataFinal4.pdf); formal statement in the online appendix (Feb. 2015), sec. 2.2, acceptance probability eq. (6) (https://faculty.wcas.northwestern.edu/gep575/ErrataFinal4appendix.pdf) (= NY Fed SR 619, rev. Oct. 2014, App. B.2 eq. (7), https://www.newyorkfed.org/medialibrary/media/research/staff_reports/sr619.pdf); RES 82(4) 1342-1345: https://academic.oup.com/restud/article-lookup/doi/10.1093/restud/rdv024
 The chain is then exact for any mixture table and offset $c \ge 0$, which the validation exploits with a
 deliberately coarse mixture (\cref{sec:validation}). % [V] tests/mcmc/blocks/test_sv_core.py::test_exact_h_log_accept_identity, ::test_block_geweke_exact_mode_with_coarse_mixture
 The centred steps need no correction (\cref{app:exact-sv}). % [V] test_sv_core.py::test_centred_gamma_phi_log_ratio_identity, ::test_sigma2_log_ratio_identity_and_ig_gibbs. The reason ("they do not move h, and the indicator conditional does not involve the parameters") is deleted here: duplicated in Appendix B.3 (app:exact-sv)
 The non-centred step (on by default, \code{asis=True}) interweaves
 \citep{yu2011center,kastner2014ancillarity}; in exact mode it is
-accepted or rejected once, with a ratio combining the auxiliary ratio and the change in $w$, a
-combination derived in the design notes (\cref{app:exact-sv}) and not claimed as new.\todo{TODO 11: prior-art search for this combined ratio (docs/phase2/01\_omori\_mixture.md §10.3; \cref{app:exact-sv}).} % [V] test_sv_core.py::test_nc_mu_sigma_log_accept_identity, ::test_nc_accept_uses_w_of_the_post_h_step_state
+accepted or rejected once, with a ratio combining the auxiliary ratio and the change in $w$, which
+is the Metropolis--Hastings ratio under the exact target for the auxiliary step's proposal
+(\cref{app:exact-sv}); \citet{hosszejni2019approaches} instead correct the $h$ step and update the
+parameters without the mixture approximation, in separate steps, and we do not claim the combination
+as new. % [V] test_sv_core.py::test_nc_mu_sigma_log_accept_identity, ::test_nc_accept_uses_w_of_the_post_h_step_state
+% [R] prior-art search (TODO 11): no published statement of this exact ASIS + exact-target combination found; Hosszejni & Kastner (arXiv 1901.11491v2; BAYSM 2018), sec. 2, RWMH sampler: h corrected, then parameters by RWMH without the mixture, then ASIS, in separate steps: https://ar5iv.labs.arxiv.org/html/1901.11491, https://api.crossref.org/works/10.1007/978-3-030-30611-3_8; derivation: docs/phase2/01_omori_mixture.md §10.3
 A negative $\sigma'$ is folded together with $\tilde h$, which preserves the non-centred posterior by the
 sign symmetry used by \citet{fruhwirth2010stochastic}; the cold start is described after
 \cref{alg:C-sv}. % [V] test_sv_core.py::test_fold_is_measure_preserving_map, ::test_block_geweke_catches_abs_sigma_without_flip; the cold-start sentence and its [R]/[V] tags moved to App. C (after alg:C-sv)
@@ -134,16 +138,20 @@ The $p_t$ are the Cholesky pivots of $\tilde Q$ (\cref{app:pivots}), but every t
 non-negative, so nothing cancels; assembling $\tilde Q$ first rounds away each $\sigma^2/v_{s_t}$ below
 the spacing of its diagonal, and the level-direction pivot becomes rounding noise
 (\cref{sec:robustness}). % [V] src/rai_bvar/engines/mcmc/linalg.py (laplacian_precision_sample); test_sv_core.py::test_awol_rw_laplacian_is_the_rw_system, ::test_rw_awol_at_a_tiny_sigma (60-digit reference; Apple M5 Max; Linux re-run is TODO 23)
-We read the recursion as GTH-type subtraction-free elimination
-\citep{grassmann1985regenerative,alfa2002accurate,ye2008computing}; we claim its application, not the
-algorithm.\todo{TODO 11: confirm this positioning against GTH, Alfa--Xue--Ye, Ye (2008) and GMRF samplers.}
+The recursion is the subtraction-free (GTH-type) elimination for diagonally dominant M-matrices
+parametrised by off-diagonal entries and row sums
+\citep{grassmann1985regenerative,ocinneide1996relative,alfa2002accurate,ye2008computing}, as described
+by \citet[Section~2.3.4]{demmel2008accurate}, applied to a tridiagonal matrix whose row sums are the
+$\delta_t$; we claim its application to SV path sampling, not the algorithm.
+% [R] Demmel, Dumitriu, Holtz & Koev, arXiv 0712.4027 (Acta Numerica 17), sec. 2.3.4 (off-diagonals and row sums as parameters; Schur-complement row-sum update without cancellation): https://arxiv.org/pdf/0712.4027, https://api.crossref.org/works/10.1017/S0962492906350015; triplet representation and GTH update: Iannazzo, Najafi Kalyani & Poloni, arXiv 2607.05437, secs. 1 and 2.4 (https://arxiv.org/pdf/2607.05437); O'Cinneide 1996: https://api.crossref.org/works/10.1007/s002110050203; mapping to eq:B-excess-pivot checked by hand (app:pivots). No GMRF or SV path sampler using the row-sum parametrisation was found (search not exhaustive)
 % "For a random-walk log variance the centred step draws sigma^2 only, and the non-centred regression is on (h_0, sigma)" moved, with its [V] tag, to App. C (after alg:C-sv) (Appendix C, next to alg:C-laplacian, which this subsection cites)
 
 \subsection{Transitory components}\label{sec:samp-transitory}
 
 The outlier scale $o_t \in \{1, \dots, K\}$ ($K = 20$ by default) has logits
 $\log\varpi_k - \log k - z_t^2/(2k^2)$, with $z_t^2 = e_t^2/\lambda^{\mathrm{pers}}_t$, $\varpi_1 = 1 - p$ and
-$\varpi_{k > 1} = p/(K - 1)$ \citep{carriero2024addressing,stock2016core}, and $p \mid o$ is beta
+$\varpi_{k > 1} = p/(K - 1)$ (\citealp{carriero2024addressing}; after the continuous mixture of
+\citealp{stock2016core}), and $p \mid o$ is beta
 (\cref{tab:C-transitory}). % [V] src/rai_bvar/components/vol/transitory.py; tests/mcmc/blocks/test_transitory.py::test_outlier_pmf_gaussian_matches_brute_force, ::test_p_conditional_counts_real_rows_only_and_draws_beta. Deleted here as duplicated in tab:C-transitory: p | o ~ Beta(a_p + N_1, b_p + T - N_1), N_1 = #{t : o_t > 1}
 For Student-$t$ errors \citep{jacquier2004bayesian}, $\nu$ is drawn on its grid ($\{3, \dots, 40\}$ by
 default) with $\tau$ integrated out, then $\tau_t$ (\cref{tab:C-transitory} gives all conditionals, including the collapsed

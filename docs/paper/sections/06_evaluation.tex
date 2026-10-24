@@ -109,6 +109,15 @@ path went; at $h = 1$ the conditioned code runs, bitwise.
 With one parameter draw and constant volatility it is exact, matching a companion-form oracle at
 $h = 2, \dots, 8$ to $10^{-10}$ (\cref{fig:lpd-estimators} and \cref{app:mcse-bound}).
 % [V] tests/unit/test_lpd_integrated.py::test_integrated_lpd_is_exact_for_a_single_parameter_draw (atol 1e-10), ::test_conditioned_estimator_misses_the_tail_that_the_integrated_one_gets
+The integrated estimator is the mixture-of-parameters, or Rao--Blackwellised, estimator
+\citep[Section~2.1]{kruger2021predictive} with each draw's simulated volatility path in the
+conditioning set, as \citet[Section~5.2]{kruger2021predictive} condition on a draw's latent states.
+With constant volatility it is the Monte Carlo average over posterior draws of a linear Gaussian
+model's exact $h$-step predictive likelihood \citep{warne2017marginalized}, and
+\citet[Appendix~D]{hiraki2026dynamic} compute multi-step predictive moments in the same way, from
+simulated log-volatility paths and a companion form, for a factor SV-in-mean VAR; we claim the
+implementation, not the estimator.
+% [R] prior-art search (OUTLINE TODO 11): Krueger et al. arXiv 1608.06802v6 sec. 2.1 eq. (2) (mixture-of-parameters, credited to Gelfand & Smith 1990) and sec. 5.2 (theta_i = all latent states and parameters): https://arxiv.org/pdf/1608.06802; Warne, Coenen & Christoffel (CFS WP 478 / JAE 32(1)), secs. 3.1-3.2 (Kalman-filter conditional h-step likelihood averaged over posterior draws; JAE numbering not checked): https://www.econstor.eu/bitstream/10419/102702/1/798286458.pdf, https://api.crossref.org/works/10.1002/jae.2514; Hiraki, Chib & Omori arXiv 2604.04529v1, App. D 'Prediction Procedure' (conditional moments given simulated log-volatility paths; aggregation over draws not stated as a density mixture): https://arxiv.org/html/2604.04529v1. Negative checks: Clark RWP 09-08 sec. 5.4 (Gaussian formula), chan2024bvars, Chan arXiv 2208.13255 sec. 3.3, bayesianVARs 0.1.8 manual, Kastner & Huber arXiv 1704.03239 (one-step only)
 
 \begin{figure}[tbp]
   \centering

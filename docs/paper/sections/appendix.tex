@@ -241,12 +241,16 @@ because $|A| = 1$, so the posteriors coincide as well.
 
 The direction ``inverse-Wishart implies the structural normal--inverse-gamma form'' is Corollary~1
 of \citet{chan2022asymmetric}, and his Proposition~1 is the converse; the conditional centring
-$\mathrm{E}[\gamma_\iota \mid a_\iota] = M\tilde a_\iota$ has a precedent in the structural priors
-of \citet{sims2006were}, who attribute it to earlier work of theirs.
-% [R] docs/phase2/05_structural_equation_sampler.md l.66-67 (S&Z 2006 eq. 7 read in the NBER draft;
-% the 1998 form confirmed through the MSBVAR documentation, its equation number UNVERIFIED)
-\todo{TODO 15: the 1998 paper itself was not obtained; check the precedent against it, or cite only
-\citet{sims2006were}.}
+$\mathrm{E}[\gamma_\iota \mid a_\iota] = M\tilde a_\iota$ with the random-walk mean (identity on the
+first lag, zeros elsewhere) is the centring of the structural prior of \citet{sims1998bayesian}, who
+normalise the structural shocks to unit variance instead of fixing the diagonal of $A$ at one;
+rescaling $a_\iota$ and $\gamma_\iota$ together leaves a linear centring unchanged.
+\citet{sims2006were} restate it, in their notation, as $A_+ = D + SA_0$ with a zero-mean prior on
+$D$; their $D$ is not the diagonal $D$ above, and its column $\iota$ is $\gamma_\iota - M\tilde
+a_\iota$ up to the scale of the row.
+% [R] docs/phase2/05_structural_equation_sampler.md l.66-67; Sims & Zha FRB Atlanta WP 96-13 (Oct. 1996), eqs. (3)-(7), pp. 3-4, and eq. (14), p. 8
+% (https://fraser.stlouisfed.org/files/docs/historical/frbatl/wp/frbatl_wp_1996-13.pdf; WP version of the IER article per https://ideas.repec.org/p/fip/fedawp/96-13.html; IER numbering not seen);
+% S&Z 2006 drafts (Apr. 2004, sec. II, https://conference.nber.org/confer/2004/si2004/me/sims.pdf; rev. Mar. 2005, sec. III, https://gceps.princeton.edu/wp-content/uploads/2017/01/110sims.pdf), eq. (7), p. 9
 Three consequences are used in the paper.
 (i) With $d = n + 2$, $\sigma_\iota^2 \sim \mathrm{IG}(1 + \iota/2, \psi_\iota/2)$ and
 $\mathrm{E}[\sigma_\iota^2] = \psi_\iota/\iota$; this is the Constant prior of every Mode.
@@ -369,7 +373,9 @@ e^{-h_t}\big),
 where $m_t$ masks padded rows.
 An independence Metropolis--Hastings step with proposal $q$ therefore accepts $h'$ with probability
 $\min\{1, \exp(w(h') - w(h))\}$.
-This is Algorithm~3 of \citet{delnegro2015time}, with the precedent of \citet{stroud2003nonlinear}.
+This is Algorithm~3 of \citet{delnegro2015time}; its acceptance probability has the form of
+eq.~(11) of \citet{stroud2003nonlinear}.
+% [R] Stroud et al. author manuscript, sec. 2.3 step 3, eq. (11), p. 7 (https://jrs390.georgetown.domains/papers/nonlinear.pdf); DNP corrigendum sec. 4 (https://faculty.wcas.northwestern.edu/gep575/ErrataFinal4.pdf)
 Because the same $g$ appears in the indicator law and in $w$, the invariant law is exact for any
 mixture table and any offset $c \ge 0$; the table and the offset change only the acceptance rate and
 the mixing.
@@ -393,7 +399,9 @@ $\alpha_{\mathrm{aux}}$, a single accept/reject with
 \begin{equation}\label{eq:asis-accept}
 \log\alpha = \log\alpha_{\mathrm{aux}} + w(h_{\mathrm{new}}) - w(h_{\mathrm{old}})
 \end{equation}
-is used; two sequential tests would also be valid but define a different kernel.
+is used; two sequential tests, as in delayed acceptance \citep{christen2005markov}, would also be
+valid but define a different kernel.
+% [R] delayed-acceptance two-stage ratio as restated by Banterle, Grazian, Lee & Robert, arXiv 1503.00996 Sec. 4.1 (https://ar5iv.labs.arxiv.org/html/1503.00996); Christen & Fox JCGS 14(4) (https://api.crossref.org/works/10.1198/106186005X76983)
 The value $w(h_{\mathrm{old}})$ must be that of the state after the $h$ step of the same sweep; a
 stale value is a bug.
 % [V] tests/mcmc/blocks/test_sv_core.py::test_nc_mu_sigma_log_accept_identity,
@@ -409,8 +417,12 @@ The combination~\eqref{eq:asis-accept} was derived in the repository's design no
 there on a toy posterior by quadrature; it is gated by the identity tests above, by the toy
 quadrature twin (A6), by Geweke tests in exact mode, and by mutant M7 with a coarse mixture table.
 % [R] docs/phase2/01_omori_mixture.md section 10.3 (derived, toy-checked); [V] tests/mutation (M7)
-We do not claim it as new.
-\todo{TODO 11: prior-art search for the ASIS + exact-correction ratio before any novelty wording.}
+It is the standard Metropolis--Hastings ratio under $\pi$ for the auxiliary step's proposal.
+Published samplers correct the $h$ draw \citep{delnegro2015time}, or correct it and update the
+parameters under the exact model in separate steps \citep{hosszejni2019approaches}, and
+\pkg{stochvol} offers an optional, off-by-default correction for the mixture approximation
+\citep{hosszejni2021modeling}. We do not claim it as new.
+% [R] prior-art search (TODO 11): Hosszejni & Kastner arXiv 1901.11491v2 sec. 2 (https://ar5iv.labs.arxiv.org/html/1901.11491); stochvol CRAN 3.2.9 manual (correction off by default, expert = list(correct_model_misspecification = TRUE); interweave = TRUE by default; https://cran.r-project.org/web/packages/stochvol/refman/stochvol.html) and vignette 'Setting up the Markov chain' (https://mirror.linux.duke.edu/cran/web/packages/stochvol/vignettes/article2.Rnw); neither says how ASIS interacts with the correction; GPL source not opened. With proposal q of the auxiliary step, pi(x')q(x|x')/(pi(x)q(x'|x)) = alpha_aux exp(Delta w); using the whole auxiliary kernel as a proposal gives exp(Delta w) instead (the second stage of delayed acceptance)
 
 \subsection{The path-integrated log predictive density, and a bound on its delta-method
 MCSE}\label{app:mcse-bound}
@@ -448,6 +460,10 @@ over draws.
 % ::test_integrated_lpd_is_the_mixture_of_exact_densities, ::test_horizon_one_is_the_conditioned_estimator_bitwise,
 % ::test_integrated_lpd_is_unit_equivariant; tests/mcmc/forecast/test_lpd_integrated_mcmc.py (jax.jacfwd);
 % [R] measured agreement 1.8e-14: b9c66c0 commit message; [REL] re-run on the release commit
+Given each draw's volatility path, the conditioning is the one \citet[Appendix~D]{hiraki2026dynamic}
+use for predictive moments; with constant volatility the estimator is that of
+\citet{warne2017marginalized}, specialised to a VAR.
+% [R] Hiraki, Chib & Omori arXiv 2604.04529v1 App. D (https://arxiv.org/html/2604.04529v1); Warne et al. CFS WP 478 secs. 3.1-3.2 (https://www.econstor.eu/bitstream/10419/102702/1/798286458.pdf; JAE 32(1), https://api.crossref.org/works/10.1002/jae.2514); mixture-of-parameters terminology: kruger2021predictive sec. 2.1 (https://arxiv.org/pdf/1608.06802)
 In a synthetic persistent VAR at $h = 8$ with an outcome 6 standard deviations out, the test's
 docstring records a path-conditioned estimate of $-35.2$ (MCSE $1.0$) against the exact $-22.3$; the
 test asserts a gap of more than 5 nats and an MCSE above $0.5$, and that the integrated estimator
@@ -652,9 +668,10 @@ The error is thus a prior effect: it is large with tight Minnesota priors and sh
 fades as the data dominate.
 Averaged over simulated datasets, per-dataset shifts of the posterior mean in both directions can
 cancel in the ranks of the parameters themselves, while a data-dependent quantity such as the
-log-likelihood keeps its power, as \citet{modrak2025simulation} discuss for SBC.
-\todo{TODO 15: check the Modr\'ak et al.\ theorem numbering against the journal version if a theorem
-is cited here.}
+log-likelihood keeps its power: an incorrect posterior passes SBC for a given quantity only when its
+rank deviations over different parts of the data space cancel, and a quantity that combines it with an
+aspect of the data can make them add up instead \citep[Sections~3.2--3.3, Theorem~5]{modrak2025simulation}.
+% [R] Modrak et al., Section 3.2 Theorem 5 and remarks; Section 3.3 prose before Theorem 6 (data-dependent quantities); likelihood as a default quantity after Theorem 6 and in Section 6.1; same numbering in the PMC accepted manuscript and arXiv v2/v3: https://pmc.ncbi.nlm.nih.gov/articles/PMC12490788/, https://arxiv.org/pdf/2211.02383v3
 This is the mechanism behind lesson~3 of the mutation suite: the block SBC of the $\pi_0$ draw catches
 M1 through the log-likelihood rank ($p = 2.8\times10^{-11}$, control minimum $p = 0.10$), whereas
 one-block invariance of the whole scan did not in a recorded run that has not been repeated
@@ -700,14 +717,16 @@ multiplication and division, so nothing cancels.
 The assembled matrix, by contrast, stores $Q_{tt} = \sigma^2/v_{s_t} + 2$: when $\sigma^2/v_{s_t}$ falls below
 half an ulp of 2, rounding returns the singular path Laplacian, and the level pivot, of order
 $\sigma^2(1/V_0 + \sum_t 1/v_{s_t})$, is lost.
-The recursion appears to be an instance of subtraction-free Gaussian elimination for diagonally
-dominant M-matrices parametrised by off-diagonals and diagonal excesses
-\citep{grassmann1985regenerative,alfa2002accurate,ye2008computing}, applied within the
-precision-sampler setting of \citet{rue2001fast}; we claim the application, not the algorithm, and
-we do not prove an error bound here.
-% [R] dossier 05 section 2.3 "Positioning caution"; bibliography report section 7 (05:66, "the authors must confirm")
-\todo{TODO 11: confirm the GTH / Alfa--Xue--Ye / Ye (2008) positioning (and GMRF samplers) by a
-prior-art search, then drop ``appears to be''.}
+The recursion is an instance of subtraction-free Gaussian elimination for diagonally dominant
+M-matrices parametrised by off-diagonal entries and row sums
+\citep{grassmann1985regenerative,ocinneide1996relative,alfa2002accurate,ye2008computing}: with
+off-diagonal entry $-w_{t-1}$, pivot-row sum $q_{t-1}$ and pivot $p_{t-1}$, the Schur-complement row-sum
+update of \citet[Section~2.3.4]{demmel2008accurate} is~\eqref{eq:B-excess-pivot}, with $\delta_t$
+the row sum of row $t$. We apply it within the precision-sampler setting of \citet{rue2001fast}; we
+claim the application, not the algorithm, and we do not prove an error bound here.
+% [R] dossier 05 section 2.3 "Positioning caution"; prior-art search (TODO 11): Demmel et al. arXiv 0712.4027 sec. 2.3.4 (https://arxiv.org/pdf/0712.4027; Acta Numerica 17, https://api.crossref.org/works/10.1017/S0962492906350015);
+% Iannazzo, Najafi Kalyani & Poloni arXiv 2607.05437 secs. 1, 2.4 (triplet representation, GTH update; https://arxiv.org/pdf/2607.05437); Bini et al. arXiv 2605.21679 sec. 1 (https://arxiv.org/pdf/2605.21679); O'Cinneide 1996 (https://api.crossref.org/works/10.1007/s002110050203);
+% Alfa-Xue-Ye 2002 and Ye 2008 at abstract level only (https://www.ams.org/journals/mcom/2002-71-237/S0025-5718-01-01325-4, https://api.crossref.org/works/10.1090/S0025-5718-08-02112-1). Mapping checked by hand: pivot row t-1 has row sum q_{t-1} and diagonal q_{t-1}+w_{t-1}, row t has row sum delta_t and b_{t,t-1} = w_{t-1}
 In exact arithmetic the pivots are those of the assembled factorisation, so the sampler is the same
 function of the injected noise.
 % [V] tests/mcmc/blocks/test_sv_core.py::test_awol_rw_laplacian_is_the_rw_system,
@@ -1441,8 +1460,9 @@ e_{it}^2/\lambda_{it}$; and data functions.
 The number of functions per per-PR composition ranges from 22 (univariate SV) to 134 (reduced form
 with SV and outliers).
 % [V] reproduced at 62d15f6 (dossier 04 section 6.6)
-Geweke's statistic is asymptotically normal only if $\operatorname{var}g(\theta, y) < \infty$
-\citep{geweke2004getting}.
+\citet{geweke2004getting} states his tests for test functions with $\operatorname{var}g(\theta, y) <
+\infty$, the condition under which their asymptotic normality is derived.
+% [R] Geweke WP Feb 2004, Section 2, eq. (2), sigma_g^2 = var[g(theta, y)] < infinity, imposed as a sufficient condition for the CLTs and statistic (6), not stated as necessary; JASA numbering not seen: http://qed.econ.queensu.ca/pub/faculty/ferrall/quant/papers/04_04_29_geweke.pdf
 Under the SV test prior $\mathrm{E}[y^2] = \mathrm{E}[e^h]$ is infinite, because $\sigma^2$ has a
 $\chi^2$ tail and $\phi$ has prior mass near 1; under $\mathrm{IG}(3, 2)$ the variance of
 $\lambda^2$ is infinite; and with Student-$t$ errors $\mathrm{E}[y^{2k}]$ is finite only for $\nu >
@@ -1462,7 +1482,9 @@ that no hyperparameter depends on $y$.
 The size of the test needs only that the sweep leaves the posterior invariant: a chain started at a
 prior draw is stationary from its first sweep under the null, and its mean is an unbiased estimate of
 $\mathrm{E}_p[g]$; ergodicity affects only power.
-% [R] docs/phase2/06_validation_geweke_sbc.md section 3.1 (argument); TODO 15 for any attribution
+This answers the concern of \citet[Section~3]{talts2018validating} about the convergence of Geweke's
+single successive-conditional chain.
+% [R] docs/phase2/06_validation_geweke_sbc.md section 3.1 (argument); the concern is in talts2018validating Section 3, para 3 (v1 p. 4, v2 p. 3): https://arxiv.org/abs/1804.06788v1, https://arxiv.org/abs/1804.06788v2; Geweke's own SC chain also starts at a prior draw (WP Feb 2004, Section 2: http://qed.econ.queensu.ca/pub/faculty/ferrall/quant/papers/04_04_29_geweke.pdf)
 At $G = 100$ and $\alpha = 10^{-3}$ the normal critical value would give an actual size of
 $1.64\times10^{-3}$ at $C = 200$ and $1.11\times10^{-3}$ at $C = 1000$, which is why the $t_{C-1}$
 quantile is used.
@@ -1509,7 +1531,8 @@ envelope at each step, so that far-tail $p$-values keep relative precision. % [V
 The quantities include the parameters, $h$ at fixed dates and its path means, the total and per-equation
 log-likelihood, $\log p(\theta)$ and the predictive unknowns $h_{T+1}$ and $y_{T+1}$ through the
 production forecast core; data-dependent quantities are needed because a ``posterior'' equal to the
-prior passes SBC on every data-free quantity \citep{modrak2025simulation}.
+prior passes SBC on every data-free quantity \citep[Section~3.4, Theorem~7]{modrak2025simulation}.
+% [R] Modrak et al. Section 3.4, Theorem 7 (arXiv v3 p. 10; same numbering in the PMC accepted manuscript): https://arxiv.org/pdf/2211.02383v3, https://pmc.ncbi.nlm.nih.gov/articles/PMC12490788/
 % [V] tests/sbc/test_sbc_compositions.py::test_quantity_selection, ::test_truth_and_forecast_core_are_the_same_map
 
 \emph{The ESS erratum.}
@@ -1706,8 +1729,9 @@ one-block invariance of the whole scan does not catch it (recorded; \cref{app:cc
 across sweeps and drawn after $h$, the order of Algorithm~1 of \citet{primiceri2005time} corrected
 by \citet{delnegro2015time}. Caught by G.
 \item[M3] (\code{JointSpec(fresh_latents=True)}; structural SV.) The observables simulator draws
-fresh latent states instead of using the current ones, the simulator error of
-\citet{geweke2004getting}. Caught by G.
+fresh latent states instead of using the current ones, the observables-simulator error in the
+constructed example of \citet{geweke2004getting}. Caught by G.
+% [R] Geweke WP Feb 2004, Section 3, item 2 of 5 and row 2 of Table 1 (http://qed.econ.queensu.ca/pub/faculty/ferrall/quant/papers/04_04_29_geweke.pdf); not numbered here because the JASA version was not seen
 \item[M4] (\code{tau_conditional}; structural SV($t$).) $\tau_t \mid \cdot$ has shape $\nu/2$ instead of
 $(\nu + 1)/2$. Caught by U and G.
 \item[M5] (sampler prior arrays; structural SV.) $B_\sigma$ is doubled in the sampler only, so the
@@ -2390,11 +2414,17 @@ library's $0.1\chi^2_1$ for the random walk has mean 0.1 and an unbounded densit
 in shape, not only in scale;
 (e)~FRED-QD would allow an estimation start in 1960Q2, closer to their 1955Q1 than the 1965Q1 used;
 (f)~our samples are defined by origin at every horizon, so pre-crisis targets at $h = 8$ run to
-2009Q4, while their archived data end in 2011Q3, so their $h > 1$ samples cannot use every origin to
-2011Q2; their convention is not established.
-Their data are in the journal's archive (current-vintage unemployment and bill rate, and real-time
-vintages of GDP and its price index), so the three candidate causes of \cref{sec:replication} could
-be tested; this run, as pre-registered, does not.
+2009Q4; Clark and Ravazzolo's forecasts are also indexed by origin (1985Q1--2011Q2), but with data
+through $t-1$ their $h$-step target is $t+h-1$, one quarter earlier than ours for the same origin,
+and since their last vintage (2011Q4) ends in 2011Q3, their samples at $h = 4$ and $8$ cannot use
+every origin to 2011Q2 (nor at $h = 2$ with second-release actuals for growth and inflation); the
+working paper states neither how they trim those origins nor whether its 2007Q4 cut-off applies to
+origins or targets \citep[Section~2 and the notes to Tables~1--3]{clark2012macroeconomic}, and the
+article was not accessible.
+Their data are in the journal's data archive \citep{clark2015macroeconomicdata} (current-vintage
+unemployment and bill rate, and real-time vintages of GDP and its price index), so the three
+candidate causes of \cref{sec:replication} could be tested; this run, as pre-registered, does not.
+% [R] item (f): CR WP 12-18 Section 2 (printed pp. 5-6) and note 1 to Tables 1-3 (printed pp. 34, 36, 38), https://www.clevelandfed.org/-/media/project/clevelandfedtenant/clevelandfedsite/publications/working-papers/2012/wp1218.pdf; JAE article closed (Wiley 403: https://onlinelibrary.wiley.com/doi/10.1002/jae.2379). Archive: http://qed.econ.queensu.ca/jae/2015-v30.4/clark-ravazzolo/ and readme.cr.txt (files used for the published results; 259 observations each; vintages 1975Q1-2011Q4; UR and bill rate within-quarter averages of monthly FAME data); DOI via DataCite: https://api.datacite.org/dois/10.15456/jae.2022321.0721135492 (zips and ZBW downloads not fetched)
 % [R] N08 §C1 (JAE archive: readme.cr.txt, cr-data-csv.zip; currentdata.csv 1947Q1-2011Q3; realtimeGDP*.csv, 148 vintages 1975Q1-2011Q4), §C2 (1955Q1 start; 1960Q2 alternative), §C3 (A ~ N(0, 1000^2 I); phi_i ~ IG(1/2, 0.0175)); [V] src/rai_bvar/priors/structural.py::contemp_arrays; src/rai_bvar/components/specs.py (_default_sigma2: 0.1 chi^2_1 for rw); benchmarks/clark_ravazzolo.py relative_table (samples by origin). Not yet in DEVIATIONS (main repository; TODO list part 4) (macro referee major 2 (c)-(f), stat minor 12, software major 6)
 
 \subsection{Run history and the first attempt's crash}\label{app:cr-history}
@@ -2460,8 +2490,12 @@ and outcome of each run, from the quick run to the acceptance run.}
 \begin{table}[!htbp]
 \centering\small
 \caption{Data of the replication. Rates are non-annualised quarterly rates; the estimation
-sample starts in 1965Q1 (one raw quarter earlier is kept for the difference).}
+sample starts in 1965Q1 (one raw quarter earlier is kept for the difference). Clark and Ravazzolo
+define growth and inflation as $100\,\Delta\log$ (their Section~2), although the notes to their
+Tables~1--3 call all variables annualised percentage points; score differences and CRPS and RMSE
+ratios do not depend on this scale, but the benchmark levels in their tables do.}
 \label{tab:TabF2}
+% [R] caption, CR scale: WP 12-18 Section 2 (printed p. 4, 100 x log difference) vs note 1 to Tables 1-3 (printed pp. 34, 36, 38, annualised): https://www.clevelandfed.org/-/media/project/clevelandfedtenant/clevelandfedsite/publications/working-papers/2012/wp1218.pdf
 % [V] benchmarks/clark_ravazzolo.py l.137-144 (VINTAGE, SERIES, ESTIMATION_START, FULL, PRE_CRISIS_END,
 % HORIZONS, LAGS), l.236-266 (load_data), l.269-293 (assert_quarterly_averages), l.296-320 (assert_in_window),
 % l.1496 (in-window check on the primary arm only)
@@ -2494,8 +2528,12 @@ The FRED-QD series are those of \citet{mccracken2021fredqd} and the monthly seri
 \citet{mccracken2016fredmd}; the data are downloaded on demand and not bundled.
 CR's estimation used real-time vintages \citep{croushore2001realtime}; the replication runs in
 pseudo real time on the final vintage, with the start date of \citet{clark2011realtime}.
-\todo{TODO 21: confirm the official FRED-QD 2026-09 tcodes of these four series (the script loads
-raw levels and sets its own codes), and align \code{fred.py} to cite McCracken and Ng (2021).}
+The benchmark FRED-QD codes of these series are 5, 6, 2 and 2
+\citep[Tables~A1A, A1F, A1C and A1H]{mccracken2021fredqd}, and the 2026-09 file carries the same
+codes; the script follows Clark and Ravazzolo's definitions instead, which agree with the benchmark
+for \code{GDPC1} (100 times code 5) but keep inflation in log first differences and UR and TBILL in
+levels.
+% [R] McCracken & Ng (2021), Appendix Table A1: GDPC1 5 (A1A, p. 27), GDPCTPI 6 (A1F, p. 33), UNRATE 2 (A1C, p. 29), TB3MS 2 (A1H, p. 36); monthly series aggregated by averaging (Appendix p. 26); https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/publications/review/pdfs/2021/01/14/fred-qd-a-quarterly-database-for-macroeconomic-research.pdf, https://doi.org/10.20955/r.103.1-44; the transform row of the checksum-verified 2026-09 file has the same four codes and no GDPDEF column. Main repository (not edited here): src/rai_bvar/datasets/fred.py l.1 still cites 'McCracken & Ng 2016, 2020' (the 2020 item is the FRED-QD WP, https://doi.org/10.20955/wp.2020.005)
 
 \begin{table}[!htbp]
 \centering\footnotesize
@@ -2523,8 +2561,8 @@ Constant / SV(rw) [structural] & \code{Constant("ig")} / \code{SV(rw=True)} in s
 CR's target is \citet{clark2015macroeconomic}; the numbers compared are those of the working paper's
 Tables~1--3 \citep{clark2012macroeconomic}, as hard-coded in the script (\code{CR_FULL}, l.\,147;
 \code{CR_PRE_DLPS}, l.\,167).
-\todo{TODO 22: obtain the JAE tables, or keep saying that the working-paper numbers are used; resolve
-the 40-versus-56 count of re-read numbers in N08.}
+The article's tables were not accessible to us; the working paper's are used throughout.
+% [R] JAE 30(4) 551-575: Wiley 403 (https://onlinelibrary.wiley.com/doi/10.1002/jae.2379), closed access per Semantic Scholar (https://api.semanticscholar.org/graph/v1/paper/DOI:10.1002/jae.2379?fields=openAccessPdf,title,isOpenAccess,externalIds), Crossref https://api.crossref.org/works/10.1002/jae.2379; the script hard-codes 56 WP numbers (CR_FULL 3 x 4 x 4 = 48, CR_PRE_DLPS 4 x 2 = 8), all located in WP Tables 1-3 (N08's '40' is its own count; dossier 06 l.106-107)
 CR's VAR(4) has a Minnesota prior without cross-variable shrinkage (tightness $\theta = 0.2$,
 $1/l^2$ lag decay, zero prior means) in the normal-diffuse form of \citet{kadiyala1997numerical},
 normal on the coefficients and diffuse on the error covariance; their VAR-SV has random-walk
@@ -2532,8 +2570,10 @@ log-volatilities, sampled by the single-move step of \citet{jacquier1994bayesian
 prior $\mathrm{IG}(1/2, 0.0175)$ that the replication does not adopt.
 The variants we use are their AR-SV with a nearly fixed autoregressive coefficient and their SV with
 Student-$t$ errors with fixed degrees of freedom $d$ \citep{jacquier2004bayesian}. % [R] N08 §C3 (moved from §11.1)
-The working paper does not state a variable ordering, which is why all 24 orderings are run.
-% [R] dossier 06 section 2 (N08 sections C2, D item 2; the JAE text was not accessible)
+The working paper uses a unit lower-triangular $A$ in its time-varying-volatility VARs (its
+Section~3.2) but does not state the variable order, which is why all 24 orderings are run; the
+article's text was not accessible.
+% [R] dossier 06 section 2 (N08 sections C2, D item 2); CR WP 12-18 Section 3.2, eqs. (7)-(11), printed pp. 8-9; no variable order stated: https://www.clevelandfed.org/-/media/project/clevelandfedtenant/clevelandfedsite/publications/working-papers/2012/wp1218.pdf; JAE text not accessible (https://onlinelibrary.wiley.com/doi/10.1002/jae.2379)
 
 \subsection{Further results of the acceptance run}\label{app:cr-results}
 
