@@ -22,9 +22,10 @@ Still yours, both optional:
 
 `docs/paper/arxiv.tar.gz`: 48 files, 573,197 bytes, SHA-256
 `316570fb298fc0259156223657605f47348209db34c0f9d06b48728a6bd8641f` (the tarball tested below,
-built 2026-10-24 09:38Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`; each of its 48
-files is byte-identical to the committed source). It is not
-committed (`.gitignore`). Rebuild and test it with
+built 2026-10-24 09:38Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`; 47 of its 48
+files are byte-identical to the committed source at 1b43f2d; the 48th, `main.bbl`, is generated
+from `refs.bib` and gitignored, and the test's TeX Live 2026 BibTeX regenerates it byte for byte).
+The tarball is not committed (`.gitignore`). Rebuild and test it with
 
 ```sh
 cd docs/paper
