@@ -1,5 +1,56 @@
 # Response to the three referee reports (draft at 75db8a7)
 
+## CHANGES since this response (2026-10-24, submission build)
+
+Two later stages on `paper-draft`: stage 1 (fd8a3f7, 83f2b56) and stage 2 (the commit that adds this
+section). The entries further down are kept as written for the draft at 75db8a7; where one conflicts
+with this section, this section holds (the entries concerned carry an "Update" line).
+
+- **Release.** `main` 4ac7969 (release 0.2.0, which is 7f880e1 plus the version string) is merged.
+  No tag exists on origin (checked 07:32Z and 08:27Z), so the paper names the release by its commit
+  and the install line in App. G pins the full hash; the tag `v0.2.0` is no longer named anywhere.
+  The paper states that there is no PyPI release and no DOI.
+- **Validation evidence (macro major 1, stat major 5).** The tables and figures of App. D read the
+  release validation record at 7f880e1 (Apple M5 Max). The old local records of unknown provenance
+  are deleted; G-full `reduced_sv` passes in the release record (stage 1, max |z| 2.67). TabD1 keeps
+  its G-small statistics from earlier commits, because the per-PR tier on the release commit has
+  pass/fail outcomes only (CI run 40061724239). The one x86-64 weekly run (CI run 40052069815, at
+  779957f) stopped at its time limit with the F1 replay test failing. Sections 9 and 12 and Apps. D
+  and E say so, and Sections 8 and 9 limit the replay claim to the Apple M5 Max.
+- **Performance.** TabE2, Section 10 and App. E add the x86-64 BENCH-P2 report of the CI bench job
+  (reported, not gated). The text now says that no idle-machine run exists, and none on the release
+  commit.
+- **D-35 in the text.** SV compositions default to 4 x 10,000 kept draws and warn below that budget.
+  This is stated in Section 4 (settings), Section 10 ("the SV default budget"), Section 12
+  (convergence gate, rewritten; TODO 33 closed) and App. F ("then-default"). Section 7 explains the
+  listing's explicit 4 x 1000.
+- **Walk-through listings re-run on the release commit** (4ac7969, clean tree before and after;
+  `run_examples.py` now uses `uv run --no-sync` and records the tracked changes after the run).
+  The stdout is identical to the d58c9ef capture except the version line, and the stderr adds the
+  D-35 warning. TabG2 and App. G are updated (software major 1, the re-capture part).
+- **Tests added on the release (PR #8, 4f627bc).** Prop. B.5 is now cited in Sections 6.4 and 11,
+  backed by `tests/unit/test_lpd_mcse_bound.py`, which passed in CI run 40061724239 (stat minor 16,
+  Author 8, the citation part). The `verdict(min_converged)` gate test is cited in Section 6.
+- **Fig. 4.** The right panel is drawn from `data/rb_tail_cell.json`, whose code commit 99f658a
+  has the release's `src/`. Its ESS labels no longer overprint.
+- **Draft marks.** All `\todo` marks are closed (27 at the start of stage 2, 43 before stage 1).
+  Each was resolved with evidence, turned into a stated limitation, or dropped with the claim it
+  guarded. The `author:` items about how far the author read the code and the paper were removed
+  with no replacement: App. J makes no claim either way.
+- **Submission build.** `\draftmarksfalse` is set. `STRICT=1 ./build.sh --check` reports 0 undefined
+  citations, 0 undefined references, 0 multiply-defined labels, 0 missing characters and 0 overfull
+  boxes. The PDF has 106 pages: the main text runs to page 35, the appendices from page 36 to 97,
+  then the references. `build.sh` no longer fails when no `\todo` is left.
+- **AUTHOR_TODO.md** lists only the items left to the author after submission: his own reading
+  statement and approval of App. J; the release steps (public repository, push of `paper-draft`,
+  tag, PyPI, Zenodo); and the third-party observations with their maintainers. The drafting-stage lists are in
+  `git show 83f2b56:docs/paper/AUTHOR_TODO.md`. The "Author N" numbers below refer to that file.
+- **Still open before upload.** arXiv compiles with pdfLaTeX, and the pdfTeX branch of `main.tex`
+  has not been tested here (Author 23). The paper does not depend on the main-repository notes, so
+  it is unaffected by the stale count in NOTES B.8 ("33/33"; the paper uses 37 from `mutants.py`
+  and the release record).
+
+
 Branch `paper-draft`, base 75db8a7 (contains `main` at 888f620). Nothing is committed. Line numbers
 are those of the working tree after this revision; each entry also gives an anchor phrase, since the
 lines will move again. "Author" items are in `AUTHOR_TODO.md`, part 4 ("Referee items for the
@@ -106,6 +157,8 @@ row 18's SBC account.** Verdict: valid_author. Applied now:
 - The failing G-full `reduced_sv` row is labelled as a pre-fix local record in §8
   `sections/08_validation.tex:103`, §12 `:105`, the FigD1/FigD2 captions
   `sections/appendix.tex:1778,1792`; both figures were regenerated with the new footer.
+  *Update (2026-10-24):* superseded. The local record is deleted, and FigD1 and FigD2 are redrawn
+  from the release record at 7f880e1, in which G-full `reduced_sv` passes (see CHANGES).
 - Row 18: `sections/11_replication.tex:366` ("its SBC $\gamma$ test and pooled-ESS gate are clean,
   while the per-replication ESS rule missed at ... 200, passes at the cap of 400 set for the row
   after that miss, and fails with a 4000-sweep pilot"), `sections/08_validation.tex:203`,
@@ -190,6 +243,8 @@ gate"). Author 22 (TODO 11, TODO 15).
 **Minor 16. Why "biased low": Jensen.** valid_apply. `sections/06_evaluation.tex:82` ("The mixture
 $\hat p_h$ is unbiased for $p_h$, so by Jensen's inequality its logarithm is biased low ...
 \eqref{eq:mcse} estimates the spread, not this bias"). Prop. B.5 is not cited (TODO 14; Author 8).
+*Update (2026-10-24):* Prop. B.5 is unit-tested on the release (4f627bc) and now cited in §6.4 and
+§11.
 
 ## Macroeconometrics referee
 
@@ -201,6 +256,13 @@ failing chain"; tags cite the docstring, 3d3f51b as an ancestor of 4bb978a and c
 `test_g_full_reduced_sv_failing_chain_is_fixed`); §12 `sections/12_limitations.tex:105`; FigD1/FigD2
 captions and the FigD2 TODO `sections/appendix.tex:1778,1792,1795`; "untracked" statements as in
 stat major 5. The uncommitted re-run is not cited. Author 10 and 3.
+*Update (2026-10-24):* this describes how the draft at 75db8a7 labelled the old local record. That
+record is deleted. The paper now cites the release validation record at 7f880e1, in which G-full
+`reduced_sv` passes at stage 1 (max |z| 2.67, `record/geweke.jsonl`). Section 8 and TabD3 report
+that all 23 compositions pass G-full on the release commit, and the FigD2 caption that no run
+failed. The replay test passes there (Apple M5 Max) and failed in the one x86-64 weekly CI run
+(40052069815, at 779957f), which Sections 9 and 12 and Apps. D and E state; Section 8 limits the
+replay claim to the Apple M5 Max (see CHANGES).
 
 **Major 2. CR's data exist; unlisted differences (c)-(f).** valid_author. Applied now: deviations
 paragraph after the quoted DEVIATIONS list, `sections/appendix.tex:2378-2393` ((c) prior on A,
@@ -309,11 +371,16 @@ scoring rule, or on both").
 ## Software referee
 
 **Major 1. No release identity.** valid_author. Author 20 (TODO 19, 20).
+*Update (2026-10-24):* release 0.2.0 is commit 4ac7969, named in Sections 1 and 13 and App. G.
+There is no tag on origin, so the install line pins the full hash. The listings were re-captured on
+that commit. Tag, PyPI and Zenodo are in AUTHOR_TODO.md, and the paper claims none of them.
 
 **Major 2. Stale arXiv tarball, `\draftmarkstrue`, untested pdfTeX branch.** valid_author.
 `make arxiv` was run as the last step: the new tarball has the 48 listed files and nothing else
 (the stray `b1-b3.txt`, `main.aux`, `main.log`, ... are gone) and its `--test` build is clean.
 `\draftmarksfalse` and a pdfLaTeX test remain Author 23.
+*Update (2026-10-24):* `\draftmarksfalse` is set and the build is clean. The pdfLaTeX test is
+still open.
 
 **Major 3. MCS effective level, block length, abstract wording.** valid_author. Applied now as stat
 major 2 (`sections/06_evaluation.tex:189`, abstract l.15). Author 1-2.

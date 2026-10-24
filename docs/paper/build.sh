@@ -58,15 +58,15 @@ multi=$(grep -o "Label \`[^']*' multiply defined" main.log | sed "s/Label \`\([^
 echo "== multiply-defined labels: $(printf '%s' "$multi" | grep -c . || true)"
 if [[ -n "$multi" ]]; then printf '  %s\n' $multi; [[ "$STRICT" == 1 ]] && status=1; fi
 
-echo "== overfull boxes wider than 10pt"
+echo "== overfull boxes: $(grep -c 'Overfull \\[hv]box' main.log || true) in all; wider than 10pt:"
 grep -o 'Overfull \\hbox ([0-9.]*pt too wide).*' main.log \
   | awk -F'[(p]' '{ if ($2 + 0 > 10) print "  " $0 }' || true
 
 # comments are stripped first (an escaped \% is not a comment); main.tex's own \string\todo{} is
-# not a mark
-acc=$(cat sections/*.tex figures/tables/*.tex 2>/dev/null | sed -e 's/\\%//g' -e 's/%.*$//' | grep -o '\\acc{' | wc -l | tr -d ' ')
+# not a mark; a count of zero is not an error (grep exits 1 when nothing matches, and pipefail is on)
+acc=$(cat sections/*.tex figures/tables/*.tex 2>/dev/null | sed -e 's/\\%//g' -e 's/%.*$//' | { grep -o '\\acc{' || true; } | wc -l | tr -d ' ')
 todo=$(cat sections/*.tex main.tex | sed -e 's/\\%//g' -e 's/%.*$//' -e 's/\\string\\todo{//g' -e 's/\\todo{abstract not written yet//' \
-  | grep -o '\\todo{' | wc -l | tr -d ' ')
+  | { grep -o '\\todo{' || true; } | wc -l | tr -d ' ')
 echo "== draft marks in the sources: ${acc} \\acc{} (sections and figures/tables), ${todo} \\todo{}"
 
 pages=$(grep -o 'Output written on main.xdv ([0-9]* pages' main.log | grep -o '[0-9]* pages' || true)

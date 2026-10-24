@@ -107,9 +107,9 @@ and RMSE ratios complete the set. Verdicts are reported with the convergence gat
 
 An origin is \emph{RB-degenerate} at horizon $h$ when the delta-method MCSE of the joint RB score of
 either arm is at least $0.9$: the weights then sit on about one draw, and the MCSE saturates near
-one nat however far off the estimate is. % [R] benchmarks/clark_ravazzolo.py RB_CEILING docstring l.355-359
-\todo{TODO 14: cite the MCSE weight bound of \cref{app:mcse-bound} here only after it is
-derived and unit-tested.}
+one nat however far off the estimate is. Before the MCMC adjustment the MCSE is a function of the
+Kish effective number of weights alone and at most one nat, so that, before the adjustment, the
+threshold corresponds to $\mathrm{ESS}_{\mathrm{K}} \approx 1.2$ (\cref{prop:mcse-bound}). % [R] benchmarks/clark_ravazzolo.py RB_CEILING docstring l.355-359; [V] Prop. B.5 and its consequence (ii) (app:mcse-bound), tests/unit/test_lpd_mcse_bound.py (4f627bc; CI run 40061724239)
 The flag is descriptive: flagged origins are kept, because dropping exactly the tail origins would
 bias the comparison. The ordering stage runs \code{ordering_sensitivity(mode='backtest',
 design='all')} with one noise replicate for SV(rw) and \code{Constant}, then a \code{compare()}
@@ -378,6 +378,5 @@ $\gamma$ test and pooled-ESS gate are clean, while the per-replication ESS rule 
 thinning cap of 200, passes at the cap of 400 set for the row after that miss, and fails with a
 4000-sweep pilot (\cref{sec:validation-coverage}). % [R] 7f410dc commit message (one run each, Apple M5 Max under load): G-small 1.98 (t_crit 4.42), G-full 1.90 (3.94), contract 10/10; positive controls on the row at the PR G-small rule: M1 17.8, dropped h_0 prior in the RW AWOL proposal 22.6, dropped last RW edge 30.0, M15 53.4, M2 461 (control 1.98); [V] tests/geweke/test_geweke_compositions.py PR_ROWS (row 18), tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max 400), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS "reduced-SV(rw)", tests/unit/test_fit_mcmc_api.py COMPOSITIONS; [REL] on the release commit: G-full 1.90 stage 1, SBC passed at t_max 400 (min p 0.0192), contract 10/10 (record/*.jsonl, junit_tests_contract.xml at 7f880e1); G-small passed in CI run 40061724239 (no statistic)
 Its slow-mixing coefficients are a limitation (\cref{sec:limitations}); its Student-$t$ variant
-has no row and still rests on its validated parts. % [V] 7f410dc: joint.py _COMPOSITIONS and mcmc_fits.py COMPOSITIONS have no reduced x SV(rw, t) entry
-\todo{TODO 3: register reduced $\times$ SV(rw, $t$) or keep its caveat.}
+has no row and still rests on its validated parts. % [V] 7f410dc and 4ac7969: joint.py _COMPOSITIONS and mcmc_fits.py COMPOSITIONS have no reduced x SV(rw, t) entry (77e09bf adds reduced-SV(t) and reduced-SV(outliers,t) contract fits, not SV(rw, t))
 % TODO 7 part done: on the release commit row 18 passes G-full (1.90), SBC at t_max 400 and the 10 contract tests (record/geweke.jsonl, record/sbc.jsonl, junit_tests_contract.xml at 7f880e1) and G-small in CI run 40061724239 (pass only); the one-off positive controls are not re-run

@@ -531,10 +531,9 @@ replication corresponds, before the MCMC adjustment, to $\mathrm{ESS}_K \approx 
 can raise the reported value above 1.
 (iv) An MCSE is a model of the error, not a certificate: at tail origins the weight ESS should be
 inspected directly.
-% derived here; not yet in the repository
-\todo{TODO 14: confirm Proposition~\ref{prop:mcse-bound} (including the ddof convention and the $\sqrt{S/\mathrm{ESS}}$
-factor) and add a unit test before \cref{sec:evaluation} and \cref{sec:replication}
-rely on it.}
+The bound, the identity, the \code{ddof=1} convention and consequence~(iii) are unit-tested
+against the library's \code{log\_pred\_density}.
+% [V] tests/unit/test_lpd_mcse_bound.py (4f627bc, PR #8; 44 cases): one-hot weights give an iid MCSE of 1 to rounding for S = 2..4000 (population formula sqrt((S-1)/S)), equal weights 0, two non-zero weights < 1, S = 2 closed form |1-a|/(1+a), random weights the identity and the bound; test_the_mcmc_ess_factor_is_outside_the_bound (iid 0.44, reported > 1); passed on Linux in CI run 40061724239 at 7f880e1 (docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt); tests/unit is not in the Apple release record (issue #3)
 
 \subsection{Dummy rows: the closed-form \texorpdfstring{$\lambda$}{lambda} marginal and an exact rejection
 envelope}\label{app:dummies}
@@ -1550,7 +1549,8 @@ prior passes SBC on every data-free quantity \citep[Section~3.4, Theorem~7]{modr
 \emph{The ESS erratum.}
 The design asked for a per-replication thinned ESS of at least $0.8L$ in 99\% of replications.
 With $L = 99$ kept draws that cannot be certified for a single replication: even with iid draws the
-Geyer ESS of the kept draws reaches $0.8L$ only in about three replications out of four.
+Geyer ESS of the kept draws reaches $0.8L$ only in about three replications out of four, according
+to a simulation stated in the documentation of the SBC module.
 The per-replication ESS is therefore predicted from the pilot IAT with an AR(1) form, $\rho_i =
 (\mathrm{IAT}_i - 1)/(\mathrm{IAT}_i + 1)$ and $\mathrm{ESS}_i = L(1 - \rho_i^{t_i})/(1 +
 \rho_i^{t_i})$, which is at least $0.96L$ whenever $t_i$ is not capped, and a second gate requires
@@ -1558,8 +1558,7 @@ the replication-pooled ESS of the kept draws, computed from autocovariances of E
 over replications (a level is used only when Kish's effective number of replications is large
 enough), to be at least $0.8L$ for every quantity.
 % [V] design change: DESIGN section 9.6 erratum; src/rai_bvar/validation/sbc.py docstring l.24-54;
-% [R] the "about 76%" and "0.836 L" figures are docstring-only (TODO 25)
-\todo{TODO 25: commit a small test for the 76\% and $0.836L$ figures, or keep them out.}
+% [R] src/rai_bvar/validation/sbc.py module docstring at 4ac7969 ("with iid draws the Geyer ESS of the kept draws reaches 0.8L in only ~76% of replications for one quantity"); no committed test. Reproduced 2026-10-24 with the module's own estimator: rng = default_rng(0), x = standard_normal((20000, 99)), share of 99/rai_bvar.validation.sbc.iat(x) >= 79.2 = 0.759. The docstring's 0.836L (minimum pooled ESS over 2e4 iid simulations) is not quoted
 \cref{tab:TabD3} collects the G-full, \code{exact=False}, composition-level B and SBC records of
 the release commit: every composition passes G-full and SBC, row~2 at the third G-full stage and
 row~15 at the second SBC stage, every composition-level B test passes, and no \code{exact=False}
@@ -1692,9 +1691,7 @@ obtained by self-normalised importance sampling on a four-observation problem, a
 maximum $|z|$ is 1.83. A small problem with an exact posterior is an oracle that does not depend on
 any other implementation.
 % [V] tests/parity/test_stochvol.py::test_sv_t_matches_the_exact_importance_sampling_posterior
-\todo{TODO 13: re-test the third-party Student-$t$ and sign-fold observations on the current releases
-and contact the maintainers before any statement about another package's sampler; until then this
-appendix states none.}
+% TODO 13: no statement about another package's sampler is made (the third-party Student-t and sign-fold observations are not re-tested on current releases and the maintainers are not contacted; AUTHOR_TODO.md)
 \item \emph{Reduced form.} \pkg{bayesianVARs} \citep{gruber2026bayesianvars} could not be built in the
 test environment (no Fortran compiler), so no finding about it is stated. The exit criterion was met
 against a substitute: an exact system-wide Gibbs sampler written in R in \pkg{rai-bvar}'s own
@@ -1969,8 +1966,10 @@ numerical weakness and dropped high-persistence coverage.
 The other formed-Gram draws, the structural coefficient step and the CCCM $\Pi$ step, still accept
 any positive pivot, without a relative floor; whether reachable states expose them is not known.
 % [V] src/rai_bvar/components/mean/linear.py l.386, 418; linear_reduced.py l.208 (ok rule: pivot > 0)
-\todo{TODO 23: commit tests that assert the old-path failures at the F1 and F2 states, re-run the
-tiny-$\sigma$ and replay tests on Linux, and decide on a relative pivot floor.}
+No test asserts the old-path values; they are recomputed by the script of \cref{fig:FigE1}.
+On Linux, in continuous integration, the tiny-$\sigma$ tests and the fast F1 tests pass, and the
+replay test failed in the one weekly run (\cref{app:validation}).
+% [V] CI run 40061724239 at 7f880e1 (tests/mcmc/blocks/test_sv_core.py and test_contemp_lstsq.py fast tests, ubuntu-latest, Python 3.12-3.14: all passed); [R] CI run 40052069815 at 779957f (test_contemp_lstsq.py "F", its only slow test the replay; provenance excerpt); docs/paper/figures/make_fig_laplacian_pivots.py (old-path values, a script, not a test)
 \cref{fig:FigE1} shows the level pivot and the error in the level of $h$ as $\sigma$
 decreases, for both factorisations.
 
@@ -2056,8 +2055,9 @@ sampling sweeps), with \code{converged} false in all six runs. Such a runner is 
 x86 machine, an idle laptop with four to eight cores, so the design reports this run and does not
 gate on the 120\,s target.
 % [R] benchmarks/reports/bench_p2_x86_github_779957f.json (main 3d5a407, PR #9): summary.wall_cold_s 228.89, wall_warm_s 198.44, sweep_ms_min3x1000 16.79, runner_ms_per_sweep 17.19, converged false x 6; machine.cpu "AMD EPYC 7763 64-Core Processor", logical_cpus 2, commit 779957f (an ancestor of 7f880e1; D-35 e8cf9f1 and PR #8 come after it); DESIGN WP24 "Amendment (Phase 2 closeout, 2026-10-23): reported on x86" ("reported, not gated"; "an idle 4-8 core AVX2 laptop")
-\todo{TODO 9: re-measure BENCH-P2 on an idle machine on the release commit; add an idle x86 entry and,
-optionally, the 4-device run.}
+No BENCH-P2 run exists on an idle machine, on the release commit, on an idle x86 laptop or on four
+devices.
+% [R] tests/bench/baseline.json (deb3929; machine.loadavg 6.26/4.66/3.56, summary.loadavg_1min 2.36-6.12); benchmarks/reports/bench_p2_x86_github_779957f.json (779957f, shared runner); no other committed BENCH-P2 report at 4ac7969 (benchmarks/reports/)
 
 \begin{table}[!htbp]
 \centering\small
@@ -2124,7 +2124,7 @@ Linux CI is the reference platform; neither observation is attributed to a parti
 This appendix documents the replication of \cref{sec:replication}: the provenance of the
 acceptance run, its pre-registration, the criteria and deviations exactly as coded, the run history,
 the data and models, and further tables and figures.
-Every number of the acceptance run is a placeholder filled from
+Every number of the acceptance run is filled automatically from
 \code{benchmarks/reports/clark_ravazzolo_acceptance.json}; numbers of the first full run (report
 commit 551f181, code 4bb978a, path-conditioned estimator, $4\times5000$ draws) are history only and
 are marked as such.
@@ -2303,12 +2303,11 @@ settings and a fresh cache (the score-cache keys do not change with the code).
 \end{itemize}
 \end{quote}
 
-The fit-level diagnostic that the first item cites is not committed to the main repository, so its
-numbers are those of the pre-registration (\cref{tab:TabF6}).
-\todo{TODO 4: commit the diagnostic script and its output to the main repository (e.g.\
-\code{benchmarks/cr_convergence_diagnostic.py} and \code{benchmarks/reports/cr_convergence_diagnostic.json});
-a copy of a script and of 520 + 424 fit records is tracked on branch \code{paper-draft} (since
-33dd9f8) under \code{docs/paper/figures/data/convergence_diagnostic/}, not on \code{main}.}
+The fit-level diagnostic that the first item cites is not part of release 0.2.0, so its numbers
+are those of the pre-registration (\cref{tab:TabF6}); a script and its 520 + 424 fit records are
+kept with the paper's sources (branch \code{paper-draft},
+\code{docs/paper/figures/data/convergence_diagnostic/}).
+% [V] git ls-files docs/paper/figures/data/convergence_diagnostic/ on paper-draft (conv_diag.py, identity_ordering.jsonl, worst_orderings.jsonl; first committed in 33dd9f8, which is on origin/paper-draft); not in main 4ac7969 (no benchmarks/cr_convergence_diagnostic*)
 
 \subsection{The criteria as coded}\label{app:cr-criteria}
 
@@ -2448,7 +2447,7 @@ candidate causes of \cref{sec:replication} could be tested; this run, as pre-reg
 
 \cref{tab:TabF1} gives each run with its commit, configuration, machine and load, wall time
 and outcome.
-In order: a quick run with the library's default MCMC settings ($4\times2000$), on a shared
+In order: a quick run with the library's then-default MCMC settings ($4\times2000$), on a shared
 four-core x86-64 virtual machine, main stage only, labelled as not the acceptance run; the first full
 attempt on 8a622c5 ($4\times5000$), which aborted in the SV(rw) ordering stage on F2; the fixes
 93f2bcd (failure replay) and f60d736 (excess-pivot recursion); the second full run on 4bb978a, which
@@ -2739,10 +2738,10 @@ check, not a parity test.}
 for contrast), origins 1985Q1--2011Q2: path-conditioned against path-integrated, from the same
 forecast draws of the acceptance run. The $h = 8$ panel has a symmetric-log axis (linear within
 $\pm1$ nat), and the largest value of each series is labelled with its origin. Drawn from a
-per-origin export of the run's score cache that is not yet committed (its check reproduces the
+per-origin export of the run's score cache, kept with the paper's sources (its check reproduces the
 report's values exactly).}
 \label{fig:FigF1}
-% [ACC] docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv (exported read-only from the run's score cache; check against the report: 2236 values, max abs diff 0; README.md there; to be committed with the paper); docs/paper/figures/make_fig_cr_per_origin.py
+% [ACC] docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv (exported read-only from the run's score cache; check against the report: 2236 values, max abs diff 0; README.md there; committed on paper-draft, git ls-files docs/paper/figures/data/cr_acceptance/); docs/paper/figures/make_fig_cr_per_origin.py
 \end{figure}
 
 \begin{figure}[!htbp]
@@ -2840,18 +2839,16 @@ and the iw\_equivalent baseline are hypotheses that we did not test. % [FULL: re
 
 \emph{Code and data availability.}
 \pkg{rai-bvar} is developed at \url{https://github.com/yigitokar/rai-bvar} under Apache-2.0.
-This paper describes release 0.2.0, commit 4ac7969 on \code{main} (tag \code{v0.2.0}), which
-differs from commit 7f880e1 only in the version string and in the committed reports of the
-validation run below. It needs Python 3.12 or later and installs with
-\begin{center}
-\code{pip install git+https://github.com/yigitokar/rai-bvar@v0.2.0}
+This paper describes release 0.2.0, commit 4ac7969 on \code{main} (the full hash is in the
+install line below), which differs from commit 7f880e1 only in the version string and in the
+committed reports of the validation run below. It needs Python 3.12 or later and installs with
+\begin{center}\footnotesize
+\mbox{\code{pip install git+https://github.com/yigitokar/rai-bvar@4ac796997df80157d086c568714168fc2387f093}}
 \end{center}
 (there is no PyPI release and no archived DOI).
-\todo{TODO 20: push the tag \code{v0.2.0} at 4ac7969; it was not on origin on 2026-10-24, and the
-install line and the tag named in Section~1 depend on it.}
 % [V] git show 4ac7969:pyproject.toml (name rai-bvar, version 0.2.0, requires-python >=3.12, license Apache-2.0); git diff --name-only 7f880e1 4ac7969 (pyproject.toml and uv.lock: the version line only, no dependency version changed; benchmarks/reports/bench_p2_x86_github_779957f.json and benchmarks/reports/validation/7f880e1_apple-m5-max/, PR #9); PR #10 "Release 0.2.0: package version bump"
 % [V] install check, 2026-10-24: from git archive 4ac7969, uv build --offline gives rai_bvar-0.2.0-py3-none-any.whl (91 files under rai_bvar/; Requires-Dist jax>=0.12, numpy>=2.0, pandas>=2.2, scipy>=1.15, scoringrules>=0.11, xarray>=2024.10), which installs offline into a fresh Python 3.12 environment and imports as rai_bvar 0.2.0; the git+https line itself was not run (no network install; the repository is private until release)
-% [TC] tag v0.2.0: not on origin at 2026-10-24 07:32Z (git ls-remote --tags origin, gh api repos/yigitokar/rai-bvar/tags: empty); the install line needs it: create v0.2.0 at 4ac7969 and push it before submission (AUTHOR_TODO). No PyPI project: https://pypi.org/pypi/rai-bvar/json returned 404 (07:44Z); no Zenodo DOI (release facts)
+% [V] no tag on origin at 2026-10-24 07:32Z and 08:27Z (git ls-remote --tags origin, gh api repos/yigitokar/rai-bvar/tags and /releases: empty), so the release is named by its commit and the install line pins the full hash (pip's git+https@<ref> accepts a full commit SHA); a tag v0.2.0 at 4ac7969 is an author step after submission (AUTHOR_TODO.md). No PyPI project: https://pypi.org/pypi/rai-bvar/json returned 404 (07:44Z); no Zenodo DOI (release facts)
 The repository holds, under \code{benchmarks/reports/}, the reports of the Clark--Ravazzolo runs
 (the quick run, the first full run, and the acceptance run with its log;
 \cref{sec:replication,app:cr}) and the pre-registration of the acceptance run
@@ -2924,10 +2921,11 @@ implementations.
 % [V] DESIGN section 5.6 with the Stage 2 amendment; dossier 03 section 10
 In practice, on one machine and version set, re-runs reproduced the printed output of the analytic
 listing of \cref{sec:walkthrough} line for line, that of the MCMC listing except its timing
-lines, and the fixed-seed validation statistics to every printed digit; across machines the
+lines (and, on the release commit, its version line), and the fixed-seed validation statistics
+to every printed digit; across machines the
 mutation statistics agreed to two or three significant figures, and MCMC results can be compared
 only within Monte Carlo error.
-% [V] dossier 02 section 19 (fact-check re-runs of ex_a.py and ex_b.py); dossier 04 (G-small and mutation re-runs);
+% [V] dossier 02 section 19 (fact-check re-runs of ex_a.py and ex_b.py); docs/paper/code/out/ (re-capture at 4ac7969 against the d58c9ef one: ex_a.txt identical, ex_b.txt differs in line 1 only); dossier 04 (G-small and mutation re-runs);
 % [R] cross-machine mutation statistics (mutants.py EVIDENCE header)
 
 \begin{table}[!htbp]
@@ -2943,7 +2941,7 @@ the production kernels.}
 \toprule
 Variation & Guarantee & Scope & Tests \\
 \midrule
-chunk size and burn-in piece size & bitwise & toys; production follows from the key layout [TC] & a \\
+chunk size and burn-in piece size & bitwise & toys; production follows from the key layout, not tested & a \\
 thinning with aligned sweeps & bitwise & toys & b \\
 fused against unfused plan & bitwise & toys (3 configurations) & c \\
 \code{vmap} over chains against a sequential loop & bitwise & toys & d \\
@@ -3006,7 +3004,7 @@ xarray and \pkg{scoringrules}), the BLAS backend, the benchmark machines, the re
 command that regenerates each table and figure.}
 \label{tab:TabG2}
 % [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/meta.json; docs/paper/code/out/env.json (written by
-% docs/paper/code/run_examples.py at d58c9ef, not re-run on the release commit); docs/paper/figures/tab_environment.py
+% docs/paper/code/run_examples.py at 4ac7969, clean tree, 2026-10-24); docs/paper/figures/tab_environment.py
 \input{figures/tables/tab_environment.tex}
 \end{table}
 
@@ -3036,9 +3034,10 @@ Warm starts are opt-in and require strictly increasing origins.
 \cref{lst:Lst1-full,lst:Lst2-full} are the scripts of \cref{sec:walkthrough} and
 \cref{lst:Lst1-out,lst:Lst2-out} their standard output, verbatim; nothing was written to stderr by
 \code{ex\_a.py}.
-% [V] docs/paper/code/{ex_a,ex_b}.py, out/{ex_a,ex_b}.txt, out/env.json (d58c9ef, macOS arm64); identical to dossier 02 §13 outputs at 62d15f6; out/ex_a.stderr.txt is empty
-They were run with \code{docs/paper/code/run_examples.py}, which records the platform and the
-package versions; the MCMC numbers are platform-specific.
+% [V] docs/paper/code/{ex_a,ex_b}.py, out/{ex_a,ex_b}.txt, out/env.json (4ac7969, clean tree, macOS arm64, 2026-10-24); identical to the d58c9ef capture except ex_b.txt line 1 (version 0.0.1 -> 0.2.0), and to dossier 02 §13 outputs at 62d15f6; out/ex_a.stderr.txt is empty
+They were run on release 0.2.0 (commit 4ac7969, clean working tree) with
+\code{docs/paper/code/run_examples.py}, which records the commit, the platform and the package
+versions (\cref{tab:TabG2}); the MCMC numbers are platform-specific.
 
 \lstinputlisting[language=Python, firstline=6, firstnumber=6, numbers=left, numberstyle=\tiny,
   basicstyle=\lstfontfamily\scriptsize, columns=fullflexible, keepspaces=true, breaklines=true,
@@ -3153,8 +3152,7 @@ The committed parity fixtures that the R oracles produced (in \code{tests/parity
 outputs of GPL programs run as oracles; the project treats them as data, not code.
 % [V] r_bvar_*.json, stochvol_*.nc, bvars_swa_*.nc (the last from an R script that calls stochvol); the
 % .csv inputs in the same directory are data, not oracle output
-\todo{TODO 17: decide whether to cite \citet{fsf2026gplfaq} for this position (as a web page, not
-legal advice).}
+% TODO 17 settled: the position is stated as the project's own, without a citation (fsf2026gplfaq stays unused in refs.bib); no legal claim is made
 The Bank of England \pkg{bvar} package \citep{labonne2026bvar} is MIT-licensed.
 FRED-MD and FRED-QD \citep{mccracken2016fredmd,mccracken2021fredqd} are downloaded on demand and
 never bundled, because some series are third-party copyrighted; the named variable sets of the
@@ -3363,8 +3361,7 @@ instruction in that session (\#8--\#10 under his instruction to finish the paper
 arXiv package); who merged \#2 is not on record beyond the account.
 % [R] session record of 2026-10-23/24 (the author's "pr merge", "merge devammm", "PR #1'i de merge et", "merge et" for #1 and #4-#6; "merge et" for #7; "paper'ı bitir, arxiv paketini hazırla" for #8-#10)
 He is responsible for the paper and for the software.
-\todo{author: approve this appendix and the authorship statement, check both against arXiv's policy
-and the target venue's, and add any acknowledgements.}
+% The author's approval of this appendix, any statement of his own reading, and acknowledgements are left to him (AUTHOR_TODO.md); the text makes no claim about how far he read the code or the paper.
 
 % -------------------------------------------------------------------------------------
 % Appendix K (TODO for the author) is kept out of the compiled paper: it mirrors OUTLINE.md section 16.

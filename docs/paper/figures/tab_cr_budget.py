@@ -6,7 +6,7 @@ Sources:
   {identity_ordering,worst_orderings}.jsonl`` (one JSON line per fit, written by ``conv_diag.py`` in
   the same folder: SV(rw), reduced Minnesota, p = 4, default SV priors, every main-stage origin,
   fit seed ``fit_seed(0, origin)``, no forecasts or scores). They are copies in the paper worktree;
-  the script and its output are not committed to the main repository (OUTLINE TODO 4), so the
+  the script and its output are kept with the paper's sources (branch paper-draft), not in release 0.2.0, so the
   table carries the evidence tag [PREREG]: its numbers are asserted equal to those of item 1 of the
   committed pre-registration (``benchmarks/reports/clark_ravazzolo_preregistration.md``, c823d20);
 * for the seed comparison, the first full run's report (``benchmarks/reports/clark_ravazzolo.json``
@@ -127,10 +127,10 @@ def main() -> None:
     lines.append(f"\\quad joint $h = 1$ $\\Delta$LPD, identity & & {tc.fullrun(tc.signed(d_main))} & "
                  f"{tc.fullrun(tc.signed(d_ord))} & \\\\")  # fmt: skip
     lines += [r"\bottomrule", r"\end{tabular}"]
-    foot = ("Upper panel [PREREG]: SV(rw) fits only (no forecasts or scores) at the main-stage fit "
-            f"seeds over the {n_full} origins 1985Q1--2011Q2, from the fit records "
-            r"\code{docs/paper/figures/data/convergence_diagnostic/*.jsonl}, which are not committed "
-            r"to the main repository (OUTLINE TODO 4); the "
+    foot = ("Upper panel, the pre-registration's diagnostic: SV(rw) fits only (no forecasts or "
+            f"scores) at the main-stage fit seeds over the {n_full} origins 1985Q1--2011Q2, from the "
+            r"fit records \code{docs/paper/figures/data/convergence_diagnostic/*.jsonl}, which are "
+            r"kept with the paper's sources, not with release 0.2.0; the "
             "generator checks that they reproduce item~1 of the pre-registration (c823d20) to the "
             f"digits stated there; all {agg['n_identity']} + {agg['n_worst']} fits finished without error. "
             "Converged: R-hat $< 1.01$ and bulk ESS $> 400$ on every primary quantity. Lower panel: "

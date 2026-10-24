@@ -4,8 +4,9 @@ Usage (from anywhere; the main repository provides the environment and the packa
 
     python docs/paper/code/run_examples.py [--repo /Users/yigitokar/rai-bvar]
 
-Each script runs as ``PYTHONDONTWRITEBYTECODE=1 uv run --frozen python <script>`` with the
-repository as working directory. stdout goes to ``out/<name>.txt`` (pulled into the paper by
+Each script runs as ``PYTHONDONTWRITEBYTECODE=1 uv run --frozen --no-sync python <script>`` with
+the repository as working directory (``--no-sync``: the repository's existing environment is used
+as it is, nothing is installed or written there). stdout goes to ``out/<name>.txt`` (pulled into the paper by
 ``\\lstinputlisting``); stderr goes to ``out/<name>.stderr.txt``, which the paper never prints
 (it holds the library's warnings, one of which names other packages; TODO 16). ``out/env.json``
 records the repository commit, whether its tracked files were clean, the platform and the
@@ -53,7 +54,7 @@ def main() -> int:
     out = HERE / "out"
     out.mkdir(exist_ok=True)
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-    cmd = ["uv", "run", "--frozen", "python"]
+    cmd = ["uv", "run", "--frozen", "--no-sync", "python"]
 
     record = {
         "repo": str(repo),
@@ -85,6 +86,10 @@ def main() -> int:
         }
         status = status or proc.returncode
         print(f"{name}: exit {proc.returncode}, {record['scripts'][name]['wall_seconds']} s")
+    # the same check after the runs: the scripts must not have changed the checkout
+    record["tracked_changes_after"] = git(
+        repo, "status", "--porcelain", "--untracked-files=no"
+    ).splitlines()
     (out / "env.json").write_text(json.dumps(record, indent=2) + "\n")
     return status
 

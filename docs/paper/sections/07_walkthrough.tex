@@ -1,15 +1,11 @@
 % Section 7 (OUTLINE.md §7; 2 pages). The listings are pulled from docs/paper/code/ and their
 % outputs from docs/paper/code/out/, written by docs/paper/code/run_examples.py, which ran both
-% scripts with `uv run --frozen python` in the main repository at commit d58c9ef (branch
-% phase-2-cr-acceptance; includes D-34, b9c66c0) on macOS-26.6.2-arm64 (versions in
-% code/out/env.json). The main working tree had uncommitted edits in docs/phase2/DESIGN.md,
-% src/rai_bvar/validation/joint.py and test files only (listed in env.json); no code path of the
-% examples imports rai_bvar.validation (grep at d58c9ef: the only production import is inside the
-% prior mode of structural/ordering.py, which the examples do not call). Both outputs are identical, line for
-% line, to those recorded at 62d15f6 in dossier 02 §13 (ex_b without its two wall-clock lines,
-% which were removed from the script). Not re-run on the release commit: the release (4ac7969 = 7f880e1 + version
-% string) contains d58c9ef ([V] git merge-base --is-ancestor); src/ changes after d58c9ef: D-35 settings and
-% resolve (default SV budget), validation/joint.py (row 18) and others (git diff --stat d58c9ef 7f880e1 -- src: 10 files).
+% scripts with `uv run --frozen --no-sync python` in the main repository at commit 4ac7969 (release
+% 0.2.0, branch main, clean tree before and after the run: env.json tracked_changes and
+% tracked_changes_after both empty) on macOS-26.6.2-arm64, 2026-10-24 08:18 UTC (versions in
+% code/out/env.json). Against the earlier capture at d58c9ef (dirty tree, 2026-10-23), ex_a.txt is
+% identical and ex_b.txt differs only in its first line (rai-bvar 0.0.1 -> 0.2.0); ex_b.stderr.txt
+% gains the D-35 budget warning (explicit 4 x 1000 < 10,000), every other warning unchanged.
 % For length, the main text shows verbatim excerpts (listings `linerange` with
 % consecutivenumbers=false, so the printed line numbers are the scripts' own); the full scripts,
 % their full outputs and the detail moved out of this section are in Appendix G (app:walk-output) and Appendices A and C (merged in the integration pass)
@@ -22,7 +18,7 @@ transformation codes, so they run without network access.
 The listings are verbatim excerpts with the scripts' own line numbers; \cref{app:walk-output}
 gives the scripts and their output in full (the MCMC output is bitwise reproducible only on the
 same platform and package versions; \cref{sec:architecture}).
-% [V] docs/paper/code/{ex_a,ex_b}.py, out/{ex_a,ex_b}.txt, out/env.json (d58c9ef, macOS arm64); identical to dossier 02 §13 outputs at 62d15f6
+% [V] docs/paper/code/{ex_a,ex_b}.py, out/{ex_a,ex_b}.txt, out/env.json (4ac7969, release 0.2.0, clean tree, macOS arm64); identical (but for the version line) to the d58c9ef capture and to dossier 02 §13 outputs at 62d15f6
 
 \subsection{Data}\label{sec:walk-data}
 
@@ -93,9 +89,10 @@ Its Minnesota hyperparameters are an empirical-Bayes plug-in from the conjugate 
 window (for SV not a type-II maximum-likelihood estimate), so every volatility arm on that window
 receives the same mean prior.
 % [V] out/ex_b.txt line 3; tests/analytic/test_eb_mcmc.py::test_eb_plug_in_equals_the_phase1_eb_mode_at_cross_1
-On this homoskedastic DGP the SV parameters $\phi_i$ and $\sigma_i$ mix slowly, and the fit is
-flagged as not converged.
-% [V] out/ex_b.txt summary table and "converged: False" (MCMCSettings(chains=4, draws=1000): 4 x 1000 kept draws)
+The listing sets a deliberately small budget of $4 \times 1000$ kept draws, a tenth of the SV
+default, for which the fit warns; on this homoskedastic DGP the SV parameters $\phi_i$ and
+$\sigma_i$ mix slowly, and the fit is flagged as not converged.
+% [V] out/ex_b.txt summary table and "converged: False" (MCMCSettings(chains=4, draws=1000): 4 x 1000 kept draws); the D-35 warning ("fewer than the SV default of 10,000 per chain") in out/ex_b.stderr.txt (run at 4ac7969, out/env.json)
 The forecast container and its log-density interface are those of the analytic case (R3).
 % [V] out/ex_b.txt lines "ForecastResult(...) | engine attr: mcmc" and the two LPD lines
 In the final comparison, whose arms are structural Mode~I models that differ only in volatility,
@@ -116,5 +113,4 @@ A numerical failure inside a kernel raises \code{MCMCNumericalError}, which name
 equation, chain and sweep and carries the diagnostics of a deterministic replay
 (\cref{sec:arch-mcmc,sec:robustness}).
 % [V] src/rai_bvar/engines/mcmc/protocols.py l.165-189 at d58c9ef
-\todo{OUTLINE \S7.4: a volatility-axis grid example (\code{rb.grid} with \code{verdict(axis="vol")})
-is [TC]; add it to \code{run\_examples.py} only if it is run on the release commit.}
+% OUTLINE §7.4 grid example (rb.grid with verdict(axis="vol")) not included: it was never run (no captured output), so the text does not show it.

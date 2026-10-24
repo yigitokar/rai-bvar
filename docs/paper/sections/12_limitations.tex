@@ -37,12 +37,11 @@ block length does not grow with $h$, and a pair's verdict depends on the other m
 Verdicts are per horizon, with no rule that combines horizons, and the DM long-run variance
 (\cref{sec:eval-tests}) is not the Newey--West variance \citep{newey1987simple} that the
 specification states. % [V] src/rai_bvar/evaluation/significance.py l.35-53; [R] SPEC.md §9.3 l.447; dossier 02 §15 D1
-\todo{TODO 10: implement the verdict-engine DGP size and power study, or keep it as future work
-here.}
+% TODO 10 settled: the DGP size and power study stays future work (no tests/dgp/ at 4ac7969), as the first sentence of this paragraph says
 
 \paragraph{The convergence gate.}
 SV fits routinely miss the $\hat R < 1.01$ and bulk ESS $> 400$ targets. The prototype pilot
-predicted this, through $\phi$ and $\sigma$, at the default budget of $4 \times 2000$ draws, at
+predicted this, through $\phi$ and $\sigma$, at the earlier default budget of $4 \times 2000$ draws, at
 which no SV arm of the quick Clark--Ravazzolo run converged at any origin. It persists at larger
 budgets: all six runs of the performance benchmark ($4 \times 10{,}000$ draws) report
 \code{converged = False}, and so did many SV(rw) fits of the first full Clark--Ravazzolo run
@@ -51,12 +50,15 @@ Part of this is noise in the rule itself: $\hat R$ is an estimate, and at a bulk
 hundred the rule $\hat R < 1.01$ also fails by chance, often \citep[cf.][]{vehtari2021rank}, so
 the gate acts much like a floor on the ESS, and near the threshold the converged count moves with
 the seed by several origins (\cref{sec:replication-prereg}). % [FULL: converged.full['SV(rw)'], orderings.per_ordering[0,8,9].converged_sv]; [PREREG] item 1 % [PREREG] item 1 ("consistent with R-hat sampling noise at bulk ESS ~600"); [R] tests/bench/baseline.json (sigma min ESS 504, 4 of 101 R-hat misses, worst 1.016; commit d490730); no committed false-alarm computation, so no rate is quoted (stat referee major 3; TODO list, part 4)
-The gate is strict in that sense, and the price is that users need larger budgets than the defaults:
+The gate is strict in that sense, and the price is that users need large budgets:
 the acceptance run used $4 \times 20{,}000$ draws, at which every reduced-form arm converged at
 \acc{min(converged[*][*])} of origins and SV(rw) did so in every ordering, and it took
 \acc{seconds} with \acc{config.n_jobs} worker processes (\cref{sec:replication-results}). % [ACC: converged.{full,pre_crisis}[*]; orderings.per_ordering[*].converged_sv; seconds; config.n_jobs]
-The default \code{MCMCSettings} (2000 draws) are
-unchanged. \todo{TODO 33: decide the convergence-gate policy for SV at the default budget.}
+Release 0.2.0 therefore raises the default for SV compositions to $4 \times 10{,}000$ kept draws
+and warns below it; the rule itself is unchanged, and the new default raises the floor without
+guaranteeing convergence: the performance benchmark still fails the rule at it
+(\cref{sec:performance}), and in the comparison example of the package's README the SV arm
+converges at 10 of its 11 origins. % [V] src/rai_bvar/settings.py at 4ac7969 (SV_DEFAULT_DRAWS = 10_000, DEFAULT_DRAWS = 2_000), engines/mcmc/monitor.py::sv_budget_message, tests/unit/test_default_budget.py (CI run 40061724239); [R] DESIGN D-35 (e8cf9f1, PR #7; resolves Q14 at the owner's instruction of 2026-10-24: "4 × 10,000 raises the floor, it is not a convergence guarantee"; converged rule, SPEC §10.6 thresholds and compare()'s 95% rule unchanged); README.md at 4ac7969 l.49 ("the SV arm converges at 10 of 11 origins at 4 × 10,000", Apple M5 Max, 2026-10-24)
 The gate also leaves the reduced-form intercepts out: it gates on the log-likelihood, each
 equation's own first-lag coefficient and the volatility parameters, only reports the intercepts
 and the contemporaneous coefficients, and does not monitor the other lag coefficients, so
@@ -91,7 +93,7 @@ In the acceptance run, at the larger budget, it does not (\code{material} =
 diagnostic's false-positive rate, and the flags it raises on SV(rw) rest on the same
 one-replicate floor: the spread of two runs, under which a signal-to-noise ratio above 3 is
 common even under order invariance, so the flags rest mainly on the fixed thresholds. % [V] src/rai_bvar/structural/ordering.py (sigma_mc = max(sd over the fit and its replicate, MCSE); backtest scores carry no MCSE, module docstring l.26-33); config.noise_reps = 1 (stat referee major 7, macro major 6) % [ACC: orderings.results.Constant.material = false; orderings.results['SV(rw)'].material = true]
-\todo{TODO 26: decide \code{noise_reps} for future runs.}
+% TODO 26 settled for the paper: noise_reps stays 1 in the reported runs (config.noise_reps = 1), stated above as a limitation; no new run
 
 \paragraph{Validation evidence.}
 Geweke tests and SBC run at $n \leq 3$; the realistic size ($n = 20$, $p = 4$, $T = 300$) is
@@ -123,7 +125,7 @@ The formed-Gram draws that were not rewritten, among them the structural coeffic
 CCCM $\Pi$ step, still accept any positive pivot, with no relative floor, although on the old
 random-walk path a tiny positive pivot could give a finite but wrong draw with no failure reported
 (\cref{sec:robustness-f2,fig:FigE1}); whether reachable states expose them is unknown. % [R] dossier 05 §7 Q1; old-path behaviour at a synthetic state: docs/paper/figures/make_fig_laplacian_pivots.py (computed from committed code; --json docs/paper/data/laplacian_pivots.json)
-\todo{TODO 23: decide on a relative pivot floor; commit tests of the old-path failures.}
+% TODO 23 (Section 12 part): no relative pivot floor at 4ac7969 (linear.py l.386, 418; linear_reduced.py l.208: ok = pivot > 0), and no test asserts the old-path values (the figure script recomputes them); both stated in this paragraph and in app:float64
 The excess-pivot recursion removed the crash and the wrong draws of the random-walk volatility
 step near $\sigma = 0$, not the slow mixing there. % [R] NOTES 17 (the fix itself is [V]: tests/mcmc/blocks/test_sv_core.py::test_rw_awol_at_a_tiny_sigma)
 The performance evidence comes from one Apple M5 Max that was not idle and one 2-vCPU x86-64
@@ -137,4 +139,4 @@ The macOS caveats of \cref{sec:robustness-platform} apply.
 \paragraph{Release state.}
 The package is at version 0.2.0, classified as pre-alpha; it is not on PyPI and installs from the
 repository (\cref{app:repro}). % [V] git show 4ac7969:pyproject.toml (version "0.2.0", "Development Status :: 2 - Pre-Alpha"); no PyPI release: https://pypi.org/pypi/rai-bvar/json returned 404 (2026-10-24 07:44Z)
-\todo{TODO 19: update the README status banner and quick start; release on PyPI with a version tag.}
+% TODO 19: README at 4ac7969 has the Phase 2 status banner and the D-35 quick start (l.5, l.26, l.49); no PyPI release and no tag on origin (git ls-remote --tags origin empty, 2026-10-24)

@@ -1,8 +1,8 @@
 # Listing 2 of the paper (docs/paper/sections/07_walkthrough.tex) shows lines 40-72; lines 8-36
 # repeat the imports and the data block of ex_a.py.
 # Run from the main repository: cd /Users/yigitokar/rai-bvar && uv run python <this file>,
-# or through run_examples.py. Output captured at main-repo commit d58c9ef (branch
-# phase-2-cr-acceptance; includes D-34, b9c66c0). Re-run on the release commit (TODO 20).
+# or through run_examples.py. Output captured at main-repo commit 4ac7969 (release 0.2.0,
+# clean tree; out/env.json); stdout equals the d58c9ef capture except the version line.
 # Differs from dossier 02 section 13.2 only by the two wall-clock prints, removed (not reproducible).
 
 import platform

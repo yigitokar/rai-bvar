@@ -14,7 +14,7 @@
 #                     \acc{} prints numbers (refuses a report that is not the registered run)
 #   make tables       every table generator figures/tab_*.py -> figures/tables/tab_*.tex (the
 #                     appendix \input's them; [REL]/[ACC] cells stay marks until the data exist)
-#   make todos        regenerate AUTHOR_TODO.md from the \todo marks and OUTLINE.md section 16
+#   make todos        regenerate AUTHOR_TODO.md (\todo census, must be 0; post-submission items)
 #   make arxiv        build the PDF, then write arxiv.tar.gz (make_arxiv.sh; ARXIV_TEST=1 also
 #                     compiles the tarball in a clean temporary directory)
 #   make clean        remove LaTeX intermediates

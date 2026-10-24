@@ -3,7 +3,7 @@
 % Evidence status follows OUTLINE.md §0.5. Every number below is [R]: tests/bench/baseline.json
 % (main repository), measured at deb3929 on a non-idle Apple M5 Max, committed in d490730, and the
 % x86-64 CI report benchmarks/reports/bench_p2_x86_github_779957f.json (779957f).
-% Re-measure on an idle machine on the release commit (OUTLINE TODO 9).
+% No idle-machine run and no run on the release commit exist (OUTLINE TODO 9, stated in the text).
 % Detail moved out of this section is in Appendix E (app:performance; merged in the integration pass).
 
 The performance target, BENCH-P2, is one realistic SV workload: structural Linear $\times$ SV ($n = 20$, $p = 4$, $T = 300$) fitted to a simulated stationary VAR(4) with SV, with four chains of 1000 burn-in and 10,000 kept sweeps, fixed hyperparameters and one CPU device, within 120~s. % [V] benchmarks/phase2_perf.py docstring; DESIGN §10.1
@@ -13,15 +13,14 @@ The only measurement of the production engine is the committed baseline, taken o
 The median wall time is 52.3~s cold and 49.6~s warm, of which compilation takes 3.46~s cold and 1.00~s when the executables are loaded from the cache (medians over the three cold and the three warm runs). % [R] baseline.json summary.wall_cold_s, wall_warm_s, compile_cold_s, compile_warm_s
 One sweep of all four chains takes 3.90~ms and peak resident memory is 3,043~MiB (medians over all six runs; \cref{app:performance}). % [R] baseline.json summary.sweep_ms_min3x1000 (runner rate over the sampling sweeps: 4.07 ms), summary.peak_rss_mb (MiB)
 These times are within the target, but on a measurement that does not follow the protocol, so the protocol's outcome is open; the numbers belong to this machine, load and commit and are not portable. % macro referee minor 10
-\todo{TODO 9: re-measure BENCH-P2 on an idle machine on the release commit, and add an idle x86 run. This also settles dossier 03 \S13.10: later commits change engine and component sources, and only a reading of the diffs, not a measurement, suggests that none is on the BENCH-P2 path.}
-% [TC] dossier 03 §13.10 (deb3929..62d15f6: 14 engine/component files). After 62d15f6 (through 7f410dc), src/ changes in seven files:
-% engines/mcmc/forecast.py (D-34), evaluation/{backtest,compare,scores}.py, forecast/result.py,
-% structural/ordering.py and validation/joint.py (7f410dc, row 18); under engines/ and components/ only engines/mcmc/forecast.py. Whether fit() reaches any of them is not checked.
+No run on an idle machine exists, and none on the release commit: later commits, D-35 among them,
+change engine code, including the resolution and runner modules that \code{fit()} calls, so the
+timings are those of commit deb3929. % [R] baseline.json machine.loadavg [6.26, 4.66, 3.56] at the start, summary.loadavg_1min 2.36-6.12 over the six runs; machine.commit deb3929; [V] git diff --stat deb3929 4ac7969 -- src/rai_bvar/engines src/rai_bvar/components (non-empty; D-35 e8cf9f1 changes engines/mcmc/{resolve,runner,monitor,results}.py); BENCH-P2's explicit 4 x 10,000 budget is unchanged by D-35 (DESIGN D-35 "Explicit budgets are unaffected: BENCH-P2 (4 x 10,000)"); dossier 03 §13.10
 
 Mixing, not speed, is the binding constraint.
 The slowest quantities, the SV scales $\sigma_i$ and persistences $\phi_i$, reach a minimum bulk ESS per second of 10.2 and 11.2 over the warm-run wall time, against 403 for the own first-lag coefficients. % [R] baseline.json summary.ess (sigma, phi, B_own1: ess_per_s_min)
 Every run reports \code{converged = False}; the runs share a seed and give identical draws, so this is one outcome seen six times: according to the commit message, 4 of the 101 primary quantities miss the R-hat threshold of 1.01 (worst 1.016, a $\sigma_i$), while every group's minimum bulk ESS exceeds 400. % [R] commit d490730 ("same seed, identical draws"; the R-hat values are not stored in the JSON); baseline.json summary.converged, summary.ess.*.ess_min (sigma 504)
-Even at five times the default number of draws, this workload thus fails the convergence rule of \cref{sec:eval-verdict}; \cref{sec:limitations} discusses the budget. % [V] src/rai_bvar/settings.py l.76 (MCMCSettings.draws = 2000; BENCH-P2 keeps 10,000)
+Even at the SV default budget of release 0.2.0 ($4 \times 10{,}000$ kept draws), this workload thus fails the convergence rule of \cref{sec:eval-verdict}; \cref{sec:limitations} discusses the budget. % [V] src/rai_bvar/settings.py at 4ac7969 (SV_DEFAULT_DRAWS = 10_000, D-35); benchmarks/phase2_perf.py (4 x 10,000 kept, burn 1000); the D-35 warning text cites the same 4 of 101 (engines/mcmc/monitor.py::sv_budget_message)
 
 On a shared 2-vCPU x86-64 runner of the continuous-integration bench job the same fit took 228.9~s cold and 198.4~s warm; the design reports that run without gating it (\cref{app:performance}). % [R] benchmarks/reports/bench_p2_x86_github_779957f.json (commit 779957f; AMD EPYC 7763, logical_cpus 2); DESIGN WP24 amendment ("reported, not gated")
 The four-device stretch target of 60~s, the reduced-form CCCM sampler, SV with Student-$t$ errors or with outliers plus $t$, and an idle x86 machine have no production measurement, and timings of design stand-ins and pilot prototypes are not quoted (\cref{app:performance}); \cref{tab:TabE2} gives the full benchmark record and \cref{tab:TabE3} the kernel microbenchmarks. % [R] dossier 03 §13.6-§13.8 (x86: git show d37e059:tests/bench/baseline.json, provisional, under heavy load, superseded by the CI report above; stand-ins and prototypes ran different code on another machine)

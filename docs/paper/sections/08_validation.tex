@@ -217,8 +217,7 @@ arm runs the code path of row 8 with a different prior on $\phi$. % [V] benchmar
 The Student-$t$ variant, SV(rw, $t$), has no row of its own; it rests on row~18, on the Student-$t$
 component of rows 4 and 10 (standardised scale, $\nu$ on a grid) and, for its fixed $\nu = 10$ and
 unit scale, on Tier~U checks of the transitory block. % [V] 7f410dc: no rw x t row in validation/joint.py _COMPOSITIONS, none in mcmc_fits.py; validation/joint.py docstring (t "standardized tau", nu in {5..12}); benchmarks/clark_ravazzolo.py models() (SV(rw, tails="t", nu_prior=DiscreteUniform(10, 10), t_scale="unit")); tests/mcmc/blocks/test_transitory.py (tests parametrised over t_scale)
-\todo{TODO 3: register the SV(rw, $t$) variant as a row with a contract fit before submission, or
-keep the previous sentence.}
+% TODO 3 settled: no SV(rw, t) row or contract fit at 4ac7969 (joint.py _COMPOSITIONS rows 1-18 and 201-205; mcmc_fits.py has reduced-SV(t), reduced-SV(outliers,t), reduced-SV(rw), no SV(rw, t)), so the previous sentence stays
 
 \subsection{Tier M: the mutation suite}\label{sec:validation-mutation}
 
@@ -232,8 +231,7 @@ All 37 catch their mutant with a passing control, in about three minutes with a 
 compilation cache (\cref{app:runtimes}), % at 62d15f6, Apple M5 Max, 177-182 s; [V] pytest tests/mutation -m mutation, reproduced by dossier 04 and its fact-check (181.85 s, 177.40 s); [REL] record/mutation.jsonl at 7f880e1: 37 records, all caught, every control passing (summary.txt: 37 passed in 145.20 s)
 and recorded runs at earlier commits on x86-64 Linux also caught every mutant
 (\cref{app:mutants}; \cref{fig:FigD1} shows each statistic against its threshold). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 and in the release record at 7f880e1 (record/mutation.jsonl, M2-G); no x86-64 record at the release commit; cross-machine agreement (two or three significant figures) is in App. D
-\todo{TODO 8: fix the stale count (33/33) in NOTES B.8; 4f627bc corrected the count in the
-\code{mutants.py} evidence header.}
+% The count 37 is from tests/mutation/mutants.py (header corrected in 4f627bc: 33 checks for M1-M16, 37 in all) and record/mutation.jsonl at 7f880e1 (37 records); main-repo docs/paper/NOTES.md item B.8 still reads "33/33" (M1-M16 only) and is not cited for the count
 Mutation testing is established \citep{demillo1978hints,jia2011analysis}; it has been applied to
 scientific software with tolerance-based oracles \citep{hook2009mutation} and, with generic
 operators, to probabilistic models \citep{jarma2026software}, and probabilistic programming systems

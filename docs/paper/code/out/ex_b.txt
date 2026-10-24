@@ -1,4 +1,4 @@
-macOS-26.6.2-arm64-arm-64bit | rai-bvar 0.0.1
+macOS-26.6.2-arm64-arm-64bit | rai-bvar 0.2.0
 mcmc | BVAR(Minnesota(structural, eb), SV, p=2, mcmc=45b567) | structural | {'mean': 'Linear', 'prior': 'Minnesota(structural, eb)', 'vol': 'SV', 'lags': '2', 'deterministic': 'c', 'outliers': 'none'}
 prior mode: Mode I | hyper: {'hierarchy': 'eb', 'lambda': 0.24549046712778935, 'alpha': 2.0, 'cross': 1.0, 'contemp': 1.0, 'var_const': 10000000.0, 'eb_method': 'conjugate_twin', 'eb_converged': True, 'offset_rule': 'relative', 'c_rel': 1e-12} | converged: False
                     mean     sd   rhat  ess_bulk

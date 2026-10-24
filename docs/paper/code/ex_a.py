@@ -1,7 +1,7 @@
 # Listing 1 of the paper (docs/paper/sections/07_walkthrough.tex), shown from line 6 on.
 # Run from the main repository: cd /Users/yigitokar/rai-bvar && uv run python <this file>,
-# or through run_examples.py. Output captured at main-repo commit d58c9ef (branch
-# phase-2-cr-acceptance; includes D-34, b9c66c0). Re-run on the release commit (TODO 20).
+# or through run_examples.py. Output captured at main-repo commit 4ac7969 (release 0.2.0,
+# clean tree; out/env.json); identical to the earlier capture at d58c9ef.
 
 import numpy as np
 import pandas as pd

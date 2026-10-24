@@ -12,9 +12,11 @@ S = 200 draws (the test's size; seed 3) and S = 2000 and 20,000 (seeds 4 and 5).
 own assertion at 6 s.d. and S = 200 is annotated.
 
 Right panel: the crisis cell (Constant and SV(rw), unemployment, h = 8, origin 2008Q2) at the
-acceptance MCMC budget. It needs ``docs/paper/data/rb_tail_cell.json`` (OUTLINE TODO 6, written by
-``rb_tail_cell.py``, which does not exist yet); until then the panel is a marked placeholder.
-Expected schema (one record per estimate)::
+acceptance MCMC budget, drawn from ``docs/paper/data/rb_tail_cell.json`` (written by
+``rb_tail_cell.py`` against main-repo commit 99f658a, whose src/ and benchmarks/clark_ravazzolo.py
+equal those of the release code 7f880e1; committed in 945e43c). Without that file the panel is a
+marked placeholder. The median weight ESS of the conditioned estimates is printed under each
+draw count, one line per model. Schema (one record per estimate)::
 
     {"origin": "2008Q2", "variable": "UR", "horizon": 8,
      "records": [{"model": "Constant" | "SV(rw)", "method": "conditioned" | "integrated",
@@ -82,6 +84,7 @@ def right_panel(ax, cell: Path) -> None:
     models = [m for m in ("Constant", "SV(rw)") if any(r["model"] == m for r in recs)]
     draws = sorted({r["draws"] for r in recs})
     xpos = {S: i for i, S in enumerate(draws)}
+    labels = []  # (x, model index, text): placed once the y-limits are known
     for k, model in enumerate(models):
         col = mc.SERIES[k]
         for method, mk, dx in (("conditioned", "o", -0.12), ("integrated", "D", 0.12)):
@@ -95,13 +98,19 @@ def right_panel(ax, cell: Path) -> None:
             for S in draws:
                 ess = [r["weight_ess"] for r in sel if r["draws"] == S]
                 if ess and method == "conditioned":
-                    mc.direct_label(ax, xpos[S] - 0.12, ax.get_ylim()[0], f"ESS {np.median(ess):.0f}",
-                                    fontsize=5.8, ha="center", va="bottom")  # fmt: skip
+                    labels.append((xpos[S], k, f"{model}: ESS {np.median(ess):.0f}"))
+    lo, hi = ax.get_ylim()
+    lo -= 0.16 * (hi - lo)  # room for the labels under the lowest mark
+    ax.set_ylim(lo, hi)
+    for x, k, text in labels:
+        mc.direct_label(ax, x, lo + (0.075 - 0.055 * k) * (hi - lo) + 0.005 * (hi - lo), text,
+                        fontsize=5.4, ha="center", va="bottom")  # fmt: skip
     ax.set_xticks(range(len(draws)))
     ax.set_xticklabels([f"S = {S:,}" for S in draws])
     ax.set_ylabel("log score (nats)")
     ax.set_title(f"{d['variable']}, h = {d['horizon']}, origin {d['origin']}", loc="left")
-    ax.legend(loc="lower right")
+    ax.legend(loc="lower right", bbox_to_anchor=(1.0, 0.15), ncol=2, fontsize=5.2,
+              columnspacing=0.6, handletextpad=0.2, borderaxespad=0.2)  # fmt: skip
 
 
 def main() -> None:

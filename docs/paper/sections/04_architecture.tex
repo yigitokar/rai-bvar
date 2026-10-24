@@ -102,8 +102,10 @@ The engine also computes recursive impulse responses and the forecast-error vari
 
 \subsection{Settings and runtime}\label{sec:arch-settings}
 
-\code{MCMCSettings} is part of the specification: by default 4 chains of 2000 kept draws after a burn-in
-of 1000, with convergence thresholds $\hat R < 1.01$ and bulk ESS $> 400$ (\cref{sec:eval-verdict}). % [V] src/rai_bvar/settings.py (MCMCSettings fields and docstring)
+\code{MCMCSettings} is part of the specification: by default 4 chains after a burn-in of 1000, with
+10,000 kept draws per chain for a composition with stochastic volatility and 2000 otherwise, and
+convergence thresholds $\hat R < 1.01$ and bulk ESS $> 400$ (\cref{sec:eval-verdict}); an SV fit with
+fewer kept draws warns (\cref{sec:limitations}). % [V] src/rai_bvar/settings.py at 4ac7969 (MCMCSettings fields and docstring; draws=None resolved by BVAR to default_draws(sv): SV_DEFAULT_DRAWS = 10_000, DEFAULT_DRAWS = 2_000; design decision D-35, e8cf9f1, PR #7); warning: src/rai_bvar/engines/mcmc/resolve.py (sv_budget), monitor.py::sv_budget_message; tests/unit/test_default_budget.py (passed on Linux in CI run 40061724239 at 7f880e1; tests/unit is not in the Apple release record); the walk-through's explicit 4 x 1000 triggers it (docs/paper/code/out/ex_b.stderr.txt)
 \code{Runtime} is not: it holds the device count (default 1), the kept draws per compiled call, a memory
 budget checked only before sampling, a memory-mapped store and the replay option. % [V] src/rai_bvar/settings.py (Runtime); tests/mcmc/runner/test_storage.py::test_run_raises_over_budget_before_sampling
 The backtest never passes a \code{Runtime}, so cached scores do not depend on the machine's device
@@ -125,7 +127,7 @@ differently for different batch sizes; in-loop and post-hoc forecasts agree to
 $10^{-12}$. % [V] test_chunking.py::test_production_chain_prefix_with_vmapped_chains_to_rounding (structural_sv), ::test_production_chain_prefix_with_vmapped_reduced_form_to_rounding (reduced_sv), 4-sweep burn; test_devices_bitwise.py::test_shard_map_matches_vmap_in_subprocess (structural_sv, 2-sweep burn); tests/mcmc/forecast/test_forecast_core.py::test_in_loop_forecast_equals_post_hoc_sv; [R] the XLA explanation: DESIGN §5.6 Stage 2 amendment
 % Deleted here: "The toy chain-prefix test is bitwise on macOS and holds only to rounding on x86-64 Linux" ([V] test_chunking.py::test_chain_prefix_invariance, docstring); duplicated in §12 (sec:limitations, same test) and TabG1 row f.
 Chunk invariance with the production kernels follows from the key layout but is not
-tested,\todo{Dossier 03 Q17: add a production-kernel chunk test, or keep ``not tested''.} % [TC]
+tested, % [TC] key layout: DESIGN §5.6; [V] no production-kernel chunk-size test at 4ac7969: tests/mcmc/runner/test_chunking.py::test_chunk_and_burn_piece_size_invariance runs the toy kernels (BASE = toys.toy_static(...)); the production tests there vary the chain count only (dossier 03 Q17)
 and nothing is guaranteed across platforms, JAX versions or PRNG implementations.
 % Deleted here as duplicated in Appendix G (app:repro, paragraph after TabG1, "Every MCMC fit records the information needed to reproduce it: ..."): "Every fit records the package and JAX versions, PRNG implementation, platform, device count, seed, salt, resolved numerical paths, ordering and specification hash." Tag kept for the record: [V] src/rai_bvar/engines/mcmc/results.py (_metadata)
 % Deleted here as duplicated in Appendix G (app:repro, paragraph after TabG1: "with partitionable threefry, the words drawn directly from a parent key equal the key data of its fold_in children, which JAX's key-reuse checker cannot see, and the engine avoids this by giving every consumer its own sub-key"): the threefry key-reuse sentence. Its tags, kept for the record: [R] DESIGN §3.1 rule 5, §5.6; [V] tests/mcmc/blocks/test_robust.py::test_ahead_and_transition_give_the_core_its_own_sub_key. The clause naming the tested draws moved to App. G (app:repro) (Appendix G); §4.6 cites app:repro in its first sentence.

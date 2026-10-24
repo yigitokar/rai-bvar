@@ -1,9 +1,10 @@
-# The rai-bvar paper (arXiv preprint draft)
+# The rai-bvar paper (arXiv preprint)
 
 LaTeX sources of *rai-bvar: Composable Bayesian VARs with Stochastic Volatility, Validated
 Samplers and a Fair Out-of-Sample Verdict Engine in Python*. The plan is `OUTLINE.md`; the
-fact-checked evidence is in `dossiers/`. What only the author can decide, run or verify is in
-`AUTHOR_TODO.md`.
+fact-checked evidence is in `dossiers/`. `main.tex` is set to the submission build
+(`\draftmarksfalse`; `\draftmarkstrue` shows the draft marks again). What is left to the author after
+submission is in `AUTHOR_TODO.md`.
 
 | Path | What it is |
 | :- | :- |
@@ -16,7 +17,7 @@ fact-checked evidence is in `dossiers/`. What only the author can decide, run or
 | `code/ex_a.py`, `code/ex_b.py`, `code/out/` | Listings 1 and 2 and their captured output (`code/run_examples.py`) |
 | `fill_acceptance.py` | fills the `\acc{}` placeholders from the acceptance JSON (below) |
 | `check_acceptance_numbers.py` | checks every acceptance-run number of the text (filled `\acc{}` values, typed numbers, table keys) against the report JSON; exit 1 on a mismatch |
-| `collect_todos.py` | regenerates `AUTHOR_TODO.md` |
+| `collect_todos.py` | regenerates `AUTHOR_TODO.md` (census of `\todo` marks, which must be 0, and the post-submission items) |
 | `texmarks.py` | shared parser for the draft marks |
 | `build.sh`, `Makefile` | build and checks |
 | `make_arxiv.sh` | writes `arxiv.tar.gz` for arXiv (`make arxiv`) |
@@ -48,8 +49,9 @@ count.
 | `\todo{...}` | something only the author can decide or verify | orange box | LaTeX error |
 
 Evidence tags are LaTeX comments at the end of the sentence they support (`% [V] ...`, `[R]`,
-`[TC]`, `[REL]`, `[ACC]`, `[FULL]`, `[PREREG]`; `OUTLINE.md` section 0.5). For the submission build,
-set `\draftmarksfalse` in `main.tex`. Every remaining `\acc` and `\todo` then stops the build.
+`[TC]`, `[REL]`, `[ACC]`, `[FULL]`, `[PREREG]`; `OUTLINE.md` section 0.5). `main.tex` is set to the
+submission build, `\draftmarksfalse`: every unfilled `\acc` and every `\todo` stops the build (none is
+left).
 
 Other conventions. `\pkg{name}` for packages. `\code{...}` for identifiers, paths and test IDs,
 with underscores plain or escaped; it works in text, math and captions. Cross-references use
@@ -80,10 +82,9 @@ reads if it exists.
    header with the report path, its SHA-256, its `generated` field and its commit. If any key does
    not resolve, it lists the key with its file and line and writes nothing.
 3. Rebuild (`make pdf`). Filled values print in green in the draft build.
-4. Re-read every sentence that contains a filled value. The script prints values, not prose. The
-   `\todo` marks in Sections 11-13 and the abstract say where an outcome-dependent sentence has to
-   be written. Check that the abstract stays under arXiv's 1920 characters. Then
-   `python3 collect_todos.py`.
+4. Re-read every sentence that contains a filled value. The script prints values, not prose (the
+   outcome sentences of the abstract and Sections 11-13 are written from the current report). Check
+   that the abstract stays under arXiv's 1920 characters. Then `python3 collect_todos.py`.
 
 Useful options:
 
@@ -130,11 +131,11 @@ with `PYTHONDONTWRITEBYTECODE=1`, and write `figures/<name>.pdf`.
 | :- | :- | :- |
 | Fig1 architecture | `make_fig_architecture.py` | static |
 | Fig3 verdict flow | `make_fig_verdict_flow.py` | static, transcribed from `CompareResult.verdict` |
-| Fig4 LPD estimators | `make_fig_lpd_estimators.py` | left panel computed; right panel a placeholder until `rb_tail_cell.json` exists (TODO 6) |
+| Fig4 LPD estimators | `make_fig_lpd_estimators.py` | left panel computed from committed code; right panel drawn from `data/rb_tail_cell.json` (written by `figures/rb_tail_cell.py` against main 99f658a, whose `src/` equals the release code) |
 | FigC1 Gibbs plan | `make_fig_plan.py` | computed (fits two tiny models; about a minute) |
 | FigD1 mutation heatmap | `make_fig_mutation_heatmap.py` | drawn from the release validation record at 7f880e1 (`benchmarks/reports/validation/7f880e1_apple-m5-max/record/mutation.jsonl`), named in a footer |
 | FigD2 Geweke dots | `make_fig_geweke_dots.py` | same record (`geweke.jsonl`, `mutation.jsonl`); `--geweke`/`--mutation` select other records, and the footer then says they are not the release record |
-| FigE1 RW pivots | `make_fig_laplacian_pivots.py` | computed from committed code; `--json PATH` writes the numbers; see AUTHOR_TODO (TODO 23) |
+| FigE1 RW pivots | `make_fig_laplacian_pivots.py` | computed from committed code; `--json PATH` writes the numbers (a script, not a test: no test asserts the old-path values, App. E) |
 | Fig6, FigF2 | `make_fig_cr_orderings.py`, `make_fig_cr_convergence.py` | placeholders until the acceptance JSON exists |
 | FigF1, FigF3 | `make_fig_cr_per_origin.py`, `make_fig_cr_cumulative.py` | drawn from the per-origin export `figures/data/cr_acceptance/` (tracked on `paper-draft`, TODO 5); their captions say so |
 
@@ -166,13 +167,15 @@ sources include, the table bodies in `figures/tables/`, `acceptance_values.tex` 
 the four files that the listings print (`code/ex_a.py`, `code/ex_b.py`, `code/out/ex_a.txt`,
 `code/out/ex_b.txt`). No scripts are shipped otherwise, and no data. `./make_arxiv.sh --test` (or
 `make arxiv ARXIV_TEST=1`) also compiles the unpacked tarball in a clean temporary directory with
-tectonic. arXiv itself compiles with pdfLaTeX, i.e. the untested pdfTeX branch of `main.tex`; set
-`\draftmarksfalse` before submitting.
+tectonic. arXiv itself compiles with pdfLaTeX, i.e. the untested pdfTeX branch of `main.tex`
+(`main.tex` is already set to `\draftmarksfalse`).
 
 Listings 1 and 2: `python3 code/run_examples.py` runs `code/ex_a.py` and `code/ex_b.py` in the main
-repository and rewrites `code/out/` (stdout, stderr, `env.json`). The listings were run at d58c9ef,
-not on the release commit 4ac7969 (= 7f880e1 plus the version string), whose D-35 changes the default
-MCMC budget of SV compositions; re-run them before submission.
+repository (with `uv run --frozen --no-sync`, so nothing is installed there) and rewrites `code/out/`
+(stdout, stderr, `env.json`, which records the commit and the tracked changes before and after the
+run). The listings were last run on 2026-10-24 at the release commit 4ac7969 with a clean tree; stdout
+equals the earlier d58c9ef capture except the version line of `ex_b.txt`, and `ex_b.stderr.txt` adds
+the D-35 budget warning (the listing sets 4 x 1000 kept draws).
 
 ## Where the data files live
 
@@ -184,8 +187,8 @@ State on branch `paper-draft` (fd8a3f7 merges `main` at 4ac7969, release 0.2.0);
   `benchmarks/reports/bench_p2_x86_github_779957f.json` (PR #9). The earlier local records of
   unknown commit and machine (`figures/data/validation_record/`) are deleted.
 - **Tracked on `paper-draft`, not on `main`:** `figures/data/convergence_diagnostic/` (the
-  fit-level diagnostic of the pre-registration: a script and 520 + 424 fit records; commit it to
-  `main`, OUTLINE TODO 4) and `figures/data/provenance/` (GitHub activity record; excerpts of the
+  fit-level diagnostic of the pre-registration: a script and 520 + 424 fit records; not part of
+  release 0.2.0, as App. F says) and `figures/data/provenance/` (GitHub activity record; excerpts of the
   logs of CI runs 40061724239, the fast suite at 7f880e1, and 40052069815, the x86-64 weekly tier at
   779957f; the test-collection counts at the release code).
 - **Tracked on `paper-draft` since a3478d4:** `figures/data/cr_acceptance/` (the per-origin export

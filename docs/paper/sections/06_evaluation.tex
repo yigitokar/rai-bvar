@@ -84,10 +84,11 @@ weights are heavy-tailed; \eqref{eq:mcse} estimates the spread, not this bias.
 In the replication of \cref{sec:cr} (Constant arm, unemployment, $h = 8$, origin 2008Q2), an agent review
 of the quick run, recorded in the repository notes, found $-93.6$ with 1000 forecast draws, $-46$
 to $-63$ with 8000 and $-36$ with 64{,}000, against $-19.1$ for the path-integrated estimator below
-on the same 1000 draws (itself a Monte Carlo estimate), while the MCSE stayed near 1 nat.
-% [R] main-repo docs/paper/NOTES.md 8b at d58c9ef (WP23 review); benchmarks/clark_ravazzolo.py RELIABILITY_NOTE l.953-962 at c823d20 ("In the review of the quick run"); b9c66c0 commit message (-93.6); REL: regenerate via rb_tail_cell.py / figures/make_fig_lpd_estimators.py (TODO 6). The paper-repo NOTES.md 8b is the older text that calls -19.1 "exact"; do not cite it
-\todo{TODO 14 (risk 6): Proposition~\ref{prop:mcse-bound} stays out of the main text until it is
-confirmed and unit-tested.}
+on the same 1000 draws (itself a Monte Carlo estimate), while the MCSE stayed near 1 nat, the
+ceiling of the formula: before the MCMC adjustment the delta-method MCSE cannot exceed one nat, and
+it reaches one when the weight sits on a single draw (\cref{prop:mcse-bound} in \cref{app:mcse-bound}).
+% [R] main-repo docs/paper/NOTES.md 8b at d58c9ef (WP23 review); benchmarks/clark_ravazzolo.py RELIABILITY_NOTE l.953-962 at c823d20 ("In the review of the quick run"); b9c66c0 commit message (-93.6); the right panel of fig:lpd-estimators (rb_tail_cell.json) is the same cell at the acceptance budget. The paper-repo NOTES.md 8b is the older text that calls -19.1 "exact"; do not cite it
+% [V] Prop. B.5 (app:mcse-bound): proof in the appendix; tests/unit/test_lpd_mcse_bound.py (4f627bc, PR #8, 44 cases: one-hot weights give 1 with ddof=1, equal weights 0, the identity (S/ESS_K - 1)/(S - 1), the MCMC sqrt(S/ESS) factor outside the bound); passed on Linux in CI run 40061724239 at 7f880e1 (docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt); the bound is for the iid MCSE (consequence iii)
 
 \paragraph{Fix (\code{lpd\_method="integrated"}).}% design decision D-34
 Given $\theta_s$ and the drawn scale path $\lambda_{s,T+1:T+h}$, the intermediate outcomes can be
@@ -128,7 +129,7 @@ implementation, not the estimator.
   acceptance MCMC budget, with the spread across seeds and $\mathrm{ESS}_{\mathrm{K}}$.}
   \label{fig:lpd-estimators}\label{fig:Fig4}
 \end{figure}
-\todo{TODO 6: the right panel of \cref{fig:lpd-estimators} needs \code{rb\_tail\_cell.json}.}
+% [R] right panel: docs/paper/data/rb_tail_cell.json (committed in 945e43c; written by figures/rb_tail_cell.py against main 99f658a, whose src/ and benchmarks/clark_ravazzolo.py equal 7f880e1's: git diff --stat 99f658a 7f880e1 -- src benchmarks/clark_ravazzolo.py is empty); 4 x 20,000 kept draws, burn 1000, three fit seeds, 1000/8000/64,000 forecast draws; drawn by figures/make_fig_lpd_estimators.py
 
 \paragraph{Residual error.}
 The integrated estimator is still an average over draws whose weights concentrate in the tails:
@@ -204,8 +205,7 @@ is no better established than the DM $p$-value it replaces; both are best read a
 % [V] src/rai_bvar/evaluation/compare.py l.202-294 (verdict), l.337-338 (MCSE in quadrature) at d58c9ef; defaults test_level=0.10, mcs_alpha=0.25, mc_multiple=3.0, min_converged=0.95
 A convergence gate then forces ``inconclusive'' if either model converged at fewer than 95\% of
 the origins.
-% [V] compare.py l.272-281 at d58c9ef; exercised by Listing 2 (docs/paper/code/out/ex_b.txt)
-\todo{Add a unit test of \code{verdict(min_converged=...)}; none at d58c9ef.}
+% [V] compare.py l.272-281 at d58c9ef; exercised by Listing 2 (docs/paper/code/out/ex_b.txt); tests/integration/test_compare.py::test_min_converged_gates_the_verdict (4f627bc, PR #8: below min_converged a 'better' or 'worse' verdict becomes 'inconclusive' with the reason appended, at or above it and at 0.0 the row stands; either side unconverged); passed on Linux in CI run 40061724239 at 7f880e1
 A fit is converged when no chain raised an error, at least two chains ran, any empirical-Bayes
 step converged, and every primary quantity (log-likelihood, own-first-lag coefficients and
 volatility parameters; \cref{app:diagnostics}) has a rank-normalised split $\hat R$ below 1.01 and
