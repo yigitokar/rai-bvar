@@ -1,0 +1,29 @@
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+tests/mutation/test_mutants.py: 37 warnings
+  tests/mutation/test_mutants.py:46: PytestWarning: record_property is incompatible with junit_family 'xunit2' (use 'legacy' or 'xunit1')
+    @pytest.mark.mutation
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 20 durations =============================
+24.00s call     tests/mutation/test_mutants.py::test_mutant_caught[M4-G]
+11.62s call     tests/mutation/test_mutants.py::test_mutant_caught[M9-G]
+11.49s call     tests/mutation/test_mutants.py::test_mutant_caught[M10-G]
+11.01s call     tests/mutation/test_mutants.py::test_mutant_caught[M17-G]
+10.60s call     tests/mutation/test_mutants.py::test_mutant_caught[M8-S]
+6.71s call     tests/mutation/test_mutants.py::test_mutant_caught[M3-G]
+6.28s call     tests/mutation/test_mutants.py::test_mutant_caught[M11-G]
+6.19s call     tests/mutation/test_mutants.py::test_mutant_caught[M12-G]
+5.52s call     tests/mutation/test_mutants.py::test_mutant_caught[M5-G]
+5.49s call     tests/mutation/test_mutants.py::test_mutant_caught[M2-G]
+4.98s call     tests/mutation/test_mutants.py::test_mutant_caught[M1-G]
+4.97s call     tests/mutation/test_mutants.py::test_mutant_caught[M18-G]
+4.64s call     tests/mutation/test_mutants.py::test_mutant_caught[M14-G]
+4.42s call     tests/mutation/test_mutants.py::test_mutant_caught[M13-G]
+3.70s call     tests/mutation/test_mutants.py::test_mutant_caught[M8-G]
+3.66s call     tests/mutation/test_mutants.py::test_mutant_caught[M6-G]
+3.44s call     tests/mutation/test_mutants.py::test_mutant_caught[M15-G]
+3.36s call     tests/mutation/test_mutants.py::test_mutant_caught[M16-G]
+3.10s call     tests/mutation/test_mutants.py::test_mutant_caught[M7-G]
+1.58s call     tests/mutation/test_mutants.py::test_mutant_caught[M11-B]
+37 passed, 1 deselected, 37 warnings in 145.20s (0:02:25)

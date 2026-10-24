@@ -1,0 +1,1104 @@
+{
+ "benchmark": "BENCH-P2",
+ "design": "docs/phase2/DESIGN.md \u00a710.1, \u00a710.6",
+ "settings": {
+  "n": 20,
+  "lags": 4,
+  "T": 300,
+  "chains": 4,
+  "burn": 1000,
+  "draws": 10000,
+  "thin": 1,
+  "devices": 1,
+  "data_seed": 0,
+  "sweep_block": 1000,
+  "sweep_reps": 3
+ },
+ "target_s": 120.0,
+ "machine": {
+  "date": "2026-10-24T02:24:14",
+  "cpu": "AMD EPYC 7763 64-Core Processor",
+  "simd": [
+   "avx",
+   "avx2",
+   "fma"
+  ],
+  "physical_cores": 1,
+  "logical_cpus": 2,
+  "mem_bytes": 8323969024,
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "python": "3.12.3",
+  "numpy": "2.5.4",
+  "xla_flags": "",
+  "loadavg": [
+   2.23681640625,
+   2.0078125,
+   1.591796875
+  ],
+  "commit": "779957f",
+  "jax": "0.12.0.1",
+  "jaxlib": "0.12.0.1"
+ },
+ "summary": {
+  "repeats": 3,
+  "compile_cold_s": 33.99364376068115,
+  "compile_warm_s": 3.8126578330993652,
+  "wall_cold_s": 228.89126300700002,
+  "wall_warm_s": 198.443881019,
+  "run_s": 194.7997434054408,
+  "post_runner_s": 5.990118404500095,
+  "runner_ms_per_sweep": 17.193120518787037,
+  "sweep_ms_min3x1000": 16.792855800500007,
+  "peak_rss_mb": 2053.63671875,
+  "loadavg_1min": [
+   0.982421875,
+   1.72216796875,
+   1.69873046875,
+   1.71923828125,
+   1.671875,
+   1.67919921875
+  ],
+  "converged": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false
+  ],
+  "ess": {
+   "loglik": {
+    "ess_min": 1838.0607665526381,
+    "ess_per_s_min": 9.262370586154043,
+    "ess_per_s_median": 9.262370586154043
+   },
+   "h_T": {
+    "ess_min": 1930.7505872251757,
+    "ess_per_s_min": 9.72945387537707,
+    "ess_per_s_median": 35.604163815431804
+   },
+   "mu": {
+    "ess_min": 4101.812377675361,
+    "ess_per_s_min": 20.66988589727608,
+    "ess_per_s_median": 42.08021889917528
+   },
+   "sigma": {
+    "ess_min": 494.2075416106311,
+    "ess_per_s_min": 2.4904146153204554,
+    "ess_per_s_median": 3.458603796954912
+   },
+   "phi": {
+    "ess_min": 618.442007446845,
+    "ess_per_s_min": 3.116457933956816,
+    "ess_per_s_median": 4.241731213739829
+   },
+   "B_own1": {
+    "ess_min": 19671.001058409234,
+    "ess_per_s_min": 99.12626661703837,
+    "ess_per_s_median": 126.54286888263672
+   },
+   "primary": {
+    "ess_min": 494.2075416106311,
+    "ess_per_s_min": 2.4904146153204554,
+    "ess_per_s_median": 27.614803838438775
+   },
+   "cross_lag": {
+    "quantity": "B[y1.L1, y0]",
+    "ess": 9149.842846093434,
+    "ess_per_s": 46.10796160158439
+   }
+  },
+  "pass_120s_cold": false,
+  "pass_120s_warm": false
+ },
+ "runs": [
+  {
+   "kind": "cold",
+   "wall_s": 227.78781784900002,
+   "compile_s": 33.38339638710022,
+   "run_s": 194.4044214618998,
+   "post_runner_s": 6.060000721000023,
+   "runner_timing": {
+    "compile": 33.38339638710022,
+    "init": 3.539171827000004,
+    "burn": 35.314734205,
+    "sample": 182.332060959,
+    "host": 0.12469285799996044,
+    "total": 221.727817128,
+    "ms_per_sweep": 17.141231032740993
+   },
+   "runner_ms_per_sweep": 17.141231032740993,
+   "converged": false,
+   "warnings": [
+    "MCMC not converged: 1 of 101 primary quantities fail R-hat < 1.01 or bulk ESS > 400 (worst: sigma[y9] R-hat 1.011, ESS 496); increase draws, burn or thin",
+    "this composition is not order-invariant: with 20 variables its results depend on their ordering (R8; N08 \u00a7B2); gauge how much with rai_bvar.ordering_sensitivity"
+   ],
+   "chain_method": "vmap",
+   "devices": 1,
+   "gram": "packed",
+   "shapes": "Shapes(n=20, lags=4, n_det=1, k=81, q=100, T_pad=320)",
+   "loadavg_before": [
+    0.982421875,
+    0.28857421875,
+    0.1005859375
+   ],
+   "loadavg_after": [
+    1.7587890625,
+    1.06396484375,
+    0.46142578125
+   ],
+   "ess": {
+    "loglik": {
+     "count": 1,
+     "ess_min": 1838.0607665526381,
+     "ess_median": 1838.0607665526381,
+     "ess_per_s_min": 8.069179396463968,
+     "ess_per_s_median": 8.069179396463968
+    },
+    "h_T": {
+     "count": 20,
+     "ess_min": 1930.7505872251757,
+     "ess_median": 7065.428447970534,
+     "ess_per_s_min": 8.476092380432151,
+     "ess_per_s_median": 31.01758695741222
+    },
+    "mu": {
+     "count": 20,
+     "ess_min": 4101.812377675361,
+     "ess_median": 8350.561952481414,
+     "ess_per_s_min": 18.007163053796152,
+     "ess_per_s_median": 36.65938780807401
+    },
+    "sigma": {
+     "count": 20,
+     "ess_min": 494.2075416106311,
+     "ess_median": 686.3387603747822,
+     "ess_per_s_min": 2.169596013858125,
+     "ess_per_s_median": 3.0130617469181535
+    },
+    "phi": {
+     "count": 20,
+     "ess_min": 618.442007446845,
+     "ess_median": 841.7456042939651,
+     "ess_per_s_min": 2.7149915798254347,
+     "ess_per_s_median": 3.6953056236394355
+    },
+    "B_own1": {
+     "count": 20,
+     "ess_min": 19671.001058409234,
+     "ess_median": 25111.65801634888,
+     "ess_per_s_min": 86.35668599033286,
+     "ess_per_s_median": 110.24144422418294
+    },
+    "cross_lag": {
+     "quantity": "B[y1.L1, y0]",
+     "stored_draws_per_chain": 2500,
+     "ess": 9149.842846093434,
+     "ess_per_s": 40.16827121175919
+    },
+    "primary": {
+     "count": 101,
+     "ess_min": 494.2075416106311,
+     "ess_median": 5479.988847278169,
+     "ess_per_s_min": 2.169596013858125,
+     "ess_per_s_median": 24.057427210224382,
+     "rhat_max": 1.011245307946079
+    }
+   },
+   "ess_s": 0.17367048900001691,
+   "sweep_ms": {
+    "min": 16.726429053999993,
+    "all": [
+     16.735499839,
+     16.726429053999993,
+     16.89593953500003
+    ],
+    "sweeps": 1000,
+    "reps": 3
+   },
+   "peak_rss_bytes": 2257649664,
+   "machine": {
+    "date": "2026-10-24T02:01:57",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "simd": [
+     "avx",
+     "avx2",
+     "fma"
+    ],
+    "physical_cores": 1,
+    "logical_cpus": 2,
+    "mem_bytes": 8323969024,
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "numpy": "2.5.4",
+    "xla_flags": "",
+    "loadavg": [
+     1.78515625,
+     1.19091796875,
+     0.5419921875
+    ],
+    "commit": "779957f",
+    "jax": "0.12.0.1",
+    "jaxlib": "0.12.0.1",
+    "backend": "cpu",
+    "devices": 1
+   },
+   "repeat": 0
+  },
+  {
+   "kind": "warm",
+   "wall_s": 198.443881019,
+   "compile_s": 3.742013454437256,
+   "run_s": 194.70186756456275,
+   "post_runner_s": 5.983038459999989,
+   "runner_timing": {
+    "compile": 3.742013454437256,
+    "init": 0.547807859000045,
+    "burn": 18.47752208999998,
+    "sample": 173.180355049,
+    "host": 0.11603224800001044,
+    "total": 192.460842559,
+    "ms_per_sweep": 17.191897639787804
+   },
+   "runner_ms_per_sweep": 17.191897639787804,
+   "converged": false,
+   "warnings": [
+    "MCMC not converged: 1 of 101 primary quantities fail R-hat < 1.01 or bulk ESS > 400 (worst: sigma[y9] R-hat 1.011, ESS 496); increase draws, burn or thin",
+    "this composition is not order-invariant: with 20 variables its results depend on their ordering (R8; N08 \u00a7B2); gauge how much with rai_bvar.ordering_sensitivity"
+   ],
+   "chain_method": "vmap",
+   "devices": 1,
+   "gram": "packed",
+   "shapes": "Shapes(n=20, lags=4, n_det=1, k=81, q=100, T_pad=320)",
+   "loadavg_before": [
+    1.72216796875,
+    1.1875,
+    0.544921875
+   ],
+   "loadavg_after": [
+    1.6796875,
+    1.443359375,
+    0.7744140625
+   ],
+   "ess": {
+    "loglik": {
+     "count": 1,
+     "ess_min": 1838.0607665526381,
+     "ess_median": 1838.0607665526381,
+     "ess_per_s_min": 9.262370586154043,
+     "ess_per_s_median": 9.262370586154043
+    },
+    "h_T": {
+     "count": 20,
+     "ess_min": 1930.7505872251757,
+     "ess_median": 7065.428447970534,
+     "ess_per_s_min": 9.72945387537707,
+     "ess_per_s_median": 35.604163815431804
+    },
+    "mu": {
+     "count": 20,
+     "ess_min": 4101.812377675361,
+     "ess_median": 8350.561952481414,
+     "ess_per_s_min": 20.66988589727608,
+     "ess_per_s_median": 42.08021889917528
+    },
+    "sigma": {
+     "count": 20,
+     "ess_min": 494.2075416106311,
+     "ess_median": 686.3387603747822,
+     "ess_per_s_min": 2.4904146153204554,
+     "ess_per_s_median": 3.458603796954912
+    },
+    "phi": {
+     "count": 20,
+     "ess_min": 618.442007446845,
+     "ess_median": 841.7456042939651,
+     "ess_per_s_min": 3.116457933956816,
+     "ess_per_s_median": 4.241731213739829
+    },
+    "B_own1": {
+     "count": 20,
+     "ess_min": 19671.001058409234,
+     "ess_median": 25111.65801634888,
+     "ess_per_s_min": 99.12626661703837,
+     "ess_per_s_median": 126.54286888263672
+    },
+    "cross_lag": {
+     "quantity": "B[y1.L1, y0]",
+     "stored_draws_per_chain": 2500,
+     "ess": 9149.842846093434,
+     "ess_per_s": 46.10796160158439
+    },
+    "primary": {
+     "count": 101,
+     "ess_min": 494.2075416106311,
+     "ess_median": 5479.988847278169,
+     "ess_per_s_min": 2.4904146153204554,
+     "ess_per_s_median": 27.614803838438775,
+     "rhat_max": 1.011245307946079
+    }
+   },
+   "ess_s": 0.17616268699998727,
+   "sweep_ms": {
+    "min": 16.68179454400001,
+    "all": [
+     16.754674267999913,
+     16.74652701800005,
+     16.68179454400001
+    ],
+    "sweeps": 1000,
+    "reps": 3
+   },
+   "peak_rss_bytes": 2048692224,
+   "machine": {
+    "date": "2026-10-24T02:06:11",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "simd": [
+     "avx",
+     "avx2",
+     "fma"
+    ],
+    "physical_cores": 1,
+    "logical_cpus": 2,
+    "mem_bytes": 8323969024,
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "numpy": "2.5.4",
+    "xla_flags": "",
+    "loadavg": [
+     1.759765625,
+     1.5,
+     0.8310546875
+    ],
+    "commit": "779957f",
+    "jax": "0.12.0.1",
+    "jaxlib": "0.12.0.1",
+    "backend": "cpu",
+    "devices": 1
+   },
+   "repeat": 0
+  },
+  {
+   "kind": "cold",
+   "wall_s": 228.89126300700002,
+   "compile_s": 33.99364376068115,
+   "run_s": 194.89761924631887,
+   "post_runner_s": 5.960751086000073,
+   "runner_timing": {
+    "compile": 33.99364376068115,
+    "init": 3.664152381000008,
+    "burn": 35.631006275000004,
+    "sample": 183.153475921,
+    "host": 0.1292921929999693,
+    "total": 222.93051192099995,
+    "ms_per_sweep": 17.19434339778627
+   },
+   "runner_ms_per_sweep": 17.19434339778627,
+   "converged": false,
+   "warnings": [
+    "MCMC not converged: 1 of 101 primary quantities fail R-hat < 1.01 or bulk ESS > 400 (worst: sigma[y9] R-hat 1.011, ESS 496); increase draws, burn or thin",
+    "this composition is not order-invariant: with 20 variables its results depend on their ordering (R8; N08 \u00a7B2); gauge how much with rai_bvar.ordering_sensitivity"
+   ],
+   "chain_method": "vmap",
+   "devices": 1,
+   "gram": "packed",
+   "shapes": "Shapes(n=20, lags=4, n_det=1, k=81, q=100, T_pad=320)",
+   "loadavg_before": [
+    1.69873046875,
+    1.49169921875,
+    0.83203125
+   ],
+   "loadavg_after": [
+    1.77197265625,
+    1.68505859375,
+    1.06640625
+   ],
+   "ess": {
+    "loglik": {
+     "count": 1,
+     "ess_min": 1838.0607665526381,
+     "ess_median": 1838.0607665526381,
+     "ess_per_s_min": 8.030279279364306,
+     "ess_per_s_median": 8.030279279364306
+    },
+    "h_T": {
+     "count": 20,
+     "ess_min": 1930.7505872251757,
+     "ess_median": 7065.428447970534,
+     "ess_per_s_min": 8.435230606273201,
+     "ess_per_s_median": 30.868056539818458
+    },
+    "mu": {
+     "count": 20,
+     "ess_min": 4101.812377675361,
+     "ess_median": 8350.561952481414,
+     "ess_per_s_min": 17.920353637744217,
+     "ess_per_s_median": 36.48265924517195
+    },
+    "sigma": {
+     "count": 20,
+     "ess_min": 494.2075416106311,
+     "ess_median": 686.3387603747822,
+     "ess_per_s_min": 2.159136767031239,
+     "ess_per_s_median": 2.9985362977956584
+    },
+    "phi": {
+     "count": 20,
+     "ess_min": 618.442007446845,
+     "ess_median": 841.7456042939651,
+     "ess_per_s_min": 2.701903075382705,
+     "ess_per_s_median": 3.6774911948833218
+    },
+    "B_own1": {
+     "count": 20,
+     "ess_min": 19671.001058409234,
+     "ess_median": 25111.65801634888,
+     "ess_per_s_min": 85.94037535547021,
+     "ess_per_s_median": 109.70998930431394
+    },
+    "cross_lag": {
+     "quantity": "B[y1.L1, y0]",
+     "stored_draws_per_chain": 2500,
+     "ess": 9149.842846093434,
+     "ess_per_s": 39.97462692935383
+    },
+    "primary": {
+     "count": 101,
+     "ess_min": 494.2075416106311,
+     "ess_median": 5479.988847278169,
+     "ess_per_s_min": 2.159136767031239,
+     "ess_per_s_median": 23.941450517971838,
+     "rhat_max": 1.011245307946079
+    }
+   },
+   "ess_s": 0.17332193900006132,
+   "sweep_ms": {
+    "min": 16.630007232000025,
+    "all": [
+     16.630007232000025,
+     16.63973429200007,
+     16.68513001000008
+    ],
+    "sweeps": 1000,
+    "reps": 3
+   },
+   "peak_rss_bytes": 2260967424,
+   "machine": {
+    "date": "2026-10-24T02:10:55",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "simd": [
+     "avx",
+     "avx2",
+     "fma"
+    ],
+    "physical_cores": 1,
+    "logical_cpus": 2,
+    "mem_bytes": 8323969024,
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "numpy": "2.5.4",
+    "xla_flags": "",
+    "loadavg": [
+     1.7822265625,
+     1.70361328125,
+     1.10595703125
+    ],
+    "commit": "779957f",
+    "jax": "0.12.0.1",
+    "jaxlib": "0.12.0.1",
+    "backend": "cpu",
+    "devices": 1
+   },
+   "repeat": 1
+  },
+  {
+   "kind": "warm",
+   "wall_s": 198.27871306600002,
+   "compile_s": 3.8126578330993652,
+   "run_s": 194.46605523290066,
+   "post_runner_s": 5.989250354999967,
+   "runner_timing": {
+    "compile": 3.8126578330993652,
+    "init": 0.5891649960000223,
+    "burn": 18.61211038800002,
+    "sample": 172.81888729699995,
+    "host": 0.10974193100003049,
+    "total": 192.28946271100006,
+    "ms_per_sweep": 17.15695415127742
+   },
+   "runner_ms_per_sweep": 17.15695415127742,
+   "converged": false,
+   "warnings": [
+    "MCMC not converged: 1 of 101 primary quantities fail R-hat < 1.01 or bulk ESS > 400 (worst: sigma[y9] R-hat 1.011, ESS 496); increase draws, burn or thin",
+    "this composition is not order-invariant: with 20 variables its results depend on their ordering (R8; N08 \u00a7B2); gauge how much with rai_bvar.ordering_sensitivity"
+   ],
+   "chain_method": "vmap",
+   "devices": 1,
+   "gram": "packed",
+   "shapes": "Shapes(n=20, lags=4, n_det=1, k=81, q=100, T_pad=320)",
+   "loadavg_before": [
+    1.71923828125,
+    1.69189453125,
+    1.10498046875
+   ],
+   "loadavg_after": [
+    1.5322265625,
+    1.66015625,
+    1.2109375
+   ],
+   "ess": {
+    "loglik": {
+     "count": 1,
+     "ess_min": 1838.0607665526381,
+     "ess_median": 1838.0607665526381,
+     "ess_per_s_min": 9.270086224237355,
+     "ess_per_s_median": 9.270086224237355
+    },
+    "h_T": {
+     "count": 20,
+     "ess_min": 1930.7505872251757,
+     "ess_median": 7065.428447970534,
+     "ess_per_s_min": 9.73755859804525,
+     "ess_per_s_median": 35.63382240441868
+    },
+    "mu": {
+     "count": 20,
+     "ess_min": 4101.812377675361,
+     "ess_median": 8350.561952481414,
+     "ess_per_s_min": 20.6871040983104,
+     "ess_per_s_median": 42.11527210034798
+    },
+    "sigma": {
+     "count": 20,
+     "ess_min": 494.2075416106311,
+     "ess_median": 686.3387603747822,
+     "ess_per_s_min": 2.492489153115124,
+     "ess_per_s_median": 3.461484845054063
+    },
+    "phi": {
+     "count": 20,
+     "ess_min": 618.442007446845,
+     "ess_median": 841.7456042939651,
+     "ess_per_s_min": 3.1190539714719017,
+     "ess_per_s_median": 4.245264614027314
+    },
+    "B_own1": {
+     "count": 20,
+     "ess_min": 19671.001058409234,
+     "ess_median": 25111.65801634888,
+     "ess_per_s_min": 99.20883968952052,
+     "ess_per_s_median": 126.64828023162572
+    },
+    "cross_lag": {
+     "quantity": "B[y1.L1, y0]",
+     "stored_draws_per_chain": 2500,
+     "ess": 9149.842846093434,
+     "ess_per_s": 46.146369948688196
+    },
+    "primary": {
+     "count": 101,
+     "ess_min": 494.2075416106311,
+     "ess_median": 5479.988847278169,
+     "ess_per_s_min": 2.492489153115124,
+     "ess_per_s_median": 27.63780721864012,
+     "rhat_max": 1.011245307946079
+    }
+   },
+   "ess_s": 0.1773240850000093,
+   "sweep_ms": {
+    "min": 16.909308967000015,
+    "all": [
+     16.921753357999933,
+     16.909308967000015,
+     16.969703957000092
+    ],
+    "sweeps": 1000,
+    "reps": 3
+   },
+   "peak_rss_bytes": 2048360448,
+   "machine": {
+    "date": "2026-10-24T02:15:09",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "simd": [
+     "avx",
+     "avx2",
+     "fma"
+    ],
+    "physical_cores": 1,
+    "logical_cpus": 2,
+    "mem_bytes": 8323969024,
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "numpy": "2.5.4",
+    "xla_flags": "",
+    "loadavg": [
+     1.73046875,
+     1.6982421875,
+     1.2490234375
+    ],
+    "commit": "779957f",
+    "jax": "0.12.0.1",
+    "jaxlib": "0.12.0.1",
+    "backend": "cpu",
+    "devices": 1
+   },
+   "repeat": 1
+  },
+  {
+   "kind": "cold",
+   "wall_s": 231.67972087800013,
+   "compile_s": 34.6407790184021,
+   "run_s": 197.03894185959803,
+   "post_runner_s": 6.0231151919999775,
+   "runner_timing": {
+    "compile": 34.6407790184021,
+    "init": 3.599184606000108,
+    "burn": 36.2893830160001,
+    "sample": 185.16813060100003,
+    "host": 0.11830678199999056,
+    "total": 225.65660568600015,
+    "ms_per_sweep": 17.373427539904764
+   },
+   "runner_ms_per_sweep": 17.373427539904764,
+   "converged": false,
+   "warnings": [
+    "MCMC not converged: 1 of 101 primary quantities fail R-hat < 1.01 or bulk ESS > 400 (worst: sigma[y9] R-hat 1.011, ESS 496); increase draws, burn or thin",
+    "this composition is not order-invariant: with 20 variables its results depend on their ordering (R8; N08 \u00a7B2); gauge how much with rai_bvar.ordering_sensitivity"
+   ],
+   "chain_method": "vmap",
+   "devices": 1,
+   "gram": "packed",
+   "shapes": "Shapes(n=20, lags=4, n_det=1, k=81, q=100, T_pad=320)",
+   "loadavg_before": [
+    1.671875,
+    1.6865234375,
+    1.24755859375
+   ],
+   "loadavg_after": [
+    1.697265625,
+    1.759765625,
+    1.38330078125
+   ],
+   "ess": {
+    "loglik": {
+     "count": 1,
+     "ess_min": 1838.0607665526381,
+     "ess_median": 1838.0607665526381,
+     "ess_per_s_min": 7.933628198389188,
+     "ess_per_s_median": 7.933628198389188
+    },
+    "h_T": {
+     "count": 20,
+     "ess_min": 1930.7505872251757,
+     "ess_median": 7065.428447970534,
+     "ess_per_s_min": 8.333705599731307,
+     "ess_per_s_median": 30.496533840746068
+    },
+    "mu": {
+     "count": 20,
+     "ess_min": 4101.812377675361,
+     "ess_median": 8350.561952481414,
+     "ess_per_s_min": 17.704667297295856,
+     "ess_per_s_median": 36.04356013912294
+    },
+    "sigma": {
+     "count": 20,
+     "ess_min": 494.2075416106311,
+     "ess_median": 686.3387603747822,
+     "ess_per_s_min": 2.133149762688445,
+     "ess_per_s_median": 2.962446422905526
+    },
+    "phi": {
+     "count": 20,
+     "ess_min": 618.442007446845,
+     "ess_median": 841.7456042939651,
+     "ess_per_s_min": 2.6693834277040995,
+     "ess_per_s_median": 3.6332295338754257
+    },
+    "B_own1": {
+     "count": 20,
+     "ess_min": 19671.001058409234,
+     "ess_median": 25111.65801634888,
+     "ess_per_s_min": 84.90601155708296,
+     "ess_per_s_median": 108.38953845931293
+    },
+    "cross_lag": {
+     "quantity": "B[y1.L1, y0]",
+     "stored_draws_per_chain": 2500,
+     "ess": 9149.842846093434,
+     "ess_per_s": 39.49349909184169
+    },
+    "primary": {
+     "count": 101,
+     "ess_min": 494.2075416106311,
+     "ess_median": 5479.988847278169,
+     "ess_per_s_min": 2.133149762688445,
+     "ess_per_s_median": 23.653295275523348,
+     "rhat_max": 1.011245307946079
+    }
+   },
+   "ess_s": 0.17147384500003682,
+   "sweep_ms": {
+    "min": 16.89518779200011,
+    "all": [
+     16.89518779200011,
+     16.91812391400003,
+     16.900602023000143
+    ],
+    "sweeps": 1000,
+    "reps": 3
+   },
+   "peak_rss_bytes": 2274742272,
+   "machine": {
+    "date": "2026-10-24T02:19:57",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "simd": [
+     "avx",
+     "avx2",
+     "fma"
+    ],
+    "physical_cores": 1,
+    "logical_cpus": 2,
+    "mem_bytes": 8323969024,
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "numpy": "2.5.4",
+    "xla_flags": "",
+    "loadavg": [
+     1.73876953125,
+     1.7666015625,
+     1.40576171875
+    ],
+    "commit": "779957f",
+    "jax": "0.12.0.1",
+    "jaxlib": "0.12.0.1",
+    "backend": "cpu",
+    "devices": 1
+   },
+   "repeat": 2
+  },
+  {
+   "kind": "warm",
+   "wall_s": 200.41150748300015,
+   "compile_s": 3.9185597896575928,
+   "run_s": 196.49294769334256,
+   "post_runner_s": 5.990986454000222,
+   "runner_timing": {
+    "compile": 3.9185597896575928,
+    "init": 0.5652299000000767,
+    "burn": 18.88682889200004,
+    "sample": 174.6884552800002,
+    "host": 0.11601751500006685,
+    "total": 194.42052102899993,
+    "ms_per_sweep": 17.337055397212293
+   },
+   "runner_ms_per_sweep": 17.337055397212293,
+   "converged": false,
+   "warnings": [
+    "MCMC not converged: 1 of 101 primary quantities fail R-hat < 1.01 or bulk ESS > 400 (worst: sigma[y9] R-hat 1.011, ESS 496); increase draws, burn or thin",
+    "this composition is not order-invariant: with 20 variables its results depend on their ordering (R8; N08 \u00a7B2); gauge how much with rai_bvar.ordering_sensitivity"
+   ],
+   "chain_method": "vmap",
+   "devices": 1,
+   "gram": "packed",
+   "shapes": "Shapes(n=20, lags=4, n_det=1, k=81, q=100, T_pad=320)",
+   "loadavg_before": [
+    1.67919921875,
+    1.75341796875,
+    1.4033203125
+   ],
+   "loadavg_after": [
+    2.33349609375,
+    1.9755859375,
+    1.556640625
+   ],
+   "ess": {
+    "loglik": {
+     "count": 1,
+     "ess_min": 1838.0607665526381,
+     "ess_median": 1838.0607665526381,
+     "ess_per_s_min": 9.171433265669892,
+     "ess_per_s_median": 9.171433265669892
+    },
+    "h_T": {
+     "count": 20,
+     "ess_min": 1930.7505872251757,
+     "ess_median": 7065.428447970534,
+     "ess_per_s_min": 9.633930763127218,
+     "ess_per_s_median": 35.25460457189494
+    },
+    "mu": {
+     "count": 20,
+     "ess_min": 4101.812377675361,
+     "ess_median": 8350.561952481414,
+     "ess_per_s_min": 20.46695037221501,
+     "ess_per_s_median": 41.66707819005726
+    },
+    "sigma": {
+     "count": 20,
+     "ess_min": 494.2075416106311,
+     "ess_median": 686.3387603747822,
+     "ess_per_s_min": 2.4659638950749976,
+     "ess_per_s_median": 3.424647461588505
+    },
+    "phi": {
+     "count": 20,
+     "ess_min": 618.442007446845,
+     "ess_median": 841.7456042939651,
+     "ess_per_s_min": 3.085860763256342,
+     "ess_per_s_median": 4.200086186993858
+    },
+    "B_own1": {
+     "count": 20,
+     "ess_min": 19671.001058409234,
+     "ess_median": 25111.65801634888,
+     "ess_per_s_min": 98.15305171574452,
+     "ess_per_s_median": 125.30047965673313
+    },
+    "cross_lag": {
+     "quantity": "B[y1.L1, y0]",
+     "stored_draws_per_chain": 2500,
+     "ess": 9149.842846093434,
+     "ess_per_s": 45.655276790278954
+    },
+    "primary": {
+     "count": 101,
+     "ess_min": 494.2075416106311,
+     "ess_median": 5479.988847278169,
+     "ess_per_s_min": 2.4659638950749976,
+     "ess_per_s_median": 27.343683584352096,
+     "rhat_max": 1.011245307946079
+    }
+   },
+   "ess_s": 0.17472989300017616,
+   "sweep_ms": {
+    "min": 16.85928254700002,
+    "all": [
+     16.897968515,
+     16.85928254700002,
+     16.91334724900003
+    ],
+    "sweeps": 1000,
+    "reps": 3
+   },
+   "peak_rss_bytes": 2049138688,
+   "machine": {
+    "date": "2026-10-24T02:24:13",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "simd": [
+     "avx",
+     "avx2",
+     "fma"
+    ],
+    "physical_cores": 1,
+    "logical_cpus": 2,
+    "mem_bytes": 8323969024,
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "numpy": "2.5.4",
+    "xla_flags": "",
+    "loadavg": [
+     2.23681640625,
+     2.0078125,
+     1.591796875
+    ],
+    "commit": "779957f",
+    "jax": "0.12.0.1",
+    "jaxlib": "0.12.0.1",
+    "backend": "cpu",
+    "devices": 1
+   },
+   "repeat": 2
+  }
+ ],
+ "kernels": {
+  "shape": {
+   "lanes": 80,
+   "n": 20,
+   "q": 100,
+   "P": 5050,
+   "T_pad": 320
+  },
+  "kernels": {
+   "gram_packed": {
+    "ms_min": 6.715852000070299,
+    "ms_median": 6.887813000048482,
+    "reps": 50,
+    "per_call_units": 1,
+    "compile_s": 0.0597535169999901,
+    "cost": {
+     "flops": 258560000.0,
+     "bytes accessed": 26036800.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 204800,
+     "output_size_in_bytes": 6400000,
+     "temp_size_in_bytes": 3232000
+    }
+   },
+   "gram_batched": {
+    "ms_min": 13.75071300003583,
+    "ms_median": 13.911941000060324,
+    "reps": 50,
+    "per_call_units": 1,
+    "compile_s": 0.05300348499986285,
+    "cost": {
+     "flops": 516980096.0,
+     "bytes accessed": 60876800.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 204800,
+     "output_size_in_bytes": 6400000,
+     "temp_size_in_bytes": 26880000
+    }
+   },
+   "precision_draw": {
+    "ms_min": 3.3326380000744393,
+    "ms_median": 3.5746010000821116,
+    "reps": 50,
+    "per_call_units": 1,
+    "compile_s": 0.29194910399996843,
+    "cost": {
+     "flops": 4928577.0,
+     "transcendentals": 8000.0,
+     "bytes accessed": 39525052.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 6528000,
+     "output_size_in_bytes": 64744,
+     "temp_size_in_bytes": 12928848
+    }
+   },
+   "sv_indicators": {
+    "ms_min": 1.475306999964232,
+    "ms_median": 1.5461880000202655,
+    "reps": 50,
+    "per_call_units": 1,
+    "compile_s": 0.130916033999938,
+    "cost": {
+     "flops": 6016000.0,
+     "transcendentals": 281600.0,
+     "bytes accessed": 14643696.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 615040,
+     "output_size_in_bytes": 307216,
+     "temp_size_in_bytes": 4096000
+    }
+   },
+   "sv_awol": {
+    "ms_min": 0.36748699994859635,
+    "ms_median": 0.42037599996547215,
+    "reps": 50,
+    "per_call_units": 1,
+    "compile_s": 0.2864232259998971,
+    "cost": {
+     "flops": 515446.0,
+     "transcendentals": 80.0,
+     "bytes accessed": 8218754.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 514560,
+     "output_size_in_bytes": 205440,
+     "temp_size_in_bytes": 1435144
+    }
+   },
+   "sv_exact": {
+    "ms_min": 0.9475710000970139,
+    "ms_median": 1.0566549999566632,
+    "reps": 50,
+    "per_call_units": 1,
+    "compile_s": 0.14128621599979851,
+    "cost": {
+     "flops": 2303920.0,
+     "transcendentals": 332800.0,
+     "bytes accessed": 11139480.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 615680,
+     "output_size_in_bytes": 640,
+     "temp_size_in_bytes": 2867840
+    }
+   },
+   "sv_core": {
+    "ms_min": 5.138203000115027,
+    "ms_median": 5.310895000093296,
+    "reps": 50,
+    "per_call_units": 1,
+    "compile_s": 4.172361056,
+    "cost": {
+     "flops": 26167360.0,
+     "transcendentals": 1028640.0,
+     "bytes accessed": 63804892.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 828800,
+     "output_size_in_bytes": 623480,
+     "temp_size_in_bytes": 6156232
+    }
+   },
+   "sweep": {
+    "ms_min": 16.67931000000067,
+    "ms_median": 16.710500964999255,
+    "reps": 5,
+    "per_call_units": 200,
+    "compile_s": 8.963766265999993,
+    "cost": {
+     "flops": 307481568.0,
+     "transcendentals": 1103840.0,
+     "bytes accessed": 145901120.0
+    },
+    "memory": {
+     "argument_size_in_bytes": 687456,
+     "output_size_in_bytes": 687584,
+     "temp_size_in_bytes": 17526472
+    }
+   }
+  },
+  "derived": {
+   "gram_batched_over_packed": 2.0475008978595555,
+   "sv_indicators+sv_awol": 1.8427939999128284
+  },
+  "budget_ms": {
+   "gram_packed": 1.1,
+   "precision_draw": 1.9,
+   "sv_indicators+sv_awol": 1.5,
+   "sv_exact": 0.4,
+   "sweep": 5.6
+  },
+  "machine": {
+   "date": "2026-10-24T02:24:59",
+   "cpu": "AMD EPYC 7763 64-Core Processor",
+   "simd": [
+    "avx",
+    "avx2",
+    "fma"
+   ],
+   "physical_cores": 1,
+   "logical_cpus": 2,
+   "mem_bytes": 8323969024,
+   "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+   "machine": "x86_64",
+   "python": "3.12.3",
+   "numpy": "2.5.4",
+   "xla_flags": "",
+   "loadavg": [
+    1.85693359375,
+    1.93017578125,
+    1.58447265625
+   ],
+   "commit": "779957f",
+   "jax": "0.12.0.1",
+   "jaxlib": "0.12.0.1",
+   "backend": "cpu",
+   "devices": 1
+  }
+ }
+}

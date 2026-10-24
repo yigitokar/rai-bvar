@@ -1,0 +1,43 @@
+{
+ "commit": "7f880e18524b8e232f7ffc8d86e7a9e0419ce8ce",
+ "requested": "7f880e1",
+ "dirty": false,
+ "started_utc": "2026-10-24T04:17:19+00:00",
+ "machine": {
+  "model": "Mac17,6",
+  "cpu": "Apple M5 Max",
+  "ncpu": 18,
+  "os": "macOS-26.6.2-arm64-arm-64bit",
+  "load_at_start": [
+   4.68115234375,
+   3.8896484375,
+   3.611328125
+  ]
+ },
+ "versions": {
+  "python": "3.12.13",
+  "jax": "0.12.0.1",
+  "numpy": "2.5.4",
+  "scipy": "1.18.1"
+ },
+ "markers": "(slow or network) and not bench",
+ "directories": [
+  "tests/geweke",
+  "tests/sbc",
+  "tests/mutation",
+  "tests/parity",
+  "tests/analytic",
+  "tests/mcmc/blocks",
+  "tests/validation",
+  "tests/contract"
+ ],
+ "excluded": {
+  "tests/unit": "its slow Phase 1 EB tests hit an intermittent macOS Accelerate heap corruption in one process (issue #3); they pass in isolation and feed no paper table"
+ },
+ "finished_utc": "2026-10-24T07:18:44+00:00",
+ "load_at_end": [
+  3.36279296875,
+  3.68359375,
+  4.13671875
+ ]
+}

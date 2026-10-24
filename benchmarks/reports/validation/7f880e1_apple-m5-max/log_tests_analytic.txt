@@ -1,0 +1,23 @@
+...........................................                              [100%]
+============================= slowest 20 durations =============================
+15.14s call     tests/analytic/test_mode1_quadrature.py::test_a5_mode1_constant_n20[weighted]
+13.41s call     tests/analytic/test_hierarchy.py::test_mh_lambda_matches_quadrature_posterior_long_chains[glp-bounds]
+13.15s call     tests/analytic/test_mh_covid.py::test_mh_two_hyperparameters_match_2d_quadrature[origin-2020-03-lambda-s0]
+12.95s call     tests/analytic/test_hierarchy.py::test_mh_lambda_matches_quadrature_posterior_simulated_data
+12.71s call     tests/analytic/test_mh_covid.py::test_mh_two_hyperparameters_match_2d_quadrature[origin-2020-04-s0-s1]
+12.19s call     tests/analytic/test_mode1_quadrature.py::test_a5_extension_iw_equivalent[n20]
+11.10s call     tests/analytic/test_mh_covid.py::test_mh_two_hyperparameters_match_2d_quadrature[window-2020-05-s2-rho]
+9.70s call     tests/analytic/test_mh_covid.py::test_mh_at_covid_origins_mixes_with_default_settings[2020Q2-0]
+9.40s call     tests/analytic/test_mh_covid.py::test_mh_two_hyperparameters_match_2d_quadrature[window-2021-01-s2-rho]
+9.36s call     tests/analytic/test_hierarchy.py::test_mh_lambda_matches_quadrature_posterior_long_chains[truncated-at-0.3]
+9.21s call     tests/analytic/test_mh_covid.py::test_mh_at_covid_origins_mixes_with_default_settings[2020Q1-0]
+9.11s call     tests/analytic/test_mcmc_twin.py::test_a4_chan_asymmetric_prior[n20]
+8.36s call     tests/analytic/test_conjugate.py::test_mh_draws_integrate_over_the_hyperparameter_draws
+8.15s call     tests/analytic/test_mcmc_twin.py::test_a1_dummies_realistic_size
+8.04s call     tests/analytic/test_mh_covid.py::test_mh_rolling_windows_after_t_star_mix_with_default_settings[0-2020-05]
+8.03s call     tests/analytic/test_mh_covid.py::test_mh_rolling_windows_after_t_star_mix_with_default_settings[2-2020-05]
+7.72s call     tests/analytic/test_mh_covid.py::test_mh_rolling_windows_after_t_star_mix_with_default_settings[0-2021-01]
+7.64s call     tests/analytic/test_mh_covid.py::test_mh_at_covid_origins_mixes_with_default_settings[2020Q2-2]
+7.58s call     tests/analytic/test_mode1_quadrature.py::test_a5_mode1_constant_n20[auto]
+7.49s call     tests/analytic/test_mh_covid.py::test_mh_rolling_windows_after_t_star_mix_with_default_settings[1-2020-05]
+43 passed, 256 deselected in 323.40s (0:05:23)
