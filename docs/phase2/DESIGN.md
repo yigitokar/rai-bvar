@@ -2251,6 +2251,42 @@ from that artifact together with its `meta.json`. Concurrency: the group is now
 `cancel-in-progress`, so a merge during the Sunday run cancelled it. A new push to a PR still cancels that PR's
 older run, and two manual dispatches on one ref still share a group, as before.
 
+**Amendment (2026-10-24): weekly tier sharded.** *Measurement.* The single weekly job did not finish on x86-64
+Linux: run 40052069815 (`779957f`, AMD EPYC 7763, 2 vCPU) hit the 330 min step timeout after 260 of 482 tests
+(53%); run 40106532730 (`8f2c969`, EPYC 9V45, 4 vCPU) passed all 483 in 273 min. Minutes per directory, cold
+XLA cache, from the progress-line timestamps (7763) and `junit.xml` (9V45), next to the local release record
+(`benchmarks/reports/validation/7f880e1_apple-m5-max/summary.txt`):
+
+| Directory | EPYC 7763, 2 vCPU | EPYC 9V45, 4 vCPU | Apple M5 Max |
+| :- | -: | -: | -: |
+| `tests/geweke` | 273.6 | 95.7 | 83.5 |
+| `tests/sbc` | not reached | 83.8 | 82.3 |
+| `tests/unit` | not reached | 52.9 | excluded (issue #3) |
+| `tests/analytic` | 23.6 | 12.0 | 5.5 |
+| `tests/mcmc` | 14.3 (to `runner/test_chunking.py`) | 11.2 | 3.4 (`blocks` only) |
+| `tests/integration` | 10.5 | 4.8 | — |
+| `tests/contract` | 7.3 | 2.8 | 0.5 |
+| `tests/mutation` | not reached | 7.0 | 2.5 |
+| `tests/parity` | not reached | 3.1 | 3.8 |
+
+The 7763 takes 2.0–2.9× the 9V45's time per directory. Gandy–Scott reruns (§9.5) add to that and depend on the
+CPU's rounding: `test_g_full_inexact_recorded[structural_sv_outliers_t]` ran 2 stages on the 7763 (69.7 min),
+1 on the 9V45 (6.4 min) and 2 on the M5 Max (22.3 min); `test_g_full[structural_sv]` ran 1, 2 and 3. Geweke alone
+on the 7763 (274 min) leaves no room under the 6 h job limit. *Decision.* The `nightly` job is a matrix of six
+shards, defined in `tools/weekly_shards.py`: `tests/geweke` and `tests/sbc` each split by `-k structural` /
+`-k "not structural"`, `tests/unit`, and the rest (`tests` with those three directories `--ignore`d, so a new
+directory lands there). On the 9V45 the shards take 55, 40, 43, 41, 53 and 41 min; on the 7763 the two Geweke
+shards took 160 and 113. A `nightly-plan` job collects the tier and every shard with `pytest --collect-only`, fails
+unless every test of the tier is in exactly one shard, and passes the matrix on. Each shard runs the same
+`-m "$TIER_MARKERS"` (now set once at the workflow level) with `fail-fast: false`. Its timeouts are 240 min for
+the test step and 270 min for the job. Its XLA cache prefix carries the shard name (`xla-slow-<shard>-…`):
+the programs differ by shard, and concurrent shards cannot save under one key. Its validation record is the
+artifact `validation-record-<sha>-<attempt>-<shard>`, whose `meta.json` adds `shard` and `shard_args`. A
+`nightly-record` job merges the shard records into `validation-record-<sha>-<attempt>`, one directory per shard,
+because two shards each write `geweke.jsonl` or `sbc.jsonl` and each shard ran on its own CPU. No test, prior,
+setting, tolerance or criterion changed. This replaces the 330/360 min timeouts of the previous amendment and
+the nightly tier's single-job budget of ≤ 3 h, which no x86 runner met.
+
 ---
 
 ## 10. Performance plan
