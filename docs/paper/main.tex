@@ -1,3 +1,5 @@
+\ifdefined\pdftexversion\pdfoutput=1 \fi% arXiv: pdfLaTeX to PDF (keep in the first 5 lines; pdfTeX
+% only: tectonic defines \pdfoutput too, and a positive value there would send hyperref to pdfTeX)
 % rai-bvar paper: master file (arXiv preprint, article class).
 %
 % Build:   make            (from docs/paper; runs tectonic, then checks the log)
@@ -26,7 +28,8 @@
   \usepackage{fontspec}
 \fi
 \usepackage[margin=1in]{geometry}
-\usepackage{microtype}
+% no font expansion: XeTeX (tectonic) has none, so pdfTeX (arXiv) then breaks lines nearly as tectonic
+\usepackage[expansion=false]{microtype}
 
 % ------------------------------------------------------------------------- mathematics
 \usepackage{amsmath,amssymb,amsthm}
@@ -89,7 +92,15 @@
 % mode, in captions and footnotes. Line breaks are allowed after '_', '.', '/', ':', ',', '=', ']',
 % ')' and '-' so long names do not run into the margin.
 \makeatletter
-\DeclareUrlCommand\rb@codeurl{\urlstyle{tt}%
+% pdfTeX (T1, arXiv): url sets ' and ` in the T1 typewriter font, whose glyphs in those slots are
+% the curly quotes; code needs the straight ones (textcomp). XeTeX (TU) prints them straight already.
+\ifPDFTeX
+  \def\rb@codequotes{\expandafter\def\expandafter\UrlSpecials\expandafter{\UrlSpecials
+    \do\'{\mbox{\textquotesingle}}\do\`{\mbox{\textasciigrave}}}}
+\else
+  \let\rb@codequotes\relax
+\fi
+\DeclareUrlCommand\rb@codeurl{\urlstyle{tt}\rb@codequotes
   \def\UrlBreaks{\do\_\do\.\do\/\do\:\do\,\do\=\do\]\do\)\do\-}}
 \DeclareUrlCommand\rb@accurl{\urlstyle{tt}%
   \def\UrlBreaks{\do\.\do\[\do\]\do\,\do\=\do\(\do\)\do\_\do\-}}
@@ -342,6 +353,11 @@ sampling; density forecasts; sampler validation; reproducibility; Python; JAX.
 \FloatBarrier
 \clearpage
 \appendix
+% cleveref names the appendix sections "Appendix" by itself only with older LaTeX kernels (the
+% tectonic bundle); with the TeX Live 2026 kernel (the pdfLaTeX test of ARXIV_SUBMISSION.md) it
+% prints "Section J". The aliases give "Appendix" under both.
+\crefalias{section}{appendix}\crefalias{subsection}{subappendix}%
+\crefalias{subsubsection}{subsubappendix}%
 \rbinput{appendix}{Appendices}{app:main}
 
 \FloatBarrier

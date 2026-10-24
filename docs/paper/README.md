@@ -20,7 +20,8 @@ submission is in `AUTHOR_TODO.md`.
 | `collect_todos.py` | regenerates `AUTHOR_TODO.md` (census of `\todo` marks, which must be 0, and the post-submission items) |
 | `texmarks.py` | shared parser for the draft marks |
 | `build.sh`, `Makefile` | build and checks |
-| `make_arxiv.sh` | writes `arxiv.tar.gz` for arXiv (`make arxiv`) |
+| `make_arxiv.sh` | writes `arxiv.tar.gz` for arXiv (`make arxiv`) and tests it with tectonic and pdfLaTeX |
+| `ARXIV_SUBMISSION.md` | the arXiv metadata to paste, the file to upload, its pdfLaTeX test and the submission steps |
 
 ## Building
 
@@ -30,12 +31,14 @@ make pdf                 # tectonic + log checks (build.sh)
 make                     # regenerate the figures first, then the PDF
 make tables              # regenerate the appendix table bodies (figures/tables/*.tex)
 make arxiv               # build, then write arxiv.tar.gz (ARXIV_TEST=1: also compile it in a temp dir)
+make arxiv ARXIV_PDFLATEX=1   # ... and compile it with pdfLaTeX in the TeX Live docker image, as arXiv does
 tectonic main.tex --keep-intermediates --keep-logs    # the bare build
 STRICT=1 ./build.sh      # also fail on undefined references and duplicate labels
 ```
 
 The build needs [tectonic](https://tectonic-typesetting.github.io/) (XeTeX). `main.tex` also has a
-pdfTeX branch (T1 fonts), which is untested. `build.sh` lists, from `main.log`: the section file
+pdfTeX branch (T1 fonts), the one arXiv compiles; `make arxiv ARXIV_PDFLATEX=1` tests it with
+pdfLaTeX in the `texlive/texlive:latest` docker image (`ARXIV_SUBMISSION.md`). `build.sh` lists, from `main.log`: the section file
 each slot read, any orphan section file, missing glyphs, undefined citations and references,
 duplicate labels, overfull boxes wider than 10pt, the number of draft marks left, and the page
 count.
@@ -167,8 +170,12 @@ sources include, the table bodies in `figures/tables/`, `acceptance_values.tex` 
 the four files that the listings print (`code/ex_a.py`, `code/ex_b.py`, `code/out/ex_a.txt`,
 `code/out/ex_b.txt`). No scripts are shipped otherwise, and no data. `./make_arxiv.sh --test` (or
 `make arxiv ARXIV_TEST=1`) also compiles the unpacked tarball in a clean temporary directory with
-tectonic. arXiv itself compiles with pdfLaTeX, i.e. the untested pdfTeX branch of `main.tex`
-(`main.tex` is already set to `\draftmarksfalse`).
+tectonic. arXiv itself compiles with pdfLaTeX, i.e. the pdfTeX branch of `main.tex` (`main.tex` is
+already set to `\draftmarksfalse`): `./make_arxiv.sh --pdflatex` (or `make arxiv ARXIV_PDFLATEX=1`)
+compiles the unpacked tarball with pdfLaTeX in the `texlive/texlive:latest` docker image twice, once
+as arXiv does (three pdflatex runs on the shipped `main.bbl`, no BibTeX) and once with BibTeX, whose
+regenerated `main.bbl` must equal the shipped one. `ARXIV_SUBMISSION.md` records the result, the
+differences from the tectonic PDF, and the metadata and steps for the submission.
 
 Listings 1 and 2: `python3 code/run_examples.py` runs `code/ex_a.py` and `code/ex_b.py` in the main
 repository (with `uv run --frozen --no-sync`, so nothing is installed there) and rewrites `code/out/`

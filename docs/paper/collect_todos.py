@@ -29,7 +29,8 @@ AFTER_SUBMISSION = r"""
 These are the only open items for the author. The paper claims no reading statement, tag, PyPI
 release, DOI or third-party finding, so its text is correct without them; each item says what to
 change in the paper if it is done. The repository URL and the pointers to the branch `paper-draft`
-need the two release steps at the top of item 2.
+need the two release steps at the top of item 2. `ARXIV_SUBMISSION.md` has the arXiv metadata, the
+file to upload (tested with pdfLaTeX) and the submission steps; these two release steps block it.
 
 1. **Your own statement for App. J (optional).** The paper makes no claim about how far you read the
    code, the derivations, the pull requests or the paper: the earlier `author:` marks and the

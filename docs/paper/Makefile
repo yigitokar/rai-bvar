@@ -16,7 +16,8 @@
 #                     appendix \input's them; [REL]/[ACC] cells stay marks until the data exist)
 #   make todos        regenerate AUTHOR_TODO.md (\todo census, must be 0; post-submission items)
 #   make arxiv        build the PDF, then write arxiv.tar.gz (make_arxiv.sh; ARXIV_TEST=1 also
-#                     compiles the tarball in a clean temporary directory)
+#                     compiles the tarball in a clean temporary directory with tectonic,
+#                     ARXIV_PDFLATEX=1 with pdfLaTeX in the TeX Live docker image, as arXiv does)
 #   make clean        remove LaTeX intermediates
 #
 # Figure scripts run with the main repository's environment and import its code read-only
@@ -79,7 +80,7 @@ todos:
 	python3 collect_todos.py
 
 arxiv: pdf
-	./make_arxiv.sh $(if $(ARXIV_TEST),--test,)
+	./make_arxiv.sh $(if $(ARXIV_TEST),--test,) $(if $(ARXIV_PDFLATEX),--pdflatex,)
 
 clean:
 	rm -f main.aux main.bbl main.blg main.log main.out main.toc main.xdv main.lof main.lot arxiv.tar.gz
