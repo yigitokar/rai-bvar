@@ -63,10 +63,13 @@ With weights $w_s = \exp(\log p_s - \max_r \log p_r)$, the reported Monte Carlo 
 the delta-method value
 \begin{equation}\label{eq:mcse}
   \widehat{\mathrm{se}}\bigl(\log\hat p_h\bigr) = \frac{\operatorname{sd}(w)}{\sqrt S\,\bar w}
-  \times \sqrt{S/\widehat{\mathrm{ESS}}(w)} ,
+  \times \sqrt{S/\widehat{\mathrm{ESS}}_{\mathrm{ac}}(w)} ,
 \end{equation}
-with the sample standard deviation; the factor with the ESS of the weights over chains and draws
-applies to MCMC forecasts only (1 when that ESS is undefined).
+with the sample standard deviation, where $\mathrm{ESS}_{\mathrm{ac}}$ is the autocorrelation
+effective sample size of the weights over chains and draws (MCMC forecasts only; the factor is 1
+when it is undefined). Distinct from it is the Kish effective number of weights
+$\mathrm{ESS}_{\mathrm{K}} = (\sum_s w_s)^2/\sum_s w_s^2$ \citep{kish1965survey}, which measures
+how many draws carry the estimate.
 % [V] src/rai_bvar/forecast/result.py l.325-338 at d58c9ef (w.std(ddof=1)); tests/mcmc/forecast/test_lpd_mcmc.py::test_ess_adjusted_mcse, ::test_mcse_falls_back_to_iid_without_an_ess
 
 \subsection{The \texorpdfstring{$h > 1$}{h > 1} tail problem and the path-integrated estimator}\label{sec:eval-tail}
@@ -75,7 +78,9 @@ applies to MCMC forecasts only (1 when that ESS is undefined).
 For $h > 1$ the moments in~\eqref{eq:rb-lpd} are conditioned on the simulated path
 $y_{s,T+1:T+h-1}$ of draw $s$.
 For an outcome far in the tail, only draws whose paths wandered towards it receive weight, in the
-limit one draw; the estimate is then biased low, and~\eqref{eq:mcse} does not show it.
+limit one draw ($\mathrm{ESS}_{\mathrm{K}} \approx 1$). The mixture $\hat p_h$ is unbiased for
+$p_h$, so by Jensen's inequality its logarithm is biased low, and the bias is large exactly when the
+weights are heavy-tailed; \eqref{eq:mcse} estimates the spread, not this bias.
 In the replication of \cref{sec:cr} (Constant arm, unemployment, $h = 8$, origin 2008Q2), a review
 of the quick run, recorded in the repository notes, found $-93.6$ with 1000 forecast draws, $-46$
 to $-63$ with 8000 and $-36$ with 64{,}000, against $-19.1$ for the path-integrated estimator below
@@ -84,7 +89,7 @@ on the same 1000 draws (itself a Monte Carlo estimate), while the MCSE stayed ne
 \todo{TODO 14 (risk 6): Proposition~\ref{prop:mcse-bound} stays out of the main text until it is
 confirmed and unit-tested.}
 
-\paragraph{Fix (D-34, \code{lpd\_method="integrated"}).}
+\paragraph{Fix (\code{lpd\_method="integrated"}).}% design decision D-34
 Given $\theta_s$ and the drawn scale path $\lambda_{s,T+1:T+h}$, the intermediate outcomes can be
 integrated out.
 With the simulated shocks $u_{s,k} = y_{s,T+k} - m_{s,k}$ and the moving-average coefficients
@@ -108,18 +113,18 @@ $h = 2, \dots, 8$ to $10^{-10}$ (\cref{fig:lpd-estimators} and \cref{app:mcse-bo
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\textwidth]{figures/fig_lpd_estimators.pdf}
-  \caption{Path-conditioned (SPEC~\S7) against path-integrated (D-34) log score at $h > 1$. Left:
+  \caption{Path-conditioned (the specification's default) against path-integrated log score at $h > 1$. Left:
   synthetic persistent VAR(2), $h = 8$, one parameter draw; error against the outcome's
   Mahalanobis distance. Right: Constant (and SV(rw)), unemployment, $h = 8$, 2008Q2, at the
-  acceptance MCMC budget, with the spread across seeds and the weight ESS.}
+  acceptance MCMC budget, with the spread across seeds and $\mathrm{ESS}_{\mathrm{K}}$.}
   \label{fig:lpd-estimators}\label{fig:Fig4}
 \end{figure}
 \todo{TODO 6: the right panel of \cref{fig:lpd-estimators} needs \code{rb\_tail\_cell.json}.}
 
 \paragraph{Residual error.}
 The integrated estimator is still an average over draws whose weights concentrate in the tails:
-at the same cell, a review recorded in the repository notes found a weight ESS of 2--6 for the
-Constant arm with 1000 forecast draws, so the pre-registered acceptance run uses 8000
+at the same cell, a review recorded in the repository notes found $\mathrm{ESS}_{\mathrm{K}}$ of
+2--6 for the Constant arm with 1000 forecast draws, so the pre-registered acceptance run uses 8000
 (\cref{app:prereg}).
 % [R] main-repo docs/paper/NOTES.md 8b D-34 addendum (D-34 review, finding math-2); [PREREG] benchmarks/reports/clark_ravazzolo_preregistration.md item 3 (c823d20)
 The estimator is opt-in and covers MCMC forecasts of linear or zero means (scope in
@@ -135,7 +140,10 @@ proper \citep{gneiting2007strictly} joint or per-variable log score as the prima
 others are listed in \cref{app:scores-tests}).
 % [V] src/rai_bvar/evaluation/scores.py l.54-177 at d58c9ef; tests/unit/test_scores_lpd_method.py::test_integrated_layout_and_values
 Loss differences are tested with the Diebold--Mariano statistic \citep{diebold1995comparing},
-corrected as in \citet{harvey1997testing}, against Student-$t_{P-1}$ quantiles (\cref{eq:dm}).
+corrected as in \citet{harvey1997testing}, against Student-$t_{P-1}$ quantiles (\cref{eq:dm}); the
+long-run variance uses a rectangular kernel with $h - 1$ autocovariances, with Bartlett weights
+only if that estimate is not positive. The correction was derived for squared-error-type losses, and
+we apply it to log-score losses without a separate argument.
 % [V] src/rai_bvar/evaluation/significance.py l.27-77 at d58c9ef; tests/unit/test_significance.py::test_dm_size_under_null, ::test_dm_hln_uses_student_t. SPEC §9.3 says Newey-West (dossier 02 §15 D1; TODO 18): the appendix text describes the code
 Following \citet{giacomini2006tests}, its $p$-values count as valid only with rolling or fixed
 windows and are labelled descriptive otherwise, since with expanding windows and nested models the
@@ -160,7 +168,8 @@ every statistic on the origins where all models have a finite joint log score.
 For a model $M$ and a reference $B$ at horizon $h$, let $\Delta\mathrm{LPD}$ be the summed
 difference of their log scores over those origins, $\mathcal D(M, B)$ the set of declared axes
 (mean, prior, volatility, \dots) on which their axis labels differ, $p_{\mathrm{DM}}$ the one-sided
-DM--HLN $p$-value and $\mathcal M_{25\%}$ the set of models whose MCS $p$-value is at least 0.25.
+DM--HLN $p$-value and $\mathcal M_{25\%}$ the 75\% model confidence set ($\alpha = 0.25$), the
+models whose MCS $p$-value is at least 0.25.
 % [V] compare.py l.333-334 (_differing_axes: axis names whose labels differ) and l.259 (mcs >= mcs_alpha) at d58c9ef
 The default rule is
 \begin{equation}\label{eq:verdict}
@@ -177,6 +186,13 @@ The default rule is
 \end{equation}
 ``worse'' is its mirror image, and anything else is ``inconclusive'' (\cref{fig:verdict-flow} in
 \cref{app:scores-tests} draws the rule as a decision flow).
+With two models the $T_{\max}$ MCS reduces to a two-sided block-bootstrap test of equal mean loss
+at level 0.25, about 12.5\% one-sided once $\Delta\mathrm{LPD} > 0$, looser than the 10\% DM route,
+and its circular block length $\operatorname{round}(P^{1/3})$ (5 at $P = 106$) does not grow with
+$h$. The set is formed over every model passed to \code{compare()}, so a pair's verdict depends on
+the comparison set (\cref{sec:replication-results}). Under expanding windows an MCS-route verdict
+is no better established than the DM $p$-value it replaces; both are best read as descriptive.
+% [V] src/rai_bvar/evaluation/significance.py l.100-137 (T_max over all models; with M = 2, d_1 = -d_2, so max = |Z*|; block length max(1, round(P^(1/3))) whatever h, l.120), compare.py (mcs over every model of the comparison; mcs_alpha = 0.25; common origins over all models); stat referee major 2, software majors 3-4, macro major 4
 % [V] src/rai_bvar/evaluation/compare.py l.202-294 (verdict), l.337-338 (MCSE in quadrature) at d58c9ef; defaults test_level=0.10, mcs_alpha=0.25, mc_multiple=3.0, min_converged=0.95
 A convergence gate then forces ``inconclusive'' if either model converged at fewer than 95\% of
 the origins.
@@ -193,6 +209,11 @@ Pairs that differ along more than one axis, or whose specs differ without a decl
 \code{verdict(axis="vol")} and \code{grid()} build such one-axis pairs for a volatility grid
 (\cref{app:scores-tests}).
 % [V] tests/unit/test_grid_harmonise.py::test_spec_grid_becomes_a_one_axis_volatility_comparison
+Axis labels are declared, not derived: against \code{Constant("iw_equivalent")} an SV arm also
+changes the prior of the contemporaneous coefficients $a_{ij}$ (the Mode~I prior instead of the
+$\lambda_i$-scaled one of \citealp{chan2022asymmetric}), which against \code{Constant("ig")} it
+would not.
+% [V] src/rai_bvar/priors/structural.py::contemp_arrays (shared by both forms, D-11): scaling "none" for Mode I, SV and Constant("ig"), prec0 = iota psi_j/(kappa_a psi_i); scaling "lambda" for Constant("iw") and Constant("iw_equivalent"), a_ij | lambda_i ~ N(0, lambda_i kappa_a/psi_j) (macro referee major 2(c))
 Each ingredient is standard and their combination is the package's; the rule's size and power
 have not been studied, and the quadrature MCSE treats the two models' errors as independent
 although both use the same per-origin forecast seed (\cref{sec:limitations}).

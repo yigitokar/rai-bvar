@@ -7,7 +7,7 @@ Data (JSON lines written with ``RAI_BVAR_VALIDATION_RECORD=<dir>``):
   * ``mutation.jsonl`` from ``tests/mutation``: the G tier's mutant and control statistics (the
     controls are G-small runs of the unmutated sampler at the mutation seeds).
 Default input: the local records in ``docs/paper/figures/data/validation_record/``, which are
-uncommitted and carry no commit or machine field (the CI's weekly job sets no
+tracked on branch paper-draft (33dd9f8) but not on main and carry no commit or machine field (the CI's weekly job sets no
 ``RAI_BVAR_VALIDATION_RECORD``), so they are not release records; the figure then says so in a
 footer. That ``geweke.jsonl`` has G-full, G-full-inexact and G-small-block rows but no G-small row:
 the G-small controls drawn are then the mutation suite's controls only (legend "mutation seeds"),

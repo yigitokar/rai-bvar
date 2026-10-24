@@ -8,7 +8,9 @@ levels that ``docs/phase2/08_common_sv_and_ordering.md`` section C5 records from
 Ravazzolo's working paper ([R]; read from the committed note with a regular expression). Lower
 panel: the run's compute record, ``config.{n_jobs, mcmc, draws, lpd_method}``,
 ``versions.{platform, rai_bvar, jax, git_commit, git_dirty}`` and ``seconds``. The report holds no
-stage times (OUTLINE TODO 2): that row is a [TC] mark until they are recorded.
+stage times; the stage-time row is read ([R]) from the run's own log, committed with the report in
+65dd212 (``benchmarks/reports/clark_ravazzolo_acceptance.log``; elapsed seconds at "main stage
+written", "ordering stage Constant", "ordering stage SV(rw)" and "done").
 
 ``--check-acc [REPORT]`` checks that every key resolves (no value is printed).
 
@@ -25,6 +27,20 @@ import tab_common as tc
 NAME = "tab_cr_levels_compute"
 N08 = ("c823d20", "docs/phase2/08_common_sv_and_ordering.md")
 VARS = (("GDP", "GDP"), ("INFL", "inflation"), ("UR", "UR"), ("TBILL", "bill"))  # (ours, N08's word)
+LOG = ("65dd212", "benchmarks/reports/clark_ravazzolo_acceptance.log")
+
+
+def stage_times() -> str:
+    """Stage times from the committed run log ([R]): the elapsed-seconds stamps of its stage lines."""
+    log = tc.git_show(*LOG)
+    def at(pat: str) -> int:
+        return int(tc.grab(log, r"\[\s*(\d+)s\] " + pat, flags=0))
+    def dur(pat: str) -> int:
+        return int(tc.grab(log, pat + r": (\d+)s", flags=0))
+    main, done = at("main stage written"), at("done:")
+    oc, osv = dur("ordering stage Constant"), dur(r"ordering stage SV\(rw\)")
+    return (f"main stage {tc.thousands(main)}\\,s; ordering stage, Constant {tc.thousands(oc)}\\,s "
+            f"and SV(rw) {tc.thousands(osv)}\\,s; done at {tc.thousands(done)}\\,s (run log, {LOG[0]})")
 
 
 def cr_levels() -> dict:
@@ -66,7 +82,7 @@ def main() -> None:
         ("MCMC budget per fit", acc("config.mcmc")),
         ("Forecast draws per origin", acc("config.draws")),
         ("Worker processes", acc("config.n_jobs")),
-        ("Stage times", tc.mark("TC") + " not recorded in the report (OUTLINE TODO 2)"),
+        ("Stage times", stage_times()),
         ("Wall time", acc("seconds")),
     ]
     b = [r"\begin{tabular}{@{}ll@{}}", r"\toprule", r"Compute record of the acceptance run & \\", r"\midrule"]
@@ -82,10 +98,11 @@ def main() -> None:
             + tc.fit("\n".join(b)) + "\n" + tc.note(foot) + "\n"
             + tc.note(tc.acc_placeholder_note("relative.full, config, versions, seconds"), red=True))  # fmt: skip
     path = tc.write(NAME, body, generator="tab_cr_levels_compute.py",
-                    status="[ACC] placeholders (no acceptance number written); CR levels [R]; stage times [TC]",
+                    status="[ACC] placeholders (no acceptance number written); CR levels [R]; stage times [R] (run log)",
                     sources=["acceptance report keys relative.full['SV(rw)'].variables[v]['1'].{lps_base,"
                              "rmse_base}, config, versions, seconds",
-                             f"main repo {N08[1]} at {N08[0]}, section C5 (benchmark VAR levels)"])  # fmt: skip
+                             f"main repo {N08[1]} at {N08[0]}, section C5 (benchmark VAR levels)",
+                             f"main repo {LOG[1]} at {LOG[0]} (stage times)"])  # fmt: skip
     tc.check_acc(path, args.check_acc)
 
 

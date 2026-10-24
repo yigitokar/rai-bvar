@@ -10,9 +10,10 @@ holds $n_d \in \{0, 1, 2\}$ deterministic terms (none, a constant, or a constant
 trend). % [V] src/rai_bvar/data/design.py (module docstring, DETERMINISTIC_KINDS)
 $Y$ (columns $y_i$) and $X$ stack the observations, $Y_{<i}$ holds the first $i-1$ columns of $Y$,
 and the column order of the data is the recursive ordering. % [V] src/rai_bvar/data/dataset.py (module docstring)
-$\kappa$ is the Minnesota overall tightness (code \code{lambda_}), $\iota$ the position of equation
-$i$ where it enters a prior formula as a number, and $\mathrm{N}(m, V)$ has variance $V$;
-\cref{tab:TabA1} lists the rest of the notation, with the code names. % [R] dossier 02 §2; DESIGN "Conventions". (TabA1 has no rows for soc/sur or the SV hyperpriors, hence "main".)
+$\kappa$ is the Minnesota overall tightness (code \code{lambda_}), $\iota$ (iota, not the index
+$i$) the position of equation $i$ where it enters a prior formula as a number, $\lambda_{i,t}$ a
+volatility, and $\mathrm{N}(m, V)$ has variance $V$; \cref{tab:TabA1} in \cref{app:notation}
+lists the rest of the notation, with the code names. % [R] dossier 02 §2; DESIGN "Conventions". (TabA1 has no rows for soc/sur or the SV hyperpriors, hence "main".)
 
 \subsection{The recursive structural form}\label{sec:framework:structural}
 
@@ -53,7 +54,7 @@ resolves \code{form="auto"}); \cref{app:prior-details} collects the options left
   \Omega_{(l,j)} = \frac{\kappa^2 (d-n-1)}{l^{\alpha}\psi_j}, \qquad d = n + 2,
 \end{equation}
 with $\Omega$ diagonal, $(l,j)$ the coefficient on lag $l$ of variable $j$, $\alpha$ the lag decay
-and $\Omega = \kappa_d$ for deterministic terms. The scales $\psi_j$ are residual variances of
+and $\Omega_{(d)} = \kappa_d$ for deterministic terms. The scales $\psi_j$ are residual variances of
 univariate AR($p$) regressions on the estimation window, and $b$ is zero except on the own first
 lag, where it is 1 for series in levels or log levels (transformation codes 1 and 4). % [V] src/rai_bvar/engines/analytic.py::_ar_residual_variances; src/rai_bvar/priors/minnesota.py (fields); src/rai_bvar/data/transforms.py (PERSISTENT_TCODES, prior_mean_own_lag)
 The Kronecker structure ties own- and cross-lag tightness \citep{kadiyala1997numerical} and the
@@ -86,7 +87,7 @@ unit Jacobian), $a_i$ and $\delta_i$ are independent a priori with diagonal prec
 (\cref{alg:C-structural}). % [V] src/rai_bvar/priors/structural.py (module docstring)
 
 Three prior modes share this form (\cref{app:niw-structural,app:mode1}; tests in
-\cref{app:prior-tests}). \emph{Mode~I}, the package's own default (design decision D-10), used by
+\cref{app:prior-tests}). \emph{Mode~I}, the package's own design and its default, used by
 \code{Constant("ig")} and every SV arm, puts the fixed scale $\bar\sigma_i^2 = \psi_i/\iota$ in place of $\lambda_i$ in the coefficient
 prior variances. % [R] docs/phase2/DESIGN.md D-10; docs/phase2/05_structural_equation_sampler.md §0 item 5; [V] src/rai_bvar/priors/structural.py (module docstring); DESIGN §6.1
 At $\kappa_c = \kappa_a = 1$ it matches exactly the reduced-form mean (for every $A$), the marginal
@@ -143,7 +144,7 @@ residual,
 \end{equation}
 and $\lambda_{i,t}$ in \eqref{eq:loglik} is then this effective variance. With \code{outliers=True},
 as in \citet{carriero2024addressing}, $o_{i,t} \in \{1, \dots, 20\}$ is 1 with probability $1 - p_i$
-and otherwise uniform, with a Beta prior on $p_i$. % [V] src/rai_bvar/priors/sv_arrays.py::outlier_beta; src/rai_bvar/components/specs.py (outlier_max=20, _default_outlier); src/rai_bvar/components/vol/transitory.py (w_k = p/(K-1)); [R] docs/phase2/03_sv_outliers_t.md §0 table (CCMM REStat §III.A "U(2,20)", online appendix II.iv fn. 8, code grid 1:20)
+and otherwise uniform on $\{2, \dots, 20\}$, with a Beta prior on $p_i$. % [V] src/rai_bvar/priors/sv_arrays.py::outlier_beta; src/rai_bvar/components/specs.py (outlier_max=20, _default_outlier); src/rai_bvar/components/vol/transitory.py (w_k = p/(K-1)); [R] docs/phase2/03_sv_outliers_t.md §0 table (CCMM REStat §III.A "U(2,20)", online appendix II.iv fn. 8, code grid 1:20)
 \todo{Check the outline's credit of the outlier grid to \citet{stock2016core} against its REStat text.}
 With \code{tails="t"}, $\tau_{i,t} \sim \mathrm{IG}(\nu_i/2, (\nu_i - 2)/2)$, a standardised $t$
 ($\mathrm{E}\,\tau_{i,t} = 1$; unit scale in \cref{app:prior-details}), and $\nu_i$ is uniform on

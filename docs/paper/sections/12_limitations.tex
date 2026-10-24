@@ -1,7 +1,8 @@
 \section{Limitations}\label{sec:limitations}
 % Drafting notes (not typeset): every limitation below is stated with its evidence tag. Numbers of
-% the Clark-Ravazzolo acceptance run are \acc{} placeholders (grammar: header of 11_replication.tex);
-% first-full-run numbers are wrapped in \fullrun{}.
+% the Clark-Ravazzolo acceptance run are \acc{} keys, filled from its committed JSON (65dd212) through
+% acceptance_values.tex (grammar: header of 11_replication.tex); first-full-run numbers are wrapped in
+% \fullrun{}.
 
 \paragraph{Scope.}
 The package implements Phases~0--2 of its roadmap. The mean axis is linear and the prior axis is
@@ -30,10 +31,12 @@ The MCSE of a total $\Delta$LPD adds the two models' per-origin MCSEs in quadrat
 although both models' forecasts at an origin draw on random streams derived from the same backtest
 seed and origin; whether the factor of three is conservative is unknown. % [V] src/rai_bvar/evaluation/compare.py _mcse_total l.337-338; backtest.py docstring l.232
 Under expanding windows a ``better'' verdict can only come through the MCS, whose validity in that
-setting is open \citep[cf.][]{hansen2011model}. Verdicts are per horizon, with no rule
-that combines horizons. The Diebold--Mariano long-run variance uses a rectangular kernel with
-$h - 1$ autocovariances and falls back to Bartlett weights \citep{newey1987simple} only if that
-estimate is not positive, whereas the specification states a Newey--West variance. % [V] src/rai_bvar/evaluation/significance.py l.35-53; [R] SPEC.md §9.3 l.447; dossier 02 §15 D1
+setting is open \citep[cf.][]{hansen2011model}; with two models it is a two-sided test at 25\%, its
+block length does not grow with $h$, and a pair's verdict depends on the other models passed to
+\code{compare()} (\cref{sec:eval-verdict,sec:replication-results}). % [V] significance.py l.100-137 (block length round(P^(1/3))), compare.py (MCS over all models; mcs_alpha = 0.25) (stat referee major 2, software major 4)
+Verdicts are per horizon, with no rule that combines horizons, and the DM long-run variance
+(\cref{sec:eval-tests}) is not the Newey--West variance \citep{newey1987simple} that the
+specification states. % [V] src/rai_bvar/evaluation/significance.py l.35-53; [R] SPEC.md §9.3 l.447; dossier 02 §15 D1
 \todo{TODO 10: implement the verdict-engine DGP size and power study, or keep it as future work
 here.}
 
@@ -44,20 +47,24 @@ which no SV arm of the quick Clark--Ravazzolo run converged at any origin. It pe
 budgets: all six runs of the performance benchmark ($4 \times 10{,}000$ draws) report
 \code{converged = False}, and so did many SV(rw) fits of the first full Clark--Ravazzolo run
 ($4 \times 5000$; \cref{sec:replication-first-run}). % [R] docs/phase2/09_pilot.md item 6, §3.3 (split-R-hat 1.03-1.06, bulk ESS ~200 at draws = 2000); [R] benchmarks/reports/clark_ravazzolo_quick.json converged = 0.0 for every SV arm, both samples (quick run predates f60d736, OUTLINE risk 19: context only); [R] tests/bench/baseline.json summary.converged (3 repeats x cold/warm, settings.draws 10000, commit deb3929); [FULL: orderings.per_ordering[*].converged_sv]
-Near the threshold the converged count moves with the seed by several origins
-(\cref{sec:replication-prereg}). % [FULL: converged.full['SV(rw)'], orderings.per_ordering[0,8,9].converged_sv]; [PREREG] item 1
-The gate is strict by design, and the price is that users need larger budgets than the defaults:
-the acceptance run used $4 \times 20{,}000$ draws (\cref{sec:replication-results}). The default \code{MCMCSettings} (2000 draws) are
+Part of this is noise in the rule itself: $\hat R$ is an estimate, and at a bulk ESS of a few
+hundred the rule $\hat R < 1.01$ also fails by chance, often \citep[cf.][]{vehtari2021rank}, so
+the gate acts much like a floor on the ESS, and near the threshold the converged count moves with
+the seed by several origins (\cref{sec:replication-prereg}). % [FULL: converged.full['SV(rw)'], orderings.per_ordering[0,8,9].converged_sv]; [PREREG] item 1 % [PREREG] item 1 ("consistent with R-hat sampling noise at bulk ESS ~600"); [R] tests/bench/baseline.json (sigma min ESS 504, 4 of 101 R-hat misses, worst 1.016; commit d490730); no committed false-alarm computation, so no rate is quoted (stat referee major 3; TODO list, part 4)
+The gate is strict in that sense, and the price is that users need larger budgets than the defaults:
+the acceptance run used $4 \times 20{,}000$ draws, at which every reduced-form arm converged at
+\acc{min(converged[*][*])} of origins and SV(rw) did so in every ordering, and it took
+\acc{seconds} with \acc{config.n_jobs} worker processes (\cref{sec:replication-results}). % [ACC: converged.{full,pre_crisis}[*]; orderings.per_ordering[*].converged_sv; seconds; config.n_jobs]
+The default \code{MCMCSettings} (2000 draws) are
 unchanged. \todo{TODO 33: decide the convergence-gate policy for SV at the default budget.}
 The gate also leaves the reduced-form intercepts out: it gates on the log-likelihood, each
-equation's own first-lag coefficient and the volatility parameters, and only reports the
-intercepts. % [V] src/rai_bvar/engines/mcmc/monitor.py module docstring and monitor_fields (intercept primary=False; loglik, B_own1, sigma, h_T primary for RW SV), at 7f410dc
+equation's own first-lag coefficient and the volatility parameters, only reports the intercepts
+and the contemporaneous coefficients, and does not monitor the other lag coefficients, so
+``converged'' certifies these primary quantities only. % [V] src/rai_bvar/engines/mcmc/monitor.py module docstring and monitor_fields (intercept primary=False; loglik, B_own1, sigma, h_T primary for RW SV), at 7f410dc
 In the SBC of row~18, the replication's primary arm, about 1--2\% of prior-drawn $T = 50$ datasets
-mix very slowly (autocorrelation times of hundreds to thousands of sweeps) in the
-reduced-form coefficients, most often an intercept: the row passes at a per-row thinning cap of
-$400$ (at the shared $200$ the per-replication ESS rule held for 987 of 997, short of
-99\%), and with a $4000$-sweep pilot that rule alone fails (981 of 997), while the Geweke and
-$\gamma$ tests stay clean. Whether the replication's fits mix as slowly is unknown. % [R] 7f410dc commit message; DESIGN §9.5 row 18 note and §9.6 erratum (2026-10-23); main-repo NOTES 6; tests/sbc/test_sbc_compositions.py docstring (one run each, Apple M5 Max under load: a Pi element is the pilot-IAT argmax in all 35 replications above 91, an intercept in 19); [V] SBC_OVERRIDES t_max 400; [REL]
+mix very slowly in the reduced-form coefficients, most often an intercept
+(\cref{sec:validation-coverage}). Whether the replication's fits mix as slowly is unknown; their
+secondary diagnostics are in the run's cache, not in its report. % [R] 7f410dc commit message; DESIGN §9.5 row 18 note and §9.6 erratum (2026-10-23); main-repo NOTES 6; tests/sbc/test_sbc_compositions.py docstring (one run each, Apple M5 Max under load: a Pi element is the pilot-IAT argmax in all 35 replications above 91, an intercept in 19); [V] SBC_OVERRIDES t_max 400; [REL]
 
 \paragraph{Log scores.}
 The path-conditioned estimator remains the default at $h > 1$. The path-integrated estimator is
@@ -68,6 +75,10 @@ the forecast's parameter and volatility-path draws, whose weights concentrate in
 crisis origin, SV(rw)'s $1000$-draw estimate varied across forecast seeds by more than its
 delta-method MCSE, and with $80{,}000$ forecast draws the values still differed by about $1.3$ nats
 per arm across fit seeds, an MCMC error that more forecast draws do not remove (\cref{app:prereg}). % [PREREG] item 3, "Stated in advance"; [R] NOTES 8b addendum (main repo, b9c66c0: SV(rw) sd 1.4 across forecast seeds vs delta-method MCSE 0.45-0.94; 80,000-draw values differ by ~1.3 nats across fit seeds)
+In the acceptance run the RB-degenerate flag fired only at
+\acc{structural.joint['4'].rb_degenerate} origin, \acc{structural.joint['4'].rb_degenerate_origins}
+at $h = 4$ in the structural pair, whose convergence the report does not record; the flag detects
+only a near-total collapse of the weights and bounds the delta-method MCSE, not this error. % [ACC: structural.{joint,variables}[*][*].rb_degenerate (1 at h = 4, 2008Q2; else 0); relative[*][*].{joint,variables}[*].rb_degenerate and variants[*][*] all 0]; RB_CEILING = 0.9 (benchmarks/clark_ravazzolo.py l.355, at c823d20)
 All scores are on the transformed (model) scale. The Monte Carlo noise of the subsampled energy and
 variogram scores is not reported, and there is no SBC of $y_{T+h}$ for $h > 1$. % [R] dossier 02 §12.2, §15 D2; dossier 04 §7.2 (SBC predictive quantities are h_{T+1}, y_{T+1} only), §15 Q12
 
@@ -75,7 +86,11 @@ variogram scores is not reported, and there is no SBC of $y_{T+h}$ for $h > 1$. 
 The noise floor of \code{ordering_sensitivity} in the replication rests on one replicate
 (\code{noise_reps=1}), and in backtest mode it has no MCSE term. In the first full run it flagged
 the order-invariant \code{Constant} arm as material, at two $h > 1$ cells. % [FULL: orderings.results.Constant.material]; src/rai_bvar/structural/ordering.py module docstring l.32
-In the acceptance run the flag is \acc{orderings.results.Constant.material}.
+In the acceptance run, at the larger budget, it does not (\code{material} =
+\acc{orderings.results.Constant.material}); one run without a false flag does not establish the
+diagnostic's false-positive rate, and the flags it raises on SV(rw) rest on the same
+one-replicate floor: the spread of two runs, under which a signal-to-noise ratio above 3 is
+common even under order invariance, so the flags rest mainly on the fixed thresholds. % [V] src/rai_bvar/structural/ordering.py (sigma_mc = max(sd over the fit and its replicate, MCSE); backtest scores carry no MCSE, module docstring l.26-33); config.noise_reps = 1 (stat referee major 7, macro major 6) % [ACC: orderings.results.Constant.material = false; orderings.results['SV(rw)'].material = true]
 \todo{TODO 26: decide \code{noise_reps} for future runs.}
 
 \paragraph{Validation evidence.}
@@ -83,18 +98,19 @@ Geweke tests and SBC run at $n \leq 3$; the realistic size ($n = 20$, $p = 4$, $
 covered only by the analytic twins, and only for constant-volatility compositions. Our parity
 tier has no external VAR-level oracle for structural Mode~I $\times$ SV. % [V] tests/analytic/test_mcmc_twin.py (A3); dossier 04 §9, §10
 The replication's primary arm, reduced form $\times$ SV(rw), has been a validation row only since
-7f410dc, after the acceptance run (row~18 of the 23 composition rows, one of the 13
-MCMC compositions of the contract tests, also fitted through \code{BVAR.fit};
-\cref{sec:replication-caveats}); its Student-$t$ variant has neither. % [V] 7f410dc: src/rai_bvar/validation/joint.py _COMPOSITIONS (rows 1-18 and 201-205), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS (13 entries, "reduced-SV(rw)" added); no reduced x SV(rw, t) entry in either
-Test priors can hide bugs: at row~18's test prior $N(0, 1)$ for the initial log-volatility, a
-variance used as a precision is invisible, and a G-small run at $N(-1, 4)$ catches it (largest
-$|z|$ $13.8$ against $2.33$ unmodified). % [R] 7f410dc commit message; DESIGN §9.5 row 18 note; [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior (RW_H0_PRIOR = N(-1, 4); row 18 per PR, row 14 nightly)
-The composition-level G-full, SBC and Tier~B runs and the weekly tier have no committed run record
-yet, and row~18's results come from one run each on a loaded machine. % [REL] docs/paper/data/release/{geweke_full,sbc,block}.jsonl. Untracked records exist in the paper worktree, docs/paper/figures/data/validation_record/{geweke,sbc}.jsonl (G-full and SBC rows; the tier G-full row of reduced_sv has passed = false, seed 20261023; its G-full-inexact row passes): when they are committed, this sentence needs a successor that reports them; row 18: 7f410dc commit message (Apple M5 Max under load)
+after the acceptance run (row~18; \cref{sec:validation-coverage}); its Student-$t$ variant has no
+row and no contract fit. % row 18 registered in 7f410dc % [V] 7f410dc: src/rai_bvar/validation/joint.py _COMPOSITIONS (rows 1-18 and 201-205), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS (13 entries, "reduced-SV(rw)" added); no reduced x SV(rw, t) entry in either
+Test priors can hide bugs: row~18's default test prior hides a prior variance used as a
+precision, which a variant G-small test catches (\cref{sec:validation-coverage}; 13.8 against 2.33). % [R] 7f410dc commit message; DESIGN §9.5 row 18 note; [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior (RW_H0_PRIOR = N(-1, 4); row 18 per PR, row 14 nightly)
+The composition-level G-full, SBC and Tier~B runs and the weekly tier have no release run record
+yet, and row~18's results come from one run each on a loaded machine. The local records that feed
+\cref{fig:FigD1,fig:FigD2} carry no commit or machine field; in them the G-full row of
+\code{reduced_sv} fails, as before the kernel fix of \cref{sec:robustness-f1} (\cref{sec:validation-geweke}). % [REL] docs/paper/data/release/{geweke_full,sbc,block}.jsonl. The local records docs/paper/figures/data/validation_record/{geweke,sbc,mutation}.jsonl are tracked on branch paper-draft (since 33dd9f8), not on main (888f620); their G-full reduced_sv row has passed = false, n_nonfinite 28068, seed 20261023 (its G-full-inexact row passes), matching the failure documented in tests/geweke/test_geweke_compositions.py and fixed in 3d3f51b; row 18: 7f410dc commit message (Apple M5 Max under load) (macro referee major 1, stat referee major 5)
 The test-prior design rule $r \leq 5$ is a derivation for the scalar conjugate model, unverified for
 $\phi$, $\sigma$, $p$ and $\nu$, and low relative numerical efficiency of some Geweke functions
 lowers power. % [R] N06 §12 item 4; [V] dossier 04 §6.6 (min RNE 0.008-0.129)
-The power of the suite is measured only against 18 curated mutants. Whether the 10-component mixture
+The suite is checked only against 18 curated mutants, which says little about its power against
+unknown bugs. Whether the 10-component mixture
 approximation is visible to G-full with unknown SV parameters is undetermined. The reduced-form
 parity check against bayesianVARs was replaced by an in-house oracle because the package could not
 be built in the test environment, and all third-party parity holds for pinned versions (stochvol

@@ -48,5 +48,19 @@ Commit & Committed (UTC) & Subject & full \#1 & full \#2 & acceptance \\
 \else\usebox{\rbtabbox}\fi
 \par\smallskip
 {\footnotesize\raggedright Quick run: report banner and header (1ae5765; its code commit was not recorded); its assembling invocation read cached origins. Full runs: config and outcome from the reports, start times, machine, load and stage times from the comments of issue \#3 (comments of 03:01Z, 04:10Z and 05:17Z on 2026-10-23). Lower panel: commit times are committer times converted to UTC; ``In the code of'' is \code{git merge-base --is-ancestor} against 8a622c5, 4bb978a and c823d20. 4fc0162 came after full run \#2 had started and is not part of it.\par}
+% the red note below prints only while a key of this table has no value (acceptance_values.tex, fill_acceptance.py)
+\makeatletter\gdef\rbaccunfilled{}\ifdefined\rb@accifdef%
+\rb@accifdef{versions.git_commit}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{config.name}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{config.mcmc}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{config.draws}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{config.lpd_method}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{config.n_jobs}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{versions.platform}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{seconds}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{criteria[*].met}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\else\gdef\rbaccunfilled{1}\fi\makeatother%
+\ifx\rbaccunfilled\empty\else%
 \par\smallskip
-{\footnotesize\raggedright\color{accmark} Placeholder: each [ACC] cell holds a key of the acceptance report (under config, versions, seconds, criteria); the number is never written here. The cell prints the value once \code{acceptance_values.tex} (\code{fill_acceptance.py}) defines its key.\par}
+{\footnotesize\raggedright\color{accmark} Placeholder: each [ACC] cell holds a key of the acceptance report (under config, versions, seconds, criteria); the number is never written here. The cell prints the value once \code{acceptance_values.tex} (\code{fill_acceptance.py}) defines its key.\par}%
+\fi

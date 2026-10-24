@@ -1247,7 +1247,9 @@ give the analogous weighted likelihood ratio test for density forecasts.
 \emph{The model confidence set and the volatility grid.}
 The model confidence set uses the $T_{\max}$ statistic on the joint log-score losses with a
 circular block bootstrap (block length $\max(1, \operatorname{round}(P^{1/3}))$, 2000
-replications); $\mathcal M_{25\%}$ in~\eqref{eq:verdict} is the set at $\alpha = 0.25$.
+replications); $\mathcal M_{25\%}$ in~\eqref{eq:verdict} is the 75\% set ($\alpha = 0.25$). With two
+models the statistic is $|Z^*|$ of one loss difference, so the route is a two-sided test at
+level 0.25, and the block length is the same at every horizon (\cref{sec:eval-verdict}).
 % [V] src/rai_bvar/evaluation/significance.py l.100-137, compare.py l.152-157 and l.259 at d58c9ef; tests/unit/test_significance.py::test_mcs_eliminates_clearly_worse_models_first
 The comparison table prints two-sided DM $p$-values while the verdict uses one-sided ones (0.029
 against 0.014 in \cref{lst:Lst1-out}).
@@ -1568,7 +1570,8 @@ mutant fails there (largest $|z|$ 13.8 for row~18 and 11.3 for row~14, against 2
 production; critical values 4.42 and 4.29). % [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior; [R] its docstring and DESIGN §9.5 row 18 note
 SBC at the shared cap $t_{\max} = 200$ had a clean $\gamma$ test (minimum $p$ 0.019 over 59
 quantities), but 10 of 997 replications had pilot IATs of 187--319, one more than the 99\% ESS rule
-allows; at 400 the rule covers every pilot IAT observed and the row passes at stage~1. % [R] tests/sbc/test_sbc_compositions.py docstring ("Row 18"); NOTES item 6
+allows; the row's cap was then raised to 400, at which the rule covers every pilot IAT observed and
+the row passes at stage~1. % [R] tests/sbc/test_sbc_compositions.py docstring ("Row 18"); NOTES item 6
 That pass rests on the ESS rule's blind spot, a pilot that underestimates the IAT: with a pilot of
 4000 sweeps instead of the design's 1000, the same run fails the per-replication rule (981 of 997;
 pilot IAT 99th percentile 530, maximum 1438 against 319), while the $\gamma$ test and the pooled-ESS
@@ -1772,9 +1775,10 @@ x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.85\linewidth]{figures/fig_mutation_heatmap.pdf}
-\caption{Mutation power: mutants M1--M18 $\times$ tiers U, B, G, S. Cell colour is
+\caption{Mutation suite: mutants M1--M18 $\times$ tiers U, B, G, S. Cell colour is
 $\log_{10}$ of the mutant's statistic divided by the tier's decision threshold; a marker shows the
-control; grey means that no check is registered.}
+control; grey means that no check is registered. Drawn from a local record without commit or
+machine field (tracked on the paper branch), not a release record.}
 \label{fig:FigD1}
 % [REL] docs/paper/data/release/mutation.jsonl (+ mutation_x86.jsonl); docs/paper/figures/make_fig_mutation_heatmap.py
 \end{figure}
@@ -1785,13 +1789,17 @@ control; grey means that no check is registered.}
 \caption{Geweke maximum $|z|$ per composition for the unmutated samplers (G-full rows and the
 recorded \code{exact=False} rows of the validation record, and the mutation suite's G-small controls
 at the mutation seeds) against the $t_{C-1}$ critical band, with the mutants' G statistics overlaid on a
-logarithmic scale; failed runs are drawn as crosses.}
-\todo{TODO 7: this draft figure is drawn from local, uncommitted records
-(\code{docs/paper/figures/data/validation_record/}) that carry no commit or machine field and hold
-no registered G-small rows; in them the G-full row of \code{reduced_sv} failed with non-finite test
-functions (seed 20261023), which is either the float64 failure that 3d3f51b fixed (a stale record) or
-a regression; the record cannot say which. Establish their provenance or redraw from the release
-records.}
+logarithmic scale; failed runs are drawn as crosses. Drawn from local records without commit or
+machine field, not release records; their failing G-full row of \code{reduced_sv} predates the
+kernel fix of \cref{sec:robustness-f1} (\cref{sec:validation-geweke}).}
+\todo{TODO 7: this draft figure is drawn from local records
+(\code{docs/paper/figures/data/validation_record/}, tracked on branch \code{paper-draft} since 33dd9f8,
+not on \code{main}) that carry no commit or machine field and hold no registered G-small rows. Their
+G-full row of \code{reduced_sv} (passed false, 28,068 non-finite values, seed 20261023) matches the
+2026-10-22 failure documented in \code{tests/geweke/test_geweke_compositions.py} and fixed in 3d3f51b,
+an ancestor of the replication's commits; the record itself cannot date itself. Redraw from the
+release records, which must carry commit and machine fields.}
+% macro referee major 1: the failing row is labelled as a pre-3d3f51b local record in the caption and in §8 and §12
 \label{fig:FigD2}
 % [REL] docs/paper/data/release/geweke.jsonl (tiers G-small, G-full), mutation.jsonl; docs/paper/figures/make_fig_geweke_dots.py (--geweke/--mutation select the release records)
 \end{figure}
@@ -1957,7 +1965,8 @@ whose level pivot is off by 7\% and 95\% and whose $h$ is off by up to 0.23 and 
 The excess-pivot recursion stays within a relative $10^{-15}$ of the reference pivot, and within
 $5.3\times10^{-14}$ of the reference $h$, at every $\sigma$ of the grid.
 These are recomputations at the synthetic state of \code{test_rw_awol_at_a_tiny_sigma}, not at the
-production fit of F2; whether pre-fix runs were affected is not stated (TODO 29).
+production fit of F2; of the replication's runs, only the quick run predates the fix
+(\cref{app:cr-history}).
 % [R] the committed figure FigE1 and its script docs/paper/figures/make_fig_laplacian_pivots.py (paper repo,
 % committed in 33dd9f8; computes both factorisations from the main repository's committed linalg.py
 % and the test's problem() and 60-digit reference), re-run 2026-10-23 against main repo 7f410dc with
@@ -2077,20 +2086,33 @@ Every number of the acceptance run is a placeholder filled from
 \code{benchmarks/reports/clark_ravazzolo_acceptance.json}; numbers of the first full run (report
 commit 551f181, code 4bb978a, path-conditioned estimator, $4\times5000$ draws) are history only and
 are marked as such.
-% [ACC] acceptance JSON (to be committed, TODO 2); [FULL] benchmarks/reports/clark_ravazzolo.json (551f181)
+% [ACC] acceptance JSON (main repo, committed in 65dd212; acceptance_values.tex); [FULL] benchmarks/reports/clark_ravazzolo.json (551f181)
 Line numbers refer to \code{benchmarks/clark_ravazzolo.py} at commit c823d20.
 
 \subsection{Provenance of the acceptance run}\label{app:cr-provenance}
 
 The acceptance configuration and its pre-registration were committed together in c823d20, before the
 run was launched.
-According to the run record, the run was started afterwards from a detached worktree at that commit
-with a clean working tree,
+According to the author's run record, the run was started afterwards from a detached worktree at
+that commit with a clean working tree,
 with the command \code{benchmarks/clark_ravazzolo.py}
 \code{benchmarks/reports/clark_ravazzolo_acceptance} \code{--config acceptance} \code{--n-jobs 10} and a fresh score cache named after the commit.
-% [R] run record (OUTLINE section 0.4); the run log is ephemeral (TODO 2)
-\todo{TODO 2: archive the run log with its UTC start time as evidence that the launch followed
-c823d20, and commit \code{clark_ravazzolo_acceptance.\{json,md\}} from the acceptance worktree.}
+% [R] run record (OUTLINE section 0.4)
+The run log, committed with the report in 65dd212, opens with the start time 2026-10-23 16:10:56 UTC,
+eleven seconds after the commit time of c823d20, and with the commit c823d20 in its configuration line;
+it ends at 19:46:21 UTC.
+% [R] benchmarks/reports/clark_ravazzolo_acceptance.log (65dd212), first two lines and last line; git log -1 --format=%cd c823d20 (2026-10-23T12:10:45-04:00)
+These two timestamps are local: a commit time is set by the author's machine, and the log was
+written by the run itself. An independent record exists as well: GitHub's repository activity log,
+which the server writes when it receives a push, records the creation of the branch
+\code{phase-2-cr-acceptance} at commit c823d20 at 16:10:46 UTC, ten seconds before the run's first
+log line; the first arm's scores were written 88\,s into the run. The pull request that later
+merged the branch was opened at 19:58:06 UTC, after the run had ended.
+% [V] figures/data/provenance/github_activity_phase-2-cr-acceptance.json (gh api "repos/yigitokar/rai-bvar/activity?ref=refs/heads/phase-2-cr-acceptance", retrieved 2026-10-23; entries: branch_creation 0000000->c823d20 at 2026-10-23T16:10:46Z, then pushes d58c9ef 16:46:25Z, 7f410dc 18:44:17Z, 65dd212 19:47:23Z, 3802295 19:47:59Z); gh pr view 5 --json createdAt (19:58:06Z); run log line "[88s] Constant: ... converged 100%" (software referee major 7)
+The report's \code{generated} field (\acc{generated}) is set when the report is first assembled,
+after the five reduced-form main-stage arms and their Gaussian scores (1193\,s into the run, by the
+log) and before the structural pair and the ordering stages; it is not the end of the run.
+% [V] benchmarks/clark_ravazzolo.py l.1532 ("generated" set in the report dict after the main-stage backtests and gaussian_lps, before the structural stage, l.1581, and the ordering stage); [R] log: AR-SV(0.9) done at 1193 s, structural pair at 1228 s and 1484 s (software referee minor 8)
 The script labels a report as the acceptance run only when \code{acceptance_gaps} (l.\,1022) returns
 nothing: the configuration must be the registered one (estimator, MCMC budget, forecast draws,
 origin and ordering steps, noise replications, backtest seed 0), every stage must have run (the
@@ -2237,12 +2259,12 @@ settings and a fresh cache (the score-cache keys do not change with the code).
 \end{itemize}
 \end{quote}
 
-The fit-level diagnostic that the first item cites is not yet committed, so its numbers are those of
-the pre-registration (\cref{tab:TabF6}).
-\todo{TODO 4: commit the diagnostic script and its output (e.g.\
+The fit-level diagnostic that the first item cites is not committed to the main repository, so its
+numbers are those of the pre-registration (\cref{tab:TabF6}).
+\todo{TODO 4: commit the diagnostic script and its output to the main repository (e.g.\
 \code{benchmarks/cr_convergence_diagnostic.py} and \code{benchmarks/reports/cr_convergence_diagnostic.json});
-an uncommitted copy of a script and of 520 + 424 fit records sits under
-\code{docs/paper/figures/data/convergence_diagnostic/} in the paper worktree.}
+a copy of a script and of 520 + 424 fit records is tracked on branch \code{paper-draft} (since
+33dd9f8) under \code{docs/paper/figures/data/convergence_diagnostic/}, not on \code{main}.}
 
 \subsection{The criteria as coded}\label{app:cr-criteria}
 
@@ -2310,9 +2332,9 @@ Criterion~6 is met only if the verdict is ``better'' in every ordering both with
 on, as \code{compare()} returns it, and with the gate off, and if both $p$-values are below 0.10 in
 every ordering.
 % [V] l.807: met = not ungated and not dm_fail and not gated
-The outcome of each criterion and the numbers behind it are \acc{criteria[*].met} and
-\acc{criteria[*].detail}; under the integrated estimator, criterion~4's detail also reports the
-path-conditioned values as a secondary number.
+In the acceptance run the outcome, as coded, is: \acc{criteria[*].met}. The script prints the
+numbers behind it as follows (under the integrated estimator, criterion~4's detail also reports
+secondary numbers, which are not part of the rule): \acc{criteria[*].detail}.
 % [V] _c4_secondary (l.621, called at l.754)
 
 \subsection{Deviations from the target}\label{app:cr-deviations}
@@ -2355,6 +2377,23 @@ additive constant, $-\frac12$ times the Dawid--Sebastiani score, which is proper
 proper
 \citep{dawid1999coherent,gneiting2007strictly}; it is a parity metric only.
 
+Four further differences from the target are not in the script's list:
+(c)~Clark and Ravazzolo's VAR-SV puts $\mathrm{N}(0, 1000^2 I)$ on the contemporaneous matrix $A$,
+whereas the library's SV arms use the Mode~I prior of $a_{ij}$ and \code{Constant("iw_equivalent")}
+the $\lambda_i$-scaled one, so the baseline and the SV arms also differ in this prior
+(\cref{sec:eval-verdict});
+(d)~their $\sigma^2$ prior $\mathrm{IG}(1/2, 0.0175)$ has zero density at 0 and no mean, whereas the
+library's $0.1\chi^2_1$ for the random walk has mean 0.1 and an unbounded density at 0, a difference
+in shape, not only in scale;
+(e)~FRED-QD would allow an estimation start in 1960Q2, closer to their 1955Q1 than the 1965Q1 used;
+(f)~our samples are defined by origin at every horizon, so pre-crisis targets at $h = 8$ run to
+2009Q4, while their archived data end in 2011Q3, so their $h > 1$ samples cannot use every origin to
+2011Q2; their convention is not established.
+Their data are in the journal's archive (current-vintage unemployment and bill rate, and real-time
+vintages of GDP and its price index), so the three candidate causes of \cref{sec:replication} could
+be tested; this run, as pre-registered, does not.
+% [R] N08 §C1 (JAE archive: readme.cr.txt, cr-data-csv.zip; currentdata.csv 1947Q1-2011Q3; realtimeGDP*.csv, 148 vintages 1975Q1-2011Q4), §C2 (1955Q1 start; 1960Q2 alternative), §C3 (A ~ N(0, 1000^2 I); phi_i ~ IG(1/2, 0.0175)); [V] src/rai_bvar/priors/structural.py::contemp_arrays; src/rai_bvar/components/specs.py (_default_sigma2: 0.1 chi^2_1 for rw); benchmarks/clark_ravazzolo.py relative_table (samples by origin). Not yet in DEVIATIONS (main repository; TODO list part 4) (macro referee major 2 (c)-(f), stat minor 12, software major 6)
+
 \subsection{Run history and the first attempt's crash}\label{app:cr-history}
 
 \cref{tab:TabF1} gives each run with its commit, configuration, machine and load, wall time
@@ -2377,8 +2416,8 @@ It differs from the aborted attempt in 41 files, not only by the fix: the dummy-
 $a$-row draw, the replay fix and the random-walk fix all entered between the two, so the second run
 is not described as differing ``only by the fix''.
 % [R] git diff --stat 8a622c5 4bb978a (dossier 06 section 8, fact-check)
-The acceptance run's wall time and stage times are \acc{seconds}; its machine and versions are
-\acc{versions}.
+The acceptance run's wall time is \acc{seconds} (stage times in its committed log); its software
+versions and platform are \acc{versions}. % [R] benchmarks/reports/clark_ravazzolo_acceptance.log (65dd212)
 
 The crash of the first attempt unfolded as follows.
 After the main stage and the Constant orderings had finished, an SV(rw) fit (reduced form, origin
@@ -2392,8 +2431,9 @@ An independent review of f60d736 found no defect; its follow-ups (4fc0162) came 
 started and left the 656-array invariance set bitwise unchanged, so the run's report stands.
 % [R] issue #3 ("Item 7: the full run crashed" and following comments); commits 93f2bcd, f60d736, 4fc0162;
 % [V] tests/mcmc/blocks/test_sv_core.py tiny-sigma tests
-\todo{TODO 29: decide whether to say that the committed quick report, which predates f60d736, may
-have been affected by the old random-walk path; cite quick-run numbers only as context.}
+The committed quick report predates f60d736, so its random-walk SV numbers may have been affected by
+the old path; they serve only as context, including as one run of the yardstick of reading rule~B
+(\cref{app:cr-results}). % resolves TODO 29 (macro referee minor 7); [V] f60d736 is an ancestor of 4bb978a and c823d20; the quick run's code is not recorded and predates f60d736 (OUTLINE risk 19)
 
 \begin{table}[!htbp]
 \centering\small
@@ -2429,7 +2469,9 @@ TBILL & 3-month Treasury bill rate, quarterly average & \code{TB3MS} & level, tc
 \midrule
 \multicolumn{4}{@{}p{0.96\linewidth}@{}}{\emph{Sample.} Vintage 2026-09 of FRED-QD and FRED-MD,
 SHA-256 checked (\cref{app:repro}); estimation from 1965Q1; expanding window; origins
-1985Q1--2011Q2 (106) and the pre-crisis subset 1985Q1--2007Q4 (92); horizons 1, 2, 4, 8; $p = 4$.} \\
+1985Q1--2011Q2 (106) and the pre-crisis subset 1985Q1--2007Q4 (92); horizons 1, 2, 4, 8; $p = 4$.
+Both samples are defined by origin at every horizon, so the targets at horizon $h$ run $h$ quarters
+past the last origin (at $h = 8$: to 2009Q4 pre-crisis, to 2013Q2 in the full sample).} \\
 \multicolumn{4}{@{}p{0.96\linewidth}@{}}{\emph{Run-time checks.} (i) FRED-QD \code{UNRATE} and
 \code{TB3MS} equal the within-quarter means of the FRED-MD monthly series of the same vintage
 (tolerance 0.01 over more than 200 quarters; first full run: maximum absolute difference
@@ -2462,7 +2504,7 @@ corrected triangular algorithm \citep{carriero2022corrigendum}, except the struc
 Arm & Volatility specification & CR counterpart & Role \\
 \midrule
 Constant & \code{Constant("iw_equivalent")}, the order-invariant prior of \citet{chan2022asymmetric} & VAR with a normal-diffuse prior & baseline of every relative measure; negative control of the ordering stage \\
-SV(rw) & \code{SV(rw=True)}: $h_0 \sim \mathrm{N}(\log(\psi_\iota/\iota), 4)$, $\sigma^2 \sim 0.1\chi^2_1$, in-window & VAR-SV (random walk) & primary arm of criteria 1--4 and 6 \\
+SV(rw) & \code{SV(rw=True)}: $h_0 \sim \mathrm{N}(\log(\psi_\iota/\iota), 4)$, $\sigma^2 \sim 0.1\chi^2_1$, in-window & VAR-SV (random walk; $\sigma^2 \sim \mathrm{IG}(1/2, 0.0175)$, $A \sim \mathrm{N}(0, 1000^2 I)$) & primary arm of criteria 1--4 and 6 \\
 SV & \code{SV()}: $\mu \sim \mathrm{N}(\log(\psi_\iota/\iota), 10)$, $(\phi+1)/2 \sim \mathrm{Beta}(20, 1.5)$, $\sigma^2 \sim \chi^2_1$ & --- & second reference of criterion 5 \\
 SV(rw,t10) & \code{SV(rw=True, tails="t", nu_prior=DiscreteUniform(10, 10), t_scale="unit")} & VAR-SVt with $d = 10$ & criterion 5 variant; $\nu$ fixed, so its grid-bound warning fires by design \\
 AR-SV(0.9) & \code{SV(phi_prior=Beta(71.25, 3.75))} & VAR-ARSV with $a_1 \sim \mathrm{N}(0.9, 0.05^2)$ (same mean and sd on $\phi$) & criterion 5 variant \\
@@ -2493,8 +2535,10 @@ The working paper does not state a variable ordering, which is why all 24 orderi
 the gate on and off, MCS membership and the variant comparisons of criterion~5, and \cref{tab:TabF7} the Constant arm's levels against CR's benchmark VAR together
 with the compute record.
 The reading rules below apply to every number here.
-Which numbers may move between the two runs was written down before the acceptance numbers
-existed. % [R] docs/paper/dossiers/06_empirical.md §9.5, OUTLINE §11.9 (paper worktree, untracked; no acceptance JSON existed then, OUTLINE §0.4)
+They say which numbers may move between the two runs. They are the paper's, not part of the
+pre-registration, and were first committed (33dd9f8) after the run had written its main-stage
+report and before the run's report was committed (65dd212), so their timing relative to the
+numbers cannot be checked. % [R] dossiers/06_empirical.md §9.5, OUTLINE §11.9; 33dd9f8 2026-10-23 19:25Z; committed run log: start 16:10:56Z, main stage written at 1484 s (16:35Z), done 19:46Z; report commit 65dd212 19:47Z
 \begin{itemize}
   \item[A.] \emph{Estimator:} every RB $\Delta$LPS and $\Delta$LPD at $h \geq 2$, the DM $p$-values
     at $h \geq 2$, the RB/Gaussian sign disagreements, the criterion-4 cells, the variant
@@ -2511,7 +2555,14 @@ existed. % [R] docs/paper/dossiers/06_empirical.md §9.5, OUTLINE §11.9 (paper 
   \item[D.] \emph{Unchanged by design:} data checks, models, priors, origins, rules and fit seeds.
 \end{itemize}
 Reading rule~B is the check on the $h = 1$ numbers: they should differ from the first run's by
-Monte Carlo noise only.
+Monte Carlo noise only. They do, by this yardstick: no $h = 1$ $\Delta$LPS or joint $\Delta$LPD of
+any arm in either sample moved by more than it. The comparison is descriptive: the yardstick is the
+largest move over all arms between a single pair of runs, one of which predates the random-walk fix
+(\cref{app:cr-history}), and SV(rw)'s own joint move (0.0106) is close to it. For scale, the
+order-invariant \code{Constant} arm's joint $h = 1$ score spans
+\acc{orderings.results.Constant.joint_lpd_range['1']} nats over the 24 seeded orderings; that is one
+arm's Monte Carlo noise, a lower bound for that of a difference between two arms, and does not by
+itself make an SV-arm move ``noise''. % [ACC] orderings.results.Constant.joint_lpd_range (0.008, 0.044, 0.068, 0.049 at h = 1, 2, 4, 8) (stat referee minor 10, macro minor 6) % [ACC]/[FULL] recomputed from relative[sample][arm] at h = 1 of the two reports: largest move 0.0031 per marginal cell (full, SV(rw,t10), GDP), 0.0116 joint (full, AR-SV(0.9)); SV(rw), full sample: 0.0015 and 0.0106
 Under the expanding window, any ``better'' verdict can only come through the model confidence set
 \citep{hansen2011model}.
 In the first full run the pre-crisis GDP $h = 8$ cell, which criterion~4 needs to be positive, was
@@ -2522,14 +2573,66 @@ approximation; its acceptance values are
 \acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_gauss} (Gaussian).
 % [FULL] relative.pre_crisis['SV(rw)'] (551f181); [ACC]
 The fit-level diagnostic covered only SV(rw), and only three of the 24 orderings at the main-stage
-seeds, so the gate-on verdicts of SV, SV(rw,t10) and AR-SV(0.9) may stay inconclusive.
-% [PREREG] item 1
+seeds, so before the run the gate-on verdicts of SV, SV(rw,t10) and AR-SV(0.9) could have stayed
+inconclusive; in the event every reduced-form arm converged at \acc{min(converged[*][*])} of origins in both
+samples, and no verdict depends on the gate.
+% [PREREG] item 1; [ACC: converged.{full,pre_crisis}[*]; verdicts.{full,pre_crisis}: gate on = gate off]
 The converged shares of every arm, in both samples, are in the last column of \cref{tab:TabF5}. % [ACC] converged.{full,pre_crisis} (the §11.7 sentence on the other arms' shares; its \acc keys are the cells of TabF5)
 Across arms and samples the RB and Gaussian $\Delta$LPS differ in sign in
 \acc{count(relative[*][*].variables[*][*].rb_gauss_disagree = true)} marginal and
 \acc{count(relative[*][*].joint[*].rb_gauss_disagree = true)} joint cells. % [ACC] (moved from §11.7)
 Across the $24$ orderings the joint $h = 1$ gain of SV(rw) over \code{Constant} runs from
 \acc{min(orderings.per_ordering[*].dlpd_h1)} to \acc{max(orderings.per_ordering[*].dlpd_h1)} nats. % [ACC] (moved from §11.7)
+
+The inflation gains are larger than Clark and Ravazzolo's: the full-sample $\Delta$LPS is
+\acc{relative.full['SV(rw)'].variables.INFL['1'].dlps} at $h = 1$ and
+\acc{relative.full['SV(rw)'].variables.INFL['8'].dlps} at $h = 8$, against their $+0.075$ and
+$+0.138$, and the $h = 8$ RMSE and CRPS ratios are
+\acc{relative.full['SV(rw)'].variables.INFL['8'].rmse_ratio} and
+\acc{relative.full['SV(rw)'].variables.INFL['8'].crps_ratio}, against their 0.883 and 0.887.
+The \code{Constant} arm's own inflation forecasts are more accurate than their benchmark VAR's
+(RMSE \acc{relative.full['SV(rw)'].variables.INFL['1'].rmse_base} against 0.269 at $h = 1$;
+\cref{tab:TabF7}), so the two sets of levels are not on the same data. The final-vintage
+chain-type price index and the down-weighting of volatile periods by SV are possible explanations,
+untested conjectures; magnitudes are not comparable across these designs, which is why the
+replication targets the ranking only.
+% [ACC] relative.full['SV(rw)'].variables.INFL[h].{dlps, rmse_ratio, crps_ratio, rmse_base}; [R] CR_FULL l.147 (INFL dLPS +0.075, +0.138; RMSE ratio h8 0.883; CRPS ratio h8 0.887); N08 §C5 (benchmark VAR INFL RMSE 0.269, LPS -0.235) (macro referee minor 3)
+
+\cref{tab:cr-c4} collects the cells of criterion~4 with the descriptive numbers that
+\cref{sec:replication-results} reports next to them; none of them enters the rule.
+
+\begin{table}[!htbp]
+\centering\footnotesize
+\caption{Criterion~4's cells, SV(rw) against \code{Constant}, acceptance run (descriptive; not part
+of the rule). Mean: the primary path-integrated RB $\Delta$LPS that the rule uses; Gauss.: Clark and
+Ravazzolo's Gaussian-approximation score; Cond.: path-conditioned RB estimator on the same draws;
+Median: per-origin median of the primary difference; Top-3 share and Mean w/o top 3: share of the
+summed difference from the three origins largest in absolute value, and the mean without them,
+recomputed from the report's \code{n}, \code{dlps} and \code{dlps_top} (typed, not \code{\textbackslash
+acc} values).}
+\label{tab:cr-c4}
+% [ACC] relative.{full,pre_crisis}['SV(rw)'].variables[v][h].{dlps,dlps_gauss,dlps_conditioned,dlps_median}; Top-3 share and Mean w/o top 3 recomputed from .{n,dlps,dlps_top} (share = sum(dlps_top values)/(n dlps); mean w/o = (n dlps - sum)/(n - 3)); printed only where the three values have the sign of the sum, "---" otherwise; values: full UR h1 +0.151 (top by |d| +4.652, -1.637, -1.556: mixed), h8 71.8% / +0.0792; full TBILL h1 (all negative against a positive sum) +0.449, h8 32.0% / -0.136; pre GDP h8 (all negative, positive sum) +0.152; pre INFL h8 11.9% / +0.280; pre UR h8 725% / -0.166 (stat referee major 1 (4), macro major 3)
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+Sample, variable & $h$ & Mean & Gauss. & Cond. & Median & Top-3 share & Mean w/o top 3 \\
+\midrule
+Full, UR & 1 & \acc{relative.full['SV(rw)'].variables.UR['1'].dlps} & \acc{relative.full['SV(rw)'].variables.UR['1'].dlps_gauss} & \acc{relative.full['SV(rw)'].variables.UR['1'].dlps_conditioned} & \acc{relative.full['SV(rw)'].variables.UR['1'].dlps_median} & --- & $+0.151$ \\
+ & 8 & \acc{relative.full['SV(rw)'].variables.UR['8'].dlps} & \acc{relative.full['SV(rw)'].variables.UR['8'].dlps_gauss} & \acc{relative.full['SV(rw)'].variables.UR['8'].dlps_conditioned} & \acc{relative.full['SV(rw)'].variables.UR['8'].dlps_median} & 72\% & $+0.079$ \\
+Full, TBILL & 1 & \acc{relative.full['SV(rw)'].variables.TBILL['1'].dlps} & \acc{relative.full['SV(rw)'].variables.TBILL['1'].dlps_gauss} & \acc{relative.full['SV(rw)'].variables.TBILL['1'].dlps_conditioned} & \acc{relative.full['SV(rw)'].variables.TBILL['1'].dlps_median} & --- & $+0.449$ \\
+ & 8 & \acc{relative.full['SV(rw)'].variables.TBILL['8'].dlps} & \acc{relative.full['SV(rw)'].variables.TBILL['8'].dlps_gauss} & \acc{relative.full['SV(rw)'].variables.TBILL['8'].dlps_conditioned} & \acc{relative.full['SV(rw)'].variables.TBILL['8'].dlps_median} & 32\% & $-0.136$ \\
+Pre-crisis, GDP & 8 & \acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps} & \acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_gauss} & \acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_conditioned} & \acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_median} & --- & $+0.152$ \\
+Pre-crisis, INFL & 8 & \acc{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps} & \acc{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps_gauss} & \acc{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps_conditioned} & \acc{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps_median} & 12\% & $+0.280$ \\
+\addlinespace
+Pre-crisis, UR & 8 & \acc{relative.pre_crisis['SV(rw)'].variables.UR['8'].dlps} & \acc{relative.pre_crisis['SV(rw)'].variables.UR['8'].dlps_gauss} & \acc{relative.pre_crisis['SV(rw)'].variables.UR['8'].dlps_conditioned} & \acc{relative.pre_crisis['SV(rw)'].variables.UR['8'].dlps_median} & $>$100\% & $-0.166$ \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\raggedright
+Rule: full-sample $h = 8$ below $h = 1$ for UR and TBILL; pre-crisis $h = 8$ positive for GDP and
+INFL. The pre-crisis UR row is not part of the rule. A share is printed only where the three
+values have the sign of the sum; above 100\%, the other origins sum to the opposite sign.
+\end{table}
 
 \begin{table}[!htbp]
 \centering\small
@@ -2570,12 +2673,13 @@ check, not a parity test.}
 \includegraphics[width=0.9\linewidth]{figures/fig_cr_per_origin.pdf}
 \caption{Per-origin $\Delta$LPS of SV(rw) against Constant for unemployment at $h = 8$ (and $h = 1$
 for contrast), origins 1985Q1--2011Q2: path-conditioned against path-integrated, from the same
-forecast draws of the acceptance run.}
+forecast draws of the acceptance run. The $h = 8$ panel has a symmetric-log axis (linear within
+$\pm1$ nat), and the largest value of each series is labelled with its origin. Drawn from a
+per-origin export of the run's score cache that is not yet committed (its check reproduces the
+report's values exactly).}
 \label{fig:FigF1}
-% [ACC] needs docs/paper/data/cr_acceptance_per_origin.csv (TODO 5); docs/paper/figures/make_fig_cr_per_origin.py
+% [ACC] docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv (exported read-only from the run's score cache; check against the report: 2236 values, max abs diff 0; README.md there; to be committed with the paper); docs/paper/figures/make_fig_cr_per_origin.py
 \end{figure}
-\todo{TODO 5: export the per-origin scores of the acceptance run to
-\code{cr_acceptance_per_origin.csv} in \code{docs/paper/data/}, or drop \cref{fig:FigF1,fig:FigF3}.}
 
 \begin{figure}[!htbp]
 \centering
@@ -2592,9 +2696,10 @@ are marked.}
 \centering
 \includegraphics[width=0.9\linewidth]{figures/fig_cr_cumulative.pdf}
 \caption{Cumulative joint $\Delta$LPD of SV(rw) against Constant over origins at $h = 1$ and $h = 4$,
-with the end of the pre-crisis sample marked.}
+with the end of the pre-crisis sample marked. Drawn from the same uncommitted per-origin export as
+\cref{fig:FigF1}.}
 \label{fig:FigF3}
-% [ACC] needs the per-origin export (TODO 5); docs/paper/figures/make_fig_cr_cumulative.py
+% [ACC] docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv; docs/paper/figures/make_fig_cr_cumulative.py
 \end{figure}
 
 \subsection{Convergence against the MCMC budget}\label{app:cr-budget}
@@ -2605,9 +2710,8 @@ with 8 chains and at $4\times20{,}000$, for the identity ordering and the two wo
 first run, together with the main-stage against ordering-stage seed comparison.
 Its numbers are those of the pre-registration until the diagnostic is committed.
 \cref{fig:FigF2} compares the converged shares per ordering of the first full run and the
-acceptance run; across the $24$ orderings of the acceptance run, SV(rw) converged at
-\acc{min(orderings.per_ordering[*].converged_sv)} to
-\acc{max(orderings.per_ordering[*].converged_sv)} of origins. % [ACC] (moved from §11.7)
+acceptance run; in the acceptance run, SV(rw)'s smallest converged share across the $24$ orderings
+is \acc{min(orderings.per_ordering[*].converged_sv)}. % [ACC] (moved from §11.7)
 The seed comparison is itself evidence of R-hat noise at the threshold: the same models in the same
 ordering converged at \fullrun{72} (main-stage seeds) and \fullrun{69} (ordering-stage seeds) of 106
 origins, with joint $h = 1$ $\Delta$LPD of \fullrun{$+0.809$} and \fullrun{$+0.838$}.
@@ -2693,9 +2797,10 @@ environment of \cref{tab:TabG2}.
 % tests/mutation/test_mutants.py (mutation.jsonl); none in tests/sbc/test_block_tier.py, tests/parity, tests/analytic;
 % [REL] the files themselves
 \todo{TODO 7: run and commit these records, adding record hooks (or JUnit capture) for composition-level
-Tier~B, parity and the twins. Uncommitted Geweke (block, G-full, \code{exact=False}), SBC and
-mutation records of unknown commit and machine sit under
-\code{docs/paper/figures/data/validation_record/}; they are not release records.}
+Tier~B, parity and the twins. Geweke (block, G-full, \code{exact=False}), SBC and mutation
+records of unknown commit and machine sit under \code{docs/paper/figures/data/validation_record/},
+tracked on branch \code{paper-draft} since 33dd9f8 but not on \code{main}; they are not release
+records.}
 
 \emph{Data.}
 The FRED vintages are downloaded on demand from the St.\ Louis Fed, verified against the SHA-256

@@ -1,0 +1,57 @@
+{
+ "cache": "/Users/yigitokar/.cache/rai-bvar-cr-c823d20",
+ "repo": "/private/tmp/claude-501/-Users-yigitokar-Library-Application-Support-Claude-scratch-workspaces-d4044e9f-e5b1-4360-a85e-73059e262094-317c3278-6d8d-4762-ae9e-105a2cb46703-scratch-2026-10-22-2b2d81/308c7bea-88f8-4f89-bc46-4961cf4d3cf2/scratchpad/rai-bvar-c823d20",
+ "git": {
+  "commit": "c823d207e0525aed98f427f437d687f7f131c92c",
+  "dirty": false
+ },
+ "config": "acceptance",
+ "lpd_method": "integrated",
+ "draws": 8000,
+ "seed": 0,
+ "mcmc": {
+  "chains": 4,
+  "draws": 20000,
+  "burn": 1000
+ },
+ "rai_bvar": "0.0.1",
+ "models": [
+  "Constant",
+  "SV(rw)",
+  "SV",
+  "SV(rw,t10)",
+  "AR-SV(0.9)"
+ ],
+ "origins": [
+  "1985Q1",
+  "2011Q2",
+  106
+ ],
+ "rows": 10600,
+ "csv_sha256": "2a95729209a4cc18918b60848f18c1caf4d29687a4226a87c3fb8ec4c8e00688",
+ "check": {
+  "report": "/Users/yigitokar/rai-bvar-paper/benchmarks/reports/clark_ravazzolo_acceptance.json",
+  "report_sha256": "d5c3ec8d6911a4d26940b7351e62f45b8d89cf01d3bcc9958b24772118e935e3",
+  "values_compared": 2236,
+  "top3_origins_compared": 576,
+  "tolerance": 1e-09,
+  "max_abs_diff": 0.0,
+  "mismatches": 0,
+  "named": {
+   "relative.full['SV(rw)'].variables.UR['8'].dlps_top": [
+    [
+     "2007Q4",
+     7.594654597593976
+    ],
+    [
+     "2008Q1",
+     6.626345271154726
+    ],
+    [
+     "2008Q2",
+     6.51530354616955
+    ]
+   ]
+  }
+ }
+}

@@ -4,12 +4,18 @@
 %
 % Number discipline (OUTLINE.md §11):
 %   * every number of the acceptance run is an \acc{} placeholder, filled from
-%     benchmarks/reports/clark_ravazzolo_acceptance.json (main repo; to be committed, TODO 2);
+%     benchmarks/reports/clark_ravazzolo_acceptance.json (main repo, committed in 65dd212, sha256
+%     d5c3ec8d...; acceptance_values.tex, written by fill_acceptance.py);
 %   * numbers of the first full run (report benchmarks/reports/clark_ravazzolo.json, committed in
 %     551f181, code 4bb978a, path-conditioned LPD) are history and are wrapped in \fullrun{};
 %   * numbers of the fit-level convergence diagnostic and of the estimator review are quoted from
 %     the committed pre-registration (c823d20) and tagged [PREREG];
-%   * every LPD number names the estimator that produced it.
+%   * every LPD number names the estimator that produced it;
+%   * a few descriptive numbers are arithmetic on report keys (the top-3 share and the mean
+%     without the three largest origins of a cell, from n, dlps and dlps_top); they are typed,
+%     with the keys and the recomputation in the tag ("recomputed from"), as for reading rule B.
+%   * numbers from the per-origin export (figures/data/cr_acceptance/, untracked) are not typed in
+%     the text until that export is committed (TODO 5); FigF1 and FigF3 are drawn from it and say so.
 %
 % Placeholder grammar used in \acc{...} (mirrors the report dict built in main() and the
 % helpers relative_table(), verdicts(), criteria() and ordering_stage() of
@@ -37,14 +43,15 @@ It exercises the whole stack on real data and illustrates the workflow; it does 
 econometric claim beyond these data and models.
 We use the working paper's numbers \citep[Tables~1--3, VAR block]{clark2012macroeconomic}; the
 article's tables were not accessed (\cref{app:cr-data}). % [R] benchmarks/clark_ravazzolo.py CR_FULL l.147, CR_PRE_DLPS l.167 (c823d20); N08 §C1, §C5
-Clark and Ravazzolo state no recursive ordering, so we run all $24$ orderings, with the
-table order GDP, INFL, UR, TBILL as the identity ordering. % [R] N08 §C2, §D item 2
+The working paper states no recursive ordering, so we run all $24$ orderings, with the
+table order GDP, INFL, UR, TBILL as the identity ordering. % [R] N08 §C2, §D item 2 (the JAE text was not read; TODO 22)
 
 \subsection{Data and models}\label{sec:replication-data}\label{sec:replication-models}
 
 The data are FRED-QD and FRED-MD, vintage 2026-09 \citep{mccracken2021fredqd,mccracken2016fredmd},
 checked against their SHA-256 checksums; estimation starts in 1965Q1, as in
-\citet{clark2011realtime}, because FRED-QD starts in 1959. % [R] N08 §C2 (1965Q1 precedent; CR start 1955Q1)
+\citet{clark2011realtime}, not in Clark and Ravazzolo's 1955Q1, which FRED-QD (from 1959) cannot
+provide (\cref{app:cr-deviations}). % [R] N08 §C2 (1965Q1 precedent; CR start 1955Q1; 1960Q2 the feasible alternative)
 The forecasts are pseudo real time on the
 final vintage, not on real-time vintages \citep{croushore2001realtime}. \cref{tab:TabF2} lists the
 series and transformations, and \cref{app:cr} every deviation from the original design. % [V] benchmarks/clark_ravazzolo.py load_data l.236, DEVIATIONS l.1380
@@ -62,15 +69,20 @@ the order-invariant baseline \code{Constant('iw_equivalent')} \citep{chan2022asy
 of the normal-diffuse VAR; the primary arm SV(rw), Clark and Ravazzolo's VAR-SV; the library's AR(1)
 default SV; their variants SV(rw,t10) and AR-SV(0.9); and a structural Mode~I pair. Apart from the
 variants' priors on $\nu$ and $\phi$, the SV priors are the library defaults
-(\cref{sec:framework:vol}), not Clark and Ravazzolo's, and no prior was tuned. % [V] DEVIATIONS item 5; docstring l.66-67
+(\cref{sec:framework:vol}), not Clark and Ravazzolo's, and no prior was tuned. Against this
+baseline the SV arms also differ in the prior of the contemporaneous coefficients
+(\cref{sec:eval-verdict}). % [V] DEVIATIONS item 5; docstring l.66-67; src/rai_bvar/priors/structural.py::contemp_arrays (SV: scaling "none", Mode I; iw_equivalent: scaling "lambda")
 
 \subsection{Evaluation design}\label{sec:replication-design}
 
 Forecasts come from an expanding window at $106$ origins 1985Q1--2011Q2, of which the $92$ up
-to 2007Q4 form the pre-crisis sample, at horizons of $1, 2, 4, 8$ quarters. Each origin is a
-separate MCMC fit with its own seed. % [V] benchmarks/clark_ravazzolo.py FULL, PRE_CRISIS_END, HORIZONS l.141-143
+to 2007Q4 form the pre-crisis sample, at horizons of $1, 2, 4, 8$ quarters. Both samples are
+defined by origin, so every horizon uses all of their origins: the pre-crisis targets at $h = 8$
+run to 2009Q4, and the full-sample ones to 2013Q2. Each origin is a separate MCMC fit with its
+own seed. % [V] benchmarks/clark_ravazzolo.py FULL, PRE_CRISIS_END, HORIZONS l.141-143; relative_table l.479 (sample = origins; no target filter); 2007Q4 + 8 = 2009Q4, 2011Q2 + 8 = 2013Q2. Whether CR define their samples the same way: TODO 22 (stat minor 12, software major 6)
 Under the expanding window the Diebold--Mariano (DM/HLN) $p$-values are descriptive, so a
-``better'' verdict must come through the model confidence set (MCS; \cref{sec:eval-tests}).
+``better'' verdict must come through the model confidence set (MCS; \cref{sec:eval-tests}), itself a
+descriptive route here (\cref{sec:eval-verdict}).
 
 The primary score is the Rao--Blackwellised (RB) log predictive density of
 \cref{sec:eval-lpd}: path-conditioned at $h > 1$ in the first full run, path-integrated in the
@@ -112,69 +124,59 @@ on the failure of \cref{sec:robustness-f2} (\cref{tab:TabF1}). It met criteria
 \fullrun{1, 2, 3 and 5} and missed \fullrun{4 and 6}.
 % [FULL: config; criteria[*].met] benchmarks/reports/clark_ravazzolo.json (551f181, code 4bb978a); [R] issue #3 04:10Z
 
-Criterion~4 failed on one cell: in the full sample the unemployment gain at $h = 8$,
-\fullrun{$+1.954$}, exceeded the one at $h = 1$, \fullrun{$+0.159$}, driven by three 2007--08
-origins with per-origin differences of \fullrun{$+41.6$}, \fullrun{$+41.4$} and \fullrun{$+40.4$}
-nats, among \fullrun{12} RB-degenerate ones.
-% [FULL: criteria[id=4].detail; relative.full['SV(rw)'].variables.UR['8'].{dlps,dlps_median,dlps_top,rb_degenerate,dlps_gauss}; rb_gauss_disagree counts recomputed]
-Criterion~6 failed on the convergence gate alone. SV(rw) was ``better'' at $h = 1$ in \fullrun{0}
-of $24$ orderings with the gate on and in \fullrun{24} of $24$ with it off, and it converged at
-\fullrun{57--82\%} of origins across orderings (\code{Constant}: \fullrun{100\%};
-\cref{app:cr-first-run}). % [FULL: criteria[id=6].detail; orderings.per_ordering[*].converged_*; warnings[arm]['MCMC not converged'].example (SV(rw) 1 of 13, R-hat 1.015, ESS 618; SV 1 of 21, 1.013, 550; SV(rw,t10) 1 of 13, 1.020, 537; AR-SV(0.9) 1 of 21, 1.012, 743); verdicts.full (gate off, h=1: MCS25 model in, reference out)]
-
-\paragraph{(a) The budget.}
-SV(rw) was refitted at the main-stage fit seeds under several MCMC budgets, with fit-level
-diagnostics only and no forecasts or scores (\cref{tab:TabF6}). In the identity ordering $72$ of
-$106$ origins converged at $4 \times 5000$ and all $106$ at $4 \times 20{,}000$; in the two worst
-orderings the counts went from $71$ and $63$ to $106$. Every base-budget failure was narrow, on a
-$\sigma$ quantity with $\hat R < 1.03$.
-% [PREREG] benchmarks/reports/clark_ravazzolo_preregistration.md item 1 (c823d20). Per-fit records in docs/paper/figures/data/convergence_diagnostic/{identity_ordering,worst_orderings}.jsonl + conv_diag.py (paper worktree, untracked); recounted from them: 72/79/92/106; 71,63 -> 106,106; max R-hat 1.0061/1.0049/1.0046; min ESS 1763/1689/1717; every failing base fit has a sigma quantity among its failures. Stays [PREREG] until committed.
-Near the threshold the converged count moves with the seed (\fullrun{72} against \fullrun{69}
-origins under the first run's two seeds; \cref{app:cr-budget}), so budgets are best sized with % [FULL: converged.full['SV(rw)']; orderings.per_ordering[ordering=0].{converged_sv,dlpd_h1}]
-fit-only diagnostics before any score exists.
-
-\paragraph{(b) The estimator and the forecast draws.}
-The criterion-4 cell was driven by the tail failure of the path-conditioned estimator
-(\cref{sec:eval-tail}, \cref{fig:lpd-estimators}); the acceptance run uses the path-integrated
-estimator. % [PREREG] "Why there is a second run"; [R] NOTES 8b (review of the quick run); [FULL: 12 RB-degenerate origins at UR h=8]
-Its weights still concentrate at crisis origins, so the forecast draws were raised to $8000$, which
-cut the thinning error of Constant's estimate at a crisis cell from $0.75$--$1.06$ to $0.09$--$0.19$ nats
-(standard deviation; \cref{app:prereg}).
-% [PREREG] item 3; [R] NOTES 8b addendum (main repo, b9c66c0)
+Criterion~4 failed on one cell, full-sample unemployment at $h = 8$ (\fullrun{$+1.954$} against
+\fullrun{$+0.159$} at $h = 1$), driven by three 2007--08 origins with differences of
+\fullrun{$+40.4$} to \fullrun{$+41.6$} nats, where the path-conditioned estimator had collapsed
+(\cref{sec:eval-tail}). Criterion~6 failed on the convergence gate alone: SV(rw) was ``better'' at
+$h = 1$ in \fullrun{0} of $24$ orderings with the gate on and in \fullrun{24} with it off, having
+converged at \fullrun{57--82\%} of origins (\code{Constant}: \fullrun{100\%};
+\cref{app:cr-first-run}). % [FULL: criteria[id=4].detail; relative.full['SV(rw)'].variables.UR['8'].{dlps,dlps_top,rb_degenerate} (12 RB-degenerate origins); criteria[id=6].detail; orderings.per_ordering[*].converged_*; warnings[arm]['MCMC not converged'].example (SV(rw) 1 of 13, R-hat 1.015, ESS 618; SV 1 of 21, 1.013, 550; SV(rw,t10) 1 of 13, 1.020, 537; AR-SV(0.9) 1 of 21, 1.012, 743); verdicts.full (gate off, h=1: MCS25 model in, reference out)]; [PREREG] "Why there is a second run"; [R] NOTES 8b (review of the quick run)
+Refits of SV(rw) at the main-stage seeds, with fit-level diagnostics and no forecasts or scores
+(\cref{tab:TabF6}), showed every base-budget failure to be narrow, on a $\sigma$ quantity with
+$\hat R < 1.03$, and all $106$ origins converging at $4 \times 20{,}000$ in the identity ordering
+($72$ at $4 \times 5000$) and in the two worst orderings ($71$ and $63$). Near the threshold the
+count moves with the seed (\fullrun{72} against \fullrun{69} origins under the first run's two
+seeds; \cref{app:cr-budget}), so budgets are best sized with such diagnostics before any score
+exists. % [PREREG] benchmarks/reports/clark_ravazzolo_preregistration.md item 1 (c823d20). Per-fit records in docs/paper/figures/data/convergence_diagnostic/{identity_ordering,worst_orderings}.jsonl + conv_diag.py (tracked on branch paper-draft since 33dd9f8, not on main 888f620); recounted from them: 72/79/92/106; 71,63 -> 106,106; max R-hat 1.0061/1.0049/1.0046; min ESS 1763/1689/1717; every failing base fit has a sigma quantity among its failures. Stays [PREREG] until committed. [FULL: converged.full['SV(rw)']; orderings.per_ordering[ordering=0].{converged_sv,dlpd_h1}]
 
 \paragraph{What was registered.}
-The pre-registration (\cref{app:prereg}), committed in c823d20 before the run was launched from a
-detached worktree at that commit with a clean tree (\cref{app:cr-provenance}), changes exactly three
-settings:
-$4 \times 20{,}000$ kept draws (burn-in $1000$) for every MCMC arm in every stage, the
-path-integrated LPD as the primary score, and $8000$ forecast draws per origin; everything else,
-the coded criteria and the $95\%$ gate included, is unchanged. % [PREREG] "What changes", "What does not change"; [V] benchmarks/clark_ravazzolo.py CONFIGS l.186-199; launch: [R] OUTLINE §0.4 (commit 2026-10-23 12:10:45 EDT; launch 12:10 EDT, same minute: the order rests on the worktree being at c823d20, to be confirmed by versions.git_commit and the archived log)
-It is explicit about its limits: ``These changes are motivated by that failure analysis, so the
-run is not blind to the previous results. What is pre-registered is that the settings below were
-fixed before any score of the new run existed, and that the criteria are evaluated on them as
-coded, whatever the outcome.'' It states in advance that criterion~4 may still fail on
-unemployment and that no further run with other settings is made after the scores are seen, except
-to fix a bug.
-% [PREREG] "Stated in advance"; the review numbers are of the quick run: benchmarks/clark_ravazzolo.py RELIABILITY_NOTE l.953 (dossier 06 §7.6 fact-check)
+The pre-registration (\cref{app:prereg}) changes exactly three settings: $4 \times 20{,}000$ kept
+draws (burn-in $1000$) for every MCMC arm in every stage, the path-integrated LPD as the primary
+score, and $8000$ forecast draws per origin, which cut the thinning error of \code{Constant}'s
+estimate at a crisis cell from $0.75$--$1.06$ to $0.09$--$0.19$ nats (standard deviation);
+everything else, the coded criteria and the $95\%$ gate included, is unchanged. % [PREREG] "What changes" (items 1-3), "What does not change"; [V] benchmarks/clark_ravazzolo.py CONFIGS l.186-199; [R] NOTES 8b addendum (main repo, b9c66c0)
+It was committed and pushed to the hosted repository before the run was launched from a clean
+checkout of that commit: GitHub's repository activity log records the creation of the branch at
+that commit at 16:10:46~UTC, ten seconds before the run's first log line and about a minute and a
+half before its first score (\cref{app:cr-provenance}). % launch: [ACC: versions.git_commit = c823d20, versions.git_dirty = false]; [V] figures/data/provenance/github_activity_phase-2-cr-acceptance.json (gh api repos/yigitokar/rai-bvar/activity?ref=refs/heads/phase-2-cr-acceptance: branch_creation 0000000->c823d20 at 2026-10-23T16:10:46Z, server-side); [R] committed run log benchmarks/reports/clark_ravazzolo_acceptance.log (65dd212): start 16:10:56Z, first arm finished at 88 s, end 19:46:21Z (software referee major 7)
+It says that the run is not blind to the first, that the criteria are evaluated as coded whatever
+the outcome, that criterion~4 may still fail on unemployment, and that no further run with other
+settings is made after the scores are seen, except to fix a bug.
+% [PREREG] "Why there is a second run" ("not blind to the previous results"), "Stated in advance"; the review numbers are of the quick run: benchmarks/clark_ravazzolo.py RELIABILITY_NOTE l.953 (dossier 06 §7.6 fact-check)
 
 \subsection{Results of the acceptance run}\label{sec:replication-results}
 
 \paragraph{Reading rules.}
-Which numbers may move between the two runs was written down before the acceptance numbers
-existed (\cref{app:cr-results}): the RB scores at $h \geq 2$, and everything built on them, may
-move with the estimator; every $h = 1$ LPD number and the CRPS, RMSE and Gaussian scores by Monte
-Carlo noise only; and the converged shares, gate-on verdicts and MC standard errors with the budget. % [R] docs/paper/dossiers/06_empirical.md §9.5, OUTLINE §11.9 (paper worktree, untracked; no acceptance JSON existed then, OUTLINE §0.4)
-\todo{Commit these reading rules before the acceptance JSON is committed, so that their timing is
-checkable, or drop the clause ``before the acceptance numbers existed''.}
+The paper's reading rules, which are not part of the pre-registration (\cref{app:cr-results}), let
+the RB scores at $h \geq 2$ move with the estimator, the $h = 1$, CRPS, RMSE and Gaussian numbers by
+Monte Carlo noise only, and the converged shares and gate-on verdicts with the budget. % [R] OUTLINE §11.9, dossiers/06_empirical.md §9.5; first committed in 33dd9f8 (paper-draft, 2026-10-23 19:25Z), after the run had written its main-stage report (committed run log: start 16:10:56Z, "main stage written" at 1484 s) and before the report was committed (65dd212, 19:47Z), so their timing relative to the numbers cannot be checked
+The $h = 1$ log-score gains of every SV arm differ from the first run's by less than the rules' Monte
+Carlo yardstick (SV(rw)'s joint gain: \acc{relative.full['SV(rw)'].joint['1'].dlpd} against
+\fullrun{$+0.809$}), a descriptive comparison: the yardstick is the largest move over all arms
+between one earlier pair of runs, one of which predates a sampler fix (\cref{app:cr-results}).
+% [ACC]/[FULL] recomputed from relative[sample][arm] at h = 1 of clark_ravazzolo_acceptance.json and clark_ravazzolo.json (551f181): largest move 0.0031 per marginal cell (full, SV(rw,t10), GDP) and 0.0116 joint (full, AR-SV(0.9)); SV(rw), full sample: 0.0015 and 0.0106; yardstick of rule B (App. F): 0.0044 and 0.0122
 
-\paragraph{Criteria and headline.}
-The acceptance run's outcome by criterion is \acc{criteria[*].met} (both runs side by side in
-\cref{tab:cr-criteria}, \cref{app:cr-criteria}), and \cref{tab:cr-headline} gives the headline
-comparison. % [ACC: criteria[*].met]
-The joint $h = 1$ gain is \acc{relative.full['SV(rw)'].joint['1'].dlpd} nats per quarter (descriptive one-sided DM
-$p$ \acc{relative.full['SV(rw)'].joint['1'].dm_p_better}). The unemployment cell at $h = 8$ is
-\acc{relative.full['SV(rw)'].variables.UR['8'].dlps} path-integrated (the other estimators in
-\cref{tab:cr-headline}).
+\paragraph{Outcome and headline.}
+As coded, the outcome is: \acc{criteria[*].met} (\cref{tab:cr-criteria}). % [ACC: criteria[*].met]
+Every reduced-form arm converged at \acc{min(converged[*][*])} of origins in both samples, on
+the gate's primary quantities, which leave the intercepts out (\cref{sec:limitations}; the report
+has no share for the structural pair), and no reduced-form origin is RB-degenerate
+(\acc{max(relative[*][*].joint[*].rb_degenerate)} at every horizon), a flag that detects only a
+near-total collapse of the weights onto one draw. % [ACC: converged.{full,pre_crisis}[*] (the five reduced-form arms; the report has no converged share for the structural pair, whose joint h = 4 cell has one RB-degenerate origin, 2008Q2: structural.joint['4']); relative.{full,pre_crisis}[*].joint[*].rb_degenerate]
+SV(rw)'s gain over \code{Constant} is positive for every variable at $h = 1$ and $2$ in both
+samples, as criterion~1 requires, its CRPS and RMSE ratios at $h \leq 2$ are below one, and the
+joint $h = 1$ gain is \acc{relative.full['SV(rw)'].joint['1'].dlpd} nats per quarter (descriptive
+one-sided DM $p$ \acc{relative.full['SV(rw)'].joint['1'].dm_p_better}; \cref{tab:cr-headline,fig:FigF3}). % [ACC: criteria[id=1..3].met and .detail; relative.full['SV(rw)'].variables[*]['1','2'].{crps_ratio,rmse_ratio}, largest 0.936 and 0.969]
 
 \begin{table}[tbp]
 \centering
@@ -190,7 +192,7 @@ descriptive under the expanding window. CR: Clark and Ravazzolo's VAR-SV against
 Tables 1--3, Gaussian-approximation log score.}
 \label{tab:cr-headline}\label{Tab13}\label{tab:Tab13}
 % The tabular is boxed and shrunk to \textwidth only if it is wider (the long \acc placeholders of the draft); filled with numbers it keeps its natural size.
-% data: acceptance JSON relative.full['SV(rw)'].variables[v][h].{dlps,dlps_conditioned,dlps_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better,crps_ratio,rmse_ratio}, .joint[h].{dlpd,dlpd_conditioned,dlpd_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better}; CR columns [R] benchmarks/clark_ravazzolo.py CR_FULL l.147 (= clark2012macroeconomic Tables 1-3); script tab_cr_headline.py (OUTLINE §14)
+% data: acceptance JSON relative.full['SV(rw)'].variables[v][h].{dlps,dlps_conditioned,dlps_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better,crps_ratio,rmse_ratio}, .joint[h].{dlpd,dlpd_conditioned,dlpd_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better}; CR columns [R] benchmarks/clark_ravazzolo.py CR_FULL l.147 (= clark2012macroeconomic Tables 1-3); typed in this file, the \acc cells filled by fill_acceptance.py; the generator tab_cr_headline.py planned in OUTLINE §14 is not written (TODO 20)
 \sbox{\crheadlinebox}{%
 \begin{tabular}{@{}llrrrcrrrrrrr@{}}
 \toprule
@@ -231,32 +233,89 @@ joint & 1 & \acc{relative.full['SV(rw)'].joint['1'].dlpd} & \acc{relative.full['
 \fi
 \end{table}
 
-\paragraph{Pre-crisis sample and the other arms.}
-Criterion~4 also needs the pre-crisis gains of GDP and inflation at $h = 8$ to stay positive
-(\cref{tab:TabF4}). Path-integrated, the GDP cell is
-\acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps} and the inflation cell
-\acc{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps}. The budget diagnostic covered SV(rw)
-only, so the other SV arms may still miss the gate and stay ``inconclusive'' (\cref{tab:TabF5}).
-Over the full sample SV(rw) converged at \acc{converged.full['SV(rw)']} of origins and
-\code{Constant} at \acc{converged.full.Constant}. At $h = 1$
-the SV(rw) verdict is
-\acc{verdicts.full[model='SV(rw)',horizon=1,convergence_gate=true].verdict} with the gate on and
-\acc{verdicts.full[model='SV(rw)',horizon=1,convergence_gate=false].verdict} with it off.
-\todo{After the JSON is in: state the route of every ``better'' verdict from
-\code{verdicts.full[*].reasons} and \code{model_in_mcs}/\code{reference_in_mcs}; under the
-expanding window it can only be the MCS.}
+\paragraph{Criterion~4.}
+Criterion~4 fails on one of its four parts, as the pre-registration allowed. % [PREREG] "Stated in advance": criterion 4 may still fail on UR
+Its rule asks the full-sample gain at $h = 8$ to be below that at $h = 1$ for unemployment and the
+bill, and the pre-crisis gain at $h = 8$ to be positive for GDP and inflation. The bill's gain falls
+from \acc{relative.full['SV(rw)'].variables.TBILL['1'].dlps} to
+\acc{relative.full['SV(rw)'].variables.TBILL['8'].dlps}, and the pre-crisis gains are
+\acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps} for GDP and
+\acc{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps} for inflation (\cref{tab:TabF4});
+the unemployment gain rises, from \acc{relative.full['SV(rw)'].variables.UR['1'].dlps} at $h = 1$
+to \acc{relative.full['SV(rw)'].variables.UR['8'].dlps} at $h = 8$, path-integrated. % [ACC: criteria[id=4].met, .detail; the cells named]
+The following numbers are secondary and descriptive: reported next to the rule, they never enter it
+(\cref{tab:cr-c4}). % [V] benchmarks/clark_ravazzolo.py _c4_secondary (l.621, called at l.754); LPD_INTEGRATED_DEVIATION (l.1372)
+The unemployment gain at $h = 8$ is concentrated: its three largest per-origin values,
+\acc{relative.full['SV(rw)'].variables.UR['8'].dlps_top[0][1]},
+\acc{relative.full['SV(rw)'].variables.UR['8'].dlps_top[1][1]} and
+\acc{relative.full['SV(rw)'].variables.UR['8'].dlps_top[2][1]} nats at
+\acc{relative.full['SV(rw)'].variables.UR['8'].dlps_top[0][0]}--\acc{relative.full['SV(rw)'].variables.UR['8'].dlps_top[2][0]}
+(\cref{fig:FigF1}; first run: \fullrun{$+40.4$ to $+41.6$}), make up 72\% of the 106-origin sum,
+and without the three values largest in absolute value the mean is $+0.079$ at $h = 8$ against
+$+0.151$ at $h = 1$; its median and the pre-crisis mean also fall with the horizon
+(\cref{tab:cr-c4}). Each of these origins carries Monte Carlo error of about 1.3 nats per arm,
+which moves a 106-origin mean by hundredths of a nat (\cref{app:prereg}).
+% recomputed from the report: relative.full['SV(rw)'].variables.UR[h].{n, dlps, dlps_top}: h = 8 sum 0.27254 x 106 = 28.889, top three 20.736 (71.8%), (28.889 - 20.736)/103 = +0.0792; h = 1: (16.988 - 1.458)/103 = +0.1508 (top three by |d|: +4.652, -1.637, -1.556) (stat referee major 1, macro major 3); [PREREG] "Stated in advance" (about 1.3 nats per arm at a crisis origin; a few hundredths in a 106-origin mean) (stat referee major 4); [ACC] dlps_median h1 +0.264, h8 +0.140; pre-crisis UR h1 +0.148, h8 +0.026
+On Clark and Ravazzolo's Gaussian-approximation score, a reported secondary result, the
+unemployment gain shrinks as in their results, from
+\acc{relative.full['SV(rw)'].variables.UR['1'].dlps_gauss} to
+\acc{relative.full['SV(rw)'].variables.UR['8'].dlps_gauss}, but criterion~4 would still fail on
+that score, on the pre-crisis GDP gain at $h = 8$
+(\acc{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_gauss}). The path-conditioned estimator
+puts the $h = 8$ unemployment gain at
+\acc{relative.full['SV(rw)'].variables.UR['8'].dlps_conditioned} (first run: \fullrun{$+1.954$});
+the pre-crisis triple is in \cref{tab:TabF4}. % [ACC: relative.{full,pre_crisis}['SV(rw)'].variables.{UR,GDP}[h].{dlps_gauss,dlps_conditioned}; the same values, rounded, in criteria[id=4].detail: Gaussian-approx UR h1 +0.122 -> h8 -0.526, TBILL +0.315 -> -0.230, pre-crisis GDP h8 -0.001, INFL h8 +0.354; pre-crisis UR h8: +0.026 integrated, +0.427 conditioned, -0.683 Gaussian (TabF4)] (software referee major 5)
+
+\paragraph{Verdicts and their routes.}
+With every reduced-form arm converged, the gate changes no verdict (\cref{tab:TabF5}), % [ACC: verdicts.{full,pre_crisis}: gate-on and gate-off verdicts equal in all 2 x 16 pairs of rows]
+and every ``better'' verdict, in either sample, comes through the MCS route (the SV arm in the 75\%
+MCS, \code{Constant} out), as it must under the expanding window. % [ACC: verdicts.{full,pre_crisis}[verdict='better'].{model_in_mcs,reference_in_mcs,reasons}: true, false, "MCS25: model in, reference out" in all 18 + 24 rows]
+Verdicts depend on the comparison set. The main stage passes all five reduced-form arms
+(\code{Constant}, SV(rw), SV, SV(rw,t10), AR-SV(0.9)) to one \code{compare()}, so its MCS is formed
+over all five: SV(rw)'s full-sample verdict is
+\acc{verdicts.full[model='SV(rw)',horizon=1,convergence_gate=true].verdict} at $h = 1$ and
+\acc{verdicts.full[model='SV(rw)',horizon=2,convergence_gate=true].verdict} at $h = 2$, $4$ and
+$8$, where that MCS retains neither SV(rw) nor \code{Constant}, although at $h = 2$ the total gain is
+\acc{verdicts.full[model='SV(rw)',horizon=2,convergence_gate=true].dlpd} nats with an MCSE of
+\acc{verdicts.full[model='SV(rw)',horizon=2,convergence_gate=true].dlpd_mcse}. The ordering stage
+compares SV(rw) with \code{Constant} alone, and there its verdict is ``better'' at every horizon in
+all $24$ orderings, at $h = 8$ with descriptive one-sided DM $p$-values from
+\acc{min(orderings.per_ordering[*].verdicts[horizon=8,convergence_gate=true].dm_pvalue_better)} to
+\acc{max(orderings.per_ordering[*].verdicts[horizon=8,convergence_gate=true].dm_pvalue_better)},
+mostly above the DM route's 0.10: the two-model MCS is the looser test
+(\cref{sec:eval-verdict}). % [ACC: verdicts.full[model='SV(rw)',horizon=2|4|8].{verdict,model_in_mcs,reference_in_mcs} = inconclusive, false, false (gate on and off); orderings.per_ordering[*].verdicts: 'better' at h = 1, 2, 4, 8, gate on and off, 24 of 24]; [V] benchmarks/clark_ravazzolo.py l.1570-1575 (one CompareResult with every main-stage arm), l.910 ([PRIMARY_SV] and the baseline only); src/rai_bvar/evaluation/compare.py CompareResult.mcs (over every model of the comparison)
+Criterion~5 is met: neither variant is better than both plain SV arms (DM $p < 0.10$) at any joint
+horizon or marginal cell. % [ACC: criteria[id=5].met, .detail (0/4 joint horizons and 0/16 cells for each variant)]
 
 \paragraph{Ordering robustness.}
-\cref{fig:cr-orderings} shows the $h = 1$ gain in each of the $24$ orderings (for the first run,
-\cref{app:cr-first-run}). The joint $h = 1$ range is
-\acc{orderings.results['SV(rw)'].joint_lpd_range['1']} nats, to be read against the joint gain
-above, and the verdict is ``better'' in
+Across the $24$ orderings (\cref{fig:cr-orderings}) SV(rw)'s joint $h = 1$ score ranges over
+\acc{orderings.results['SV(rw)'].joint_lpd_range['1']} nats, against a gain of
+\acc{relative.full['SV(rw)'].joint['1'].dlpd}; for GDP, the smallest gain, over
+\acc{orderings.results['SV(rw)'].summary[variable='GDP',horizon=1].lpd_range} against
+\acc{relative.full['SV(rw)'].variables.GDP['1'].dlps}. % [ACC: orderings.results['SV(rw)'].{joint_lpd_range,summary}; relative.full['SV(rw)'].variables[*]['1'].dlps (GDP the smallest)]. lpd_range and joint_lpd_range are the range over orderings of SV(rw)'s own average log score (src/rai_bvar/structural/ordering.py docstring l.45; benchmarks/clark_ravazzolo.py l.878), not of its gain over Constant: the gain's own range, max - min of orderings.per_ordering[*].dlpd_h1, is 0.0774 (+0.800 to +0.877, App. F.7; Fig. 6 prints "spread 0.077"), against 0.0757 here; for GDP both round to 0.052 (final number check, 2026-10-23)
+SV(rw) converged at \acc{min(orderings.per_ordering[*].converged_sv)} of origins in every ordering
+(first run: \fullrun{57--82\%}; \cref{fig:FigF2}), and its verdict is ``better'' in
 \acc{count(orderings.per_ordering[*].verdict_h1 = 'better')} of $24$ orderings with the gate on and
-\acc{count(orderings.per_ordering[*].verdict_h1_ungated = 'better')} with it off. The
-\code{Constant} arm, flagged ``material'' at two cells in the first run (\cref{app:cr-first-run}), % [FULL: orderings.results.Constant.material = true; summary rows (joint,2) lpd_range 0.189, SNR 14.3; (UR,8) 1.233, SNR 7.5]
-is flagged \acc{orderings.results.Constant.material}
-(\acc{orderings.results.Constant.summary[material=true]}); as it is order invariant, we read a flag
-on it as a limitation of the noise floor (\cref{sec:limitations}), not as order dependence.
+\acc{count(orderings.per_ordering[*].verdict_h1_ungated = 'better')} with it off; so criterion~6,
+which the first run missed on the gate alone, is met. The orderings share the data, so these are
+24 dependent comparisons, not 24 confirmations. % [ACC: criteria[id=6].met, .detail]; [FULL: orderings.per_ordering[*].converged_sv]
+For scale, the order-invariant \code{Constant} arm, whose spread across orderings is the Monte Carlo
+noise of another sampler and so at best a lower bound on SV(rw)'s, has ranges of
+\acc{min(orderings.results.Constant.summary[*].lpd_range)}--\acc{max(orderings.results.Constant.summary[*].lpd_range)}
+nats over its 20 variable--horizon cells
+(\acc{min(orderings.results.Constant.joint_lpd_range[*])}--\acc{max(orderings.results.Constant.joint_lpd_range[*])}
+for the joint score), against
+\acc{min(orderings.results['SV(rw)'].summary[*].lpd_range)}--\acc{max(orderings.results['SV(rw)'].summary[*].lpd_range)}
+(\acc{min(orderings.results['SV(rw)'].joint_lpd_range[*])}--\acc{max(orderings.results['SV(rw)'].joint_lpd_range[*])})
+for SV(rw). % [ACC: orderings.results.{Constant,'SV(rw)'}.{summary[*].lpd_range, joint_lpd_range}] (stat referee major 7, macro major 6)
+The materiality flags rest on a noise floor estimated from one replicate
+(\cref{sec:limitations}): \code{Constant}, flagged at two cells in the first run
+(\cref{app:cr-first-run}), is not flagged here (\code{material} =
+\acc{orderings.results.Constant.material}), which is one realisation, and SV(rw) is flagged at
+\acc{count(orderings.results['SV(rw)'].summary[*].material = true)} of its $20$ cells. % [FULL: orderings.results.Constant.material = true; summary rows (joint,2) lpd_range 0.189, SNR 14.3; (UR,8) 1.233, SNR 7.5]; [ACC: orderings.results['SV(rw)'].material = true; summary[*].material (GDP, UR, TBILL at h = 1; INFL at h = 4, 8; UR, TBILL and joint at h >= 2; 14 of 20)]
+Part of SV(rw)'s ordering dependence may come from its priors, whose centring depends on an
+equation's position ($\mu_i$ and $h_{i,0}$ at $\log(\psi_i/\iota)$; \cref{sec:framework:vol}), not
+only from the triangular factorisation. % [V] src/rai_bvar/priors/sv_arrays.py::sv_prior_arrays; 03_framework.tex (SV priors); TabF3 (stat referee major 7)
 
 \begin{figure}[tbp]
 \centering
@@ -266,35 +325,48 @@ $h = 1$ per variable and joint, one point per ordering (24), with the identity o
 column gives the spread across orderings and SV(rw)'s signal-to-noise ratio, the quantity the
 materiality flag compares with 3. Right: joint ordering range by horizon for SV(rw) and for the
 order-invariant \code{Constant} arm (negative control), with flagged cells marked. At $h \geq 2$
-the scores are path-integrated.}
+the scores are path-integrated. The flags' noise floor rests on one replicate per arm, so a flag,
+or its absence, is one realisation.}
 \label{fig:cr-orderings}\label{Fig6}\label{fig:Fig6}
 % data: acceptance JSON orderings.per_ordering[*].{ordering,label,dlps_h1,dlpd_h1}, orderings.results[*].summary[*].{variable,horizon,lpd_range,lpd_range_snr,material}; script figures/make_fig_cr_orderings.py (sigma_MC is not in the report, so no noise band is drawn)
 \end{figure}
 
 \paragraph{Interpretation.}
-As pre-registered, a failure of criterion~4 is reported as a difference from Clark and Ravazzolo,
-attributed only with evidence and with no setting tuned in response (\cref{app:prereg}).
-% [PREREG] "Stated in advance"
-The run-level warnings (\acc{warnings}) are listed in
-\cref{app:cr}.
-\todo{After the acceptance JSON is committed: two or three sentences of interpretation from the
-numbers above, within these branches only.}
+On these data and models the run reproduces the ranking that the replication targets (criteria 1--3
+and 6; criterion 5, on the variants, also holds). On the primary score it does not reproduce the
+horizon pattern for unemployment, whose gain falls from $+0.162$ at $h = 1$ to $-0.707$ at $h = 8$
+in Clark and Ravazzolo's working paper (\cref{tab:cr-headline}) and rises here, mostly through three
+crisis origins (on their score it falls; above). % [R] benchmarks/clark_ravazzolo.py CR_FULL l.147 (UR: +0.162, -0.707); [ACC] as above
+As registered, we report this as a difference from their results and tuned nothing in response
+(\cref{app:prereg}). The pre-registration names three candidate causes: the final vintage instead
+of real-time data, Chan's \code{iw_equivalent} baseline instead of the normal-diffuse VAR, and the
+library's default SV priors instead of theirs. These are hypotheses, which this run does not test,
+although Clark and Ravazzolo's data are in the journal's archive (\cref{app:cr-deviations}); the
+pre-registration rules out further runs with other settings. % [PREREG] "Stated in advance" (criterion 4: attribution "with evidence where possible", not tuned; no further run with different settings except to fix a bug); [R] N08 §C1 (JAE data archive: currentdata.csv, realtimeGDP.csv, realtimeGDPpriceindex.csv) (macro referee major 2)
+No run-level warning reports a convergence failure, as the first run's did. % [ACC: warnings (kinds per arm; origin_messages: prior means 106 per arm; order dependence 106 per SV arm; nu grid bound 106; sign fold 13-32 per SV arm); no "MCMC not converged" kind, which the first run had]
 
 \subsection{Caveats}\label{sec:replication-caveats}
 
 The illustration is limited by final-vintage instead of real-time data; the working
 paper's numbers instead of the article's; Chan's \code{iw_equivalent} baseline instead of the
-normal-diffuse VAR, and the library's SV priors instead of Clark and Ravazzolo's; descriptive
-significance, with verdicts that come through the MCS, whose validity in this setting is open;
-operational thresholds of our own choosing;
+normal-diffuse VAR, and the library's SV priors instead of Clark and Ravazzolo's (further
+differences in \cref{app:cr-deviations}); descriptive significance, with verdicts that come through
+the MCS, whose validity in this setting is open; operational thresholds of our own choosing;
 a pre-registration that is not blind; one backtest seed in the main stage; and a change of the
 primary estimator between the runs at $h > 1$, which is why every LPD number above names its
 estimator.
+The DM components of criteria 1, 5 and 6 are descriptive under the expanding window, so these
+criteria are coded descriptive checks, not tests. % [V] benchmarks/clark_ravazzolo.py criteria l.666-834 (rule strings with one-sided DM/HLN p < 0.10 in criteria 1, 5 and 6) (stat referee minor 7)
+Criterion~4 compares gains on the RB score with a pattern that Clark and Ravazzolo measured on the
+Gaussian approximation, a proper but not strictly proper score (\cref{app:cr-deviations}); that is
+a limitation of the criterion's design, which compares point estimates of the gains with no
+allowance for their uncertainty. % stat referee major 1 (5), macro major 3
 The primary arm, reduced form $\times$ SV(rw), was not a registered validation composition at the
-run's commit; since 7f410dc, which changes no sampler code, it is row~18. % [V] git diff --stat c823d20 7f410dc -- src/ (only src/rai_bvar/validation/joint.py: "reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3))); at c823d20 RW only in row 14 (structural_sv_rw); DESIGN §9.5 row 18 note (StaticConfig equal to the CR arm's in every component field; shapes, inert nu_grid and the §9.2 test priors differ)
-On that row the Geweke tests pass (largest $|z|$ $1.98$ and $1.90$ at the per-PR and nightly
-sizes, against $4.42$ and $3.94$), five injected bugs are caught, SBC passes at a per-row
-thinning cap of $400$, and the contract tests pass (\cref{sec:validation-coverage}). % [R] 7f410dc commit message (one run each, Apple M5 Max under load): G-small 1.98 (t_crit 4.42), G-full 1.90 (3.94), contract 10/10; positive controls on the row at the PR G-small rule: M1 17.8, dropped h_0 prior in the RW AWOL proposal 22.6, dropped last RW edge 30.0, M15 53.4, M2 461 (control 1.98); [V] tests/geweke/test_geweke_compositions.py PR_ROWS (row 18), tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max 400), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS "reduced-SV(rw)", tests/unit/test_fit_mcmc_api.py COMPOSITIONS; [REL] re-record on the release commit
+run's commit; since a later commit that changes no sampler code, it is row~18. % [V] git diff --stat c823d20 7f410dc -- src/ (only src/rai_bvar/validation/joint.py: "reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3))); at c823d20 RW only in row 14 (structural_sv_rw); DESIGN §9.5 row 18 note (StaticConfig equal to the CR arm's in every component field; shapes, inert nu_grid and the §9.2 test priors differ)
+On that row the Geweke and contract tests pass and five injected bugs are caught; its SBC
+$\gamma$ test and pooled-ESS gate are clean, while the per-replication ESS rule missed at the shared
+thinning cap of 200, passes at the cap of 400 set for the row after that miss, and fails with a
+4000-sweep pilot (\cref{sec:validation-coverage}). % [R] 7f410dc commit message (one run each, Apple M5 Max under load): G-small 1.98 (t_crit 4.42), G-full 1.90 (3.94), contract 10/10; positive controls on the row at the PR G-small rule: M1 17.8, dropped h_0 prior in the RW AWOL proposal 22.6, dropped last RW edge 30.0, M15 53.4, M2 461 (control 1.98); [V] tests/geweke/test_geweke_compositions.py PR_ROWS (row 18), tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max 400), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS "reduced-SV(rw)", tests/unit/test_fit_mcmc_api.py COMPOSITIONS; [REL] re-record on the release commit
 Its slow-mixing coefficients are a limitation (\cref{sec:limitations}); its Student-$t$ variant
 has no row and still rests on its validated parts. % [V] 7f410dc: joint.py _COMPOSITIONS and mcmc_fits.py COMPOSITIONS have no reduced x SV(rw, t) entry
 \todo{TODO 3, 7: re-record the row~18 numbers (7f410dc message, one run each, loaded M5 Max) on the

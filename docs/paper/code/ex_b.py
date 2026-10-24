@@ -1,4 +1,4 @@
-# Listing 2 of the paper (docs/paper/sections/07_walkthrough.tex) shows lines 37-75; lines 8-36
+# Listing 2 of the paper (docs/paper/sections/07_walkthrough.tex) shows lines 40-72; lines 8-36
 # repeat the imports and the data block of ex_a.py.
 # Run from the main repository: cd /Users/yigitokar/rai-bvar && uv run python <this file>,
 # or through run_examples.py. Output captured at main-repo commit d58c9ef (branch

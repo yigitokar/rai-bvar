@@ -151,15 +151,16 @@ RELEASE_RECORD = PAPER / "data" / "release"
 def record_status_note(fig, paths) -> None:
     """A grey footer naming the validation record a figure was drawn from, when that record is
     not the release record (``docs/paper/data/release/``, OUTLINE TODO 7). The local records in
-    ``docs/paper/figures/data/validation_record/`` are uncommitted and carry no commit or machine
-    field (sections/appendix.tex: "not release records"), so a figure drawn from them must say so."""
+    ``docs/paper/figures/data/validation_record/`` (tracked on branch paper-draft since 33dd9f8, not
+    on main) carry no commit or machine field (sections/appendix.tex: "not release records"), so a
+    figure drawn from them must say so."""
     paths = [Path(p).resolve() for p in paths]
     if all(p.is_relative_to(RELEASE_RECORD.resolve()) for p in paths):
         return
     names = ", ".join(str(p.relative_to(PAPER)) if p.is_relative_to(PAPER) else str(p)
                       for p in paths)  # fmt: skip
-    fig.text(0.0, -0.01, f"Draft data: {names}; uncommitted local record, commit and machine "
-             "not recorded; not the release record (OUTLINE TODO 7).", ha="left", va="top",
+    fig.text(0.0, -0.01, f"Draft data: {names}; local record (paper branch, not main), commit and "
+             "machine not recorded; not the release record (OUTLINE TODO 7).", ha="left", va="top",
              fontsize=5.6, color=MUTED, wrap=True)  # fmt: skip
 
 
@@ -266,7 +267,7 @@ def load_acceptance(args) -> dict | None:
     return rep
 
 
-PER_ORIGIN_CSV = PAPER / "data" / "cr_acceptance_per_origin.csv"
+PER_ORIGIN_CSV = DATA / "cr_acceptance" / "cr_acceptance_per_origin.csv"  # make_data_cr_per_origin.py
 
 
 def load_per_origin(args):
@@ -282,7 +283,7 @@ def load_per_origin(args):
     if (meta.get("config") != "acceptance" or meta.get("lpd_method") != "integrated") \
             and not args.allow_non_acceptance:
         raise SystemExit(f"{path} is not an export of the acceptance run (meta: {meta})")
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, float_precision="round_trip")  # the export writes %.17g: exact
     df["period"] = pd.PeriodIndex(df["origin"], freq="Q")
     df.attrs["lpd_method"] = meta.get("lpd_method", "unknown")
     return df

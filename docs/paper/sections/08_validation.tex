@@ -14,7 +14,7 @@ simulation-based calibration (SBC) tests. % [R] SPEC.md §3 R6 (l.121)
 The rule answers the first threat of \cref{sec:intro}, a published sampler that targeted the
 wrong posterior \citep{carriero2019large,bognanni2022comment,carriero2022corrigendum}. % the episode itself is told in §1 (01_introduction.tex l.19); its retelling here is deleted as duplicated
 A passing suite is informative only if one knows what it would
-have caught, so we measure its power by injecting known errors into the production samplers
+have caught, so we inject known errors into the production samplers and check that each is caught
 (\cref{sec:validation-mutation}). % The harness size (rai_bvar.validation, 4,233 lines at 7f410dc, 4,230 at c823d20; [V] wc -l) is stated in App. D (app:runtimes); deleted here as duplicated
 
 \phantomsection\label{sec:validation-tiers}\label{sec:validation-cost}%
@@ -38,8 +38,8 @@ systems, Matheron's rule; \citealp{journel1978mining,chiles2012geostatistics,wil
 and the kernels in precision form ($q\times q$ Gram updates). % [V] src/rai_bvar/validation/dummies.py docstring l.1-4; tests/validation/test_reference_dummies.py
 Mixture constants are transcribed twice and must agree on every printed digit. % [V] tests/validation/test_mixture_transcription.py
 An oracle shares any convention we copied into it, whereas Geweke and SBC tests share only our
-prior and simulator, so the two are complementary (the rule's origin: erratum E9,
-\cref{app:errata}).
+prior and simulator, so the two are complementary (the rule's origin: a design-review erratum,
+\cref{app:errata}). % erratum E9
 
 \paragraph{Production code; failures fail.} A test chain's step is the production
 \code{prepare(data, prior)} followed by one production sweep, never a copy, % [V] src/rai_bvar/validation/joint.py docstring l.1-11
@@ -86,8 +86,7 @@ function $g$, and $\bar g_{\mathrm{SC}}$ and $s^2_C$ the mean and variance of th
 \end{equation}
 and the test fails iff $\min_g p_g \le \alpha/G$ over the $G$ functions. % [V] src/rai_bvar/validation/geweke.py docstring l.1-32; tests/validation/test_geweke_selftest.py::test_statistics_follow_the_documented_keys_and_formulas, ::test_correct_toy_holds_the_nominal_level_over_20_seeds, ::test_deliberately_wrong_toys_fail
 A prior-started chain is stationary from its first sweep under the null, so the size needs only
-that the sweep leave the posterior invariant; ergodicity affects power, and a burn-in would only
-lower it.
+that the sweep leave the posterior invariant; ergodicity affects power.
 \todo{TODO 15: verify before attributing the opposite concern (Geweke $z$-scores need converged
 chains) to Talts et al.\ (2018); until then cite no one for it.}
 Test priors follow the rule $r = \mathrm{Var}_{\mathrm{prior}}/\mathrm{Var}_{\mathrm{post}} \le 5$,
@@ -96,11 +95,17 @@ test functions must have finite variance, which excludes raw data moments under 
 (\cref{app:geweke-functions}), and include the exact log-likelihood \eqref{eq:loglik}. % [R] docs/phase2/06_validation_geweke_sbc.md §3.4; DESIGN §9.5; [V] finite-variance flags in src/rai_bvar/validation/reference.py
 G-small runs per PR and the larger G-full weekly, at $n \le 3$ (\cref{app:geweke-small,app:sbc});
 rows with the approximate (\code{exact=False}) SV sampler are recorded but do not gate. % [V] tests/geweke/test_geweke_compositions.py (sizes; test_g_full_inexact_recorded)
-At commit 62d15f6 the 15 PR compositions then registered pass G-small (\cref{tab:TabD1}), largest
+The 15 PR compositions registered before row~18 pass G-small (\cref{tab:TabD1}; commit and machine in \cref{app:geweke-small}), largest
 final-stage $|z|$ 3.03 against critical values of 4.10--4.50, row 201 at the fresh second stage; % [V] pytest tests/geweke -m "geweke and not slow", reproduced at 62d15f6 on Apple M5 Max (dossier 04 §6.6; fact-check re-run identical) [REL: geweke.jsonl]; row 201: same run, deterministic on one machine for fixed code and seed; mutants.py EVIDENCE["M17"] is the same computation (SEED_G), not an independent check
 row~18, added later as the sixteenth PR row, is reported in \cref{sec:validation-coverage}. % [V] tests/geweke/test_geweke_compositions.py PR_ROWS at 7f410dc (rows 1-5, 7-10, 17, 18, 201-205 = 16)
 \todo{[REL] Report G-full and the \code{exact=False} rows only from a committed
 \code{geweke_full.jsonl}; do not write that G-full passes on every row before then.}
+G-full has no release record yet. A local record on the paper branch, which carries no commit or
+machine field and so cannot date itself, shows \code{reduced_sv} failing with non-finite test
+functions. That matches the float64 failure documented in the test module, fixed in the kernel
+before both full replication runs that the paper reports (\cref{sec:robustness-f1}); a committed test replays the failing
+chain, and the production step now succeeds (\cref{fig:FigD2}).
+% [R] tests/geweke/test_geweke_compositions.py module docstring ("Known nightly finding (2026-10-22): test_g_full[reduced_sv] failed on one SC chain of 4000 (sweep 194) ... EQ_CONTEMP, equation 2 ... Resolved ... lstsq_draw"); docs/paper/figures/data/validation_record/geweke.jsonl (tracked on paper-draft since 33dd9f8, not on main 888f620): tier G-full, reduced_sv, passed false, n_nonfinite 28068, 92 of 137 functions failing, seed 20261023, no commit field; [V] 3d3f51b ("fixes test_g_full[reduced_sv]") is an ancestor of 4bb978a and c823d20, not of 8a622c5 (git merge-base --is-ancestor); tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed (slow). A re-run of test_g_full[reduced_sv] at 75db8a7 by a reviewer passed but is uncommitted and not cited (macro referee major 1; TODO 7)
 The Geweke simulator also reaches states far outside those that ordinary data produce, which is how
 a float64 weakness of a coefficient draw was found (\cref{sec:robustness-f1}).
 
@@ -181,25 +186,25 @@ Tiers U, B, G and S (\cref{tab:TabD2}). % [R] dossier 01 §5; SV_PARAMETRIZATION
 \subsection{Coverage of the compositions the replication scores}\label{sec:validation-coverage}
 
 The primary arm of the replication in \cref{sec:replication}, reduced-form Minnesota $\times$
-SV(rw), is validation row~18, \code{reduced_sv_rw}, registered after the acceptance commit c823d20
-in commit 7f410dc, which changes no sampler code, % [V] main repo 7f410dc: src/rai_bvar/validation/joint.py "reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3)); git show 7f410dc --stat (the only src/ file changed is validation/joint.py)
+SV(rw), is validation row~18, \code{reduced_sv_rw}, registered after the acceptance run's commit in
+a commit that changes no sampler code (\cref{app:row18}), % c823d20 (acceptance), 7f410dc (row 18); [V] main repo 7f410dc: src/rai_bvar/validation/joint.py "reduced_sv_rw": _Def(18, _R, rw=True, n=(3, 3)); git show 7f410dc --stat (the only src/ file changed is validation/joint.py)
 and the row's configuration equals the arm's in every component field except the shapes, the test
 priors and an inert $\nu$ grid. % [R] docs/phase2/DESIGN.md §9.5 "Row 18" note (7f410dc; StaticConfig built through the production resolve path); the committed test_pr_rows_are_the_design_rows checks only mean kind, persistent vol, rw and transitory
 Like rows 7--10 it runs G-small per PR and G-full and SBC weekly, with its \code{exact=False}
 variant recorded, and the arm is among the 13 MCMC compositions of the contract tests and among
 those fitted through the public \code{BVAR.fit} path. % [V] 7f410dc: tests/geweke/test_geweke_compositions.py PR_ROWS, INEXACT_ROWS; tests/sbc/test_sbc_compositions.py (COMPOSITIONS); tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS (13, incl. "reduced-SV(rw)"); tests/unit/test_fit_mcmc_api.py COMPOSITIONS (("reduced", rb.SV(rw=True)))
-In runs recorded with the commit (one Apple M5 Max, under load), the row's largest $|z|$ is 1.98
+In single runs recorded with that commit (\cref{app:row18}), the row's largest $|z|$ is 1.98
 in G-small (critical value 4.42) and 1.90 in G-full (3.94), and the arm passes all ten contract
-tests. % [R] commit message 7f410dc; DESIGN §9.5 row 18 note ("G-small max |z| 1.98, G-full 1.90 ... all at stage 1"); tests/contract/test_forecast_contract_mcmc.py has 10 test functions; [REL] re-record on the release commit
-In one-off runs on the row, outside the mutation suite, its G-small rule fails, against the
-control's 1.98, for the mutants M1 (17.8), M15 (53.4) and M2 (461) and for two unregistered errors, a
-dropped $h_0$ prior in the random-walk AWOL proposal (22.6) and a dropped last random-walk edge (30.0). % [R] commit message 7f410dc ("Positive controls on the row, PR G-small rule"); M1, M2 and M15 are mutants of tests/mutation/mutants.py, but their runs on row 18 are not registered there (nor are the other two errors), so the 37 checks of Tab7 are unchanged
-A prior variance $V_0$ used as a precision is invisible at the test prior $h_0 \sim \mathrm{N}(0,
-1)$; a variant G-small test at $\mathrm{N}(-1, 4)$, run on every PR, catches it ($|z|$ 13.8
-against 2.33). % [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior (RW_H0_PRIOR = {"V0": 4.0, "m0": -1.0}; row 18 PR, row 14 nightly); [R] 13.8 / 2.33 from its docstring and DESIGN §9.5 row 18 note
-SBC passes with a per-row thinning cap of 400; at the shared 200 the per-replication ESS rule held
-for 987 of 997 replications, short of 99\%, and with a 4000-sweep pilot instead of the design's
-1000 it fails at 400 too (981 of 997), with the $\gamma$ test and the pooled-ESS gate clean. The
+tests. % one Apple M5 Max under load % [R] commit message 7f410dc; DESIGN §9.5 row 18 note ("G-small max |z| 1.98, G-full 1.90 ... all at stage 1"); tests/contract/test_forecast_contract_mcmc.py has 10 test functions; [REL] re-record on the release commit
+In one-off runs outside the mutation suite its G-small rule catches three of the suite's mutants
+and two further errors, and a variant G-small test at $h_0 \sim \mathrm{N}(-1, 4)$, run on every PR,
+catches a prior variance used as a precision, which the default test prior hides
+(\cref{app:row18}). % [R] commit message 7f410dc ("Positive controls on the row, PR G-small rule": M1 17.8, M15 53.4, M2 461, dropped h_0 prior in the RW AWOL proposal 22.6, dropped last RW edge 30.0; control 1.98); M1, M2 and M15 are mutants of tests/mutation/mutants.py, but their runs on row 18 are not registered there, so the 37 checks of Tab7 are unchanged; [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior (RW_H0_PRIOR = {"V0": 4.0, "m0": -1.0}; row 18 PR, row 14 nightly); [R] 13.8 / 2.33 from its docstring and DESIGN §9.5 row 18 note
+At the shared thinning cap of 200 the $\gamma$ test and the pooled-ESS gate were clean, but the
+per-replication ESS rule held for only 987 of 997 replications, short of 99\%; after that miss the
+row's cap was raised to 400, at which it passes. With a 4000-sweep pilot instead of the design's
+1000, the per-replication rule fails at 400 too (981 of 997), while the $\gamma$ test and the
+pooled-ESS gate stay clean. The
 slow quantities are the reduced-form coefficients $\Pi$, mostly intercepts, on about 1--2\% of
 prior-drawn $T = 50$ datasets: a mixing tail, not a calibration error
 (\cref{app:sbc,sec:limitations}). % [V] tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max = 400), PILOT = 1000 at 7f410dc; [R] its module docstring ("Row 18"), NOTES item 6, DESIGN §9.5 row 18 note and §9.6 erratum (one run each, Apple M5 Max under load; Geweke and gamma clean); detail: App. D, app:row18
@@ -222,16 +227,18 @@ unmutated control with common seeds, a per-PR test requires a confirmed catching
 mutant, and an uncaught mutant blocks the release. % [V] tests/mutation/mutants.py docstring l.1-45; tests/mutation/test_mutants.py::test_registry, ::test_mutant_caught; DESIGN §9.7 l.1898
 Tier~U catches 14 mutants, G all 18 (M7 with a coarse mixture table, M11 and M12 under the
 auxiliary-mixture sampler), B the four with a B check and S the one with an S check: 37 checks. % [V] tests/mutation/mutants.py _ALL (catchers) l.767-826; pytest -m mutation collects 37
-At commit 62d15f6 all 37 catch their mutant with a passing control, in 177--182~s on an Apple M5
-Max with a cold compilation cache, % [V] pytest tests/mutation -m mutation, reproduced by dossier 04 and its fact-check (181.85 s, 177.40 s) [REL: mutation.jsonl]
+All 37 catch their mutant with a passing control, in about three minutes with a cold
+compilation cache (\cref{app:runtimes}), % at 62d15f6, Apple M5 Max, 177-182 s; [V] pytest tests/mutation -m mutation, reproduced by dossier 04 and its fact-check (181.85 s, 177.40 s) [REL: mutation.jsonl]
 and recorded runs at earlier commits on x86-64 Linux also caught every mutant
 (\cref{app:mutants}; \cref{fig:FigD1} shows each statistic against its threshold). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 [REL: mutation_x86.jsonl]; cross-machine agreement (two or three significant figures) is in App. D
 \todo{TODO 8: fix the stale count (33/33) and the machine labels in the \code{mutants.py} evidence
 header and NOTES B.8 before the table is regenerated.}
 Mutation testing is established
 \citep{demillo1978hints,jia2011analysis}, including for probabilistic programming systems
-\citep{dutta2018testing}; we add curated algorithm-level mutants, some taken from published errors,
-and a release gate built on them.
+\citep{dutta2018testing}; the suite uses curated algorithm-level mutants, some taken from published
+errors, as a release gate. Because each mutant's catching tiers were confirmed when it was
+registered, the 37 catches show that the suite still catches these errors, not how often the tiers
+would catch an unknown bug.
 \todo{TODO 11: prior-art search on mutation testing of MCMC samplers before any ``to our
 knowledge'' wording.}
 
@@ -240,8 +247,10 @@ knowledge'' wording.}
   \caption{Mutation suite: injected error and, per catching tier, the mutant / control statistic
     (seams, compositions, U tolerances: \cref{app:mutants}); all 37 checks catch their mutant with a
     passing control. U: identity or closed-form error at one joint draw; B, S: Bonferroni-adjusted $q$
-    or minimum $p$; G: largest $|z|$ at G-small (critical values 4.10--4.40). Reproduced on an Apple
-    M5 Max at 62d15f6; equal to the committed evidence except M2 (702 / 2.48 there, labelled M1 Pro).}
+    or minimum $p$; G: largest $|z|$ at G-small at the mutation compositions (critical values
+    4.10--4.40); M12's U check is a closed-form check with tolerance $10^{-4}$. Reproduced on one
+    machine (\cref{app:mutants}); the committed evidence differs only for M2 (702 / 2.48).}
+  % reproduced on an Apple M5 Max at 62d15f6; the committed EVIDENCE labels its M2 run M1 Pro (TODO 8)
   \label{tab:Tab7}
   % Body to be regenerated by docs/paper/figures/tab_mutation.py from
   % docs/paper/data/release/mutation.jsonl (Apple M5 Max) and mutation_x86.jsonl (x86-64 Linux),
@@ -308,8 +317,9 @@ the non-local errors: a step order (M2, the indicator placement of \citet{primic
 latents (M3), a sampler--model prior mismatch (M5) and a model approximation (M16); every
 conditional-formula error is caught by an identity or closed form at one joint draw. % M3 = Geweke's "error 2" per NOTES B.7 / N06: verify the numbering in geweke2004getting before attributing it (TODO 15). [V] mutants.py _ALL (u_check=None: M2 l.771-773, M3 l.774-776, M5 l.780-782, M16 l.815-818); conditional-formula errors = M1, M4, M6-M15, M17, M18; whether an identity could detect M5 is untested (dossier 04 §17 item 1)
 \emph{(2) Exactness changes what counts as a bug.} Exact-mode SV is exact for any mixture table and
-indicator law, because the correction \eqref{eq:w} uses the same table, so M11 and M12 are bugs only
-of the auxiliary-mixture sampler, and the uncorrected move M7, invisible with the 10-component table
+indicator law, provided the correction \eqref{eq:w} is computed from the same logits and table as
+the indicator draw, an implementation invariant that no mutant breaks on one side only; so M11 and
+M12 are bugs only of the auxiliary-mixture sampler, and the uncorrected move M7, invisible with the 10-component table
 at our test sizes, is caught once a one-component table is injected in mutant and control alike:
 degrade an approximation on purpose to test its exact correction. % [V] tests/mcmc/blocks/test_sv_core.py::test_block_geweke_exact_mode_with_coarse_mixture; mutants.py docstring l.32-44; NOTES B.3
 \emph{(3) The log-likelihood is a test quantity.} Block SBC catches M1 through the rank of the

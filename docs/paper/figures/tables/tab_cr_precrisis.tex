@@ -32,5 +32,50 @@ joint & 1 & \acc{relative.pre_crisis['SV(rw)'].joint['1'].dlpd} & \acc{relative.
 \else\usebox{\rbtabbox}\fi
 \par\smallskip
 {\footnotesize\raggedright Origins 1985Q1--2007Q4 of the expanding-window backtest. Integrated: path-integrated RB log score (primary); Conditioned: path-conditioned RB estimator on the same draws (secondary, in no rule); Gaussian: Gaussian approximation; Degen.: RB-degenerate origins (joint MCSE $\geq 0.9$ for either arm). CR: Clark and Ravazzolo's VAR-SV against VAR, working paper, Gaussian-approximation log score (\code{CR_PRE_DLPS} of \code{benchmarks/clark_ravazzolo.py}).\par}
+% the red note below prints only while a key of this table has no value (acceptance_values.tex, fill_acceptance.py)
+\makeatletter\gdef\rbaccunfilled{}\ifdefined\rb@accifdef%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['1'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['1'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['1'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['1'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['8'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.GDP['8'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['1'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['1'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['1'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['1'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['8'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.INFL['8'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['1'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['1'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['1'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['1'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['8'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['8'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['8'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.UR['8'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['1'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['1'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['1'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['1'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['8'].dlps}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['8'].dlps_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['8'].dlps_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].variables.TBILL['8'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['1'].dlpd}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['1'].dlpd_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['1'].dlpd_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['1'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['8'].dlpd}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['8'].dlpd_conditioned}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['8'].dlpd_gauss}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\rb@accifdef{relative.pre_crisis['SV(rw)'].joint['8'].rb_degenerate}{\@gobble}{\gdef\rbaccunfilled{1}}%
+\else\gdef\rbaccunfilled{1}\fi\makeatother%
+\ifx\rbaccunfilled\empty\else%
 \par\smallskip
-{\footnotesize\raggedright\color{accmark} Placeholder: each [ACC] cell holds a key of the acceptance report (under \code{relative.pre_crisis['SV(rw)']}); the number is never written here. The cell prints the value once \code{acceptance_values.tex} (\code{fill_acceptance.py}) defines its key.\par}
+{\footnotesize\raggedright\color{accmark} Placeholder: each [ACC] cell holds a key of the acceptance report (under \code{relative.pre_crisis['SV(rw)']}); the number is never written here. The cell prints the value once \code{acceptance_values.tex} (\code{fill_acceptance.py}) defines its key.\par}%
+\fi

@@ -2,7 +2,7 @@
 h = 1 and h = 4 (primary RB estimator: path-integrated in the acceptance run), with the end of the
 pre-crisis sample (2007Q4) marked.
 
-Data: the per-origin export ``docs/paper/data/cr_acceptance_per_origin.csv`` written by
+Data: the per-origin export ``docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv`` written by
 make_data_cr_per_origin.py from the acceptance run's score cache (OUTLINE TODO 5). Origins with a
 missing score at a horizon (outcome beyond the sample) are skipped. Without the export the
 script writes a marked placeholder.
@@ -33,7 +33,7 @@ def main() -> None:
     if df is None:
         mc.placeholder(NAME, "FigF3", "Cumulative joint dLPD (SV(rw) - Constant) over origins, "
                        "h = 1 and h = 4, pre-crisis boundary marked",
-                       "docs/paper/data/cr_acceptance_per_origin.csv (make_data_cr_per_origin.py; TODO 5)",
+                       "docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv (make_data_cr_per_origin.py; TODO 5)",
                        f"python {Path(__file__).name}")  # fmt: skip
         return
     mc.style()

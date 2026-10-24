@@ -93,7 +93,8 @@ The forecast container and its log-density interface are those of the analytic c
 % [V] out/ex_b.txt lines "ForecastResult(...) | engine attr: mcmc" and the two LPD lines
 In the final comparison, whose arms are structural Mode~I models that differ only in volatility,
 SV has a $\Delta$LPD of $-0.11$ over 11 rolling-window origins with an MCSE of 0.10, too imprecise
-for any verdict (one-sided DM $p$-value 0.421), and it converged at none of them, so the
+for any verdict (one-sided DM $p$-value 0.421 for ``worse''; the reasons line prints the smaller
+of the two one-sided values), and it converged at none of them, so the
 convergence gate forces ``inconclusive'' whatever the other evidence says.
 % [V] out/ex_b.txt axes lines; table row "Linear x SV 1" and reasons line ("converged at only 0% of origins")
 This is intended: the gate refuses to certify a comparison with an unconverged fit (\cref{sec:cr}

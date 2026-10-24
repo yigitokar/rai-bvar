@@ -285,7 +285,7 @@ def write(name: str, body: str, *, sources: Iterable[str], status: str, generato
             f"% Status: {status}"]  # fmt: skip
     head += [f"% Source: {s}" for s in sources]
     head += ["% Body only: the caption, label and evidence tags are in sections/*.tex.", ""]
-    text = "\n".join(head) + body.rstrip() + "\n"
+    text = "\n".join(head) + _acc_note_unless_filled(body.rstrip()) + "\n"
     path.write_text(text, encoding="utf-8")
     rel = path.relative_to(PAPER) if path.is_relative_to(PAPER) else path
     print(f"wrote {rel}")
@@ -317,12 +317,55 @@ def check_acc(path: Path, report: Path | None) -> None:
         raise SystemExit(1)
 
 
+ACC_NOTE_TEXT = "Placeholder: each [ACC] cell holds a key of the acceptance report"
+
+
 def acc_placeholder_note(prefix: str) -> str:
-    """The red note under a table whose cells are acceptance-report keys."""
+    """The red note under a table whose cells are acceptance-report keys. :func:`write` makes it
+    conditional: it prints only while some ``\\acc`` key of the table has no value, i.e. until
+    ``acceptance_values.tex`` defines every key (then each cell prints its number instead)."""
     where = tex(prefix) if "," in prefix else code(prefix)
-    return ("Placeholder: each [ACC] cell holds a key of the acceptance report (under "
+    return (f"{ACC_NOTE_TEXT} (under "
             f"{where}); the number is never written here. The cell prints the value once "
             r"\code{acceptance_values.tex} (\code{fill_acceptance.py}) defines its key.")
+
+
+def acc_keys(text: str) -> list[str]:
+    """The arguments of every ``\\acc{...}`` in ``text`` (balanced braces), in order, unique."""
+    out: list[str] = []
+    for m in re.finditer(r"\\acc(?![A-Za-z@])\s*\{", text):
+        depth, j = 1, m.end()
+        while j < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[j], 0)
+            j += 1
+        key = text[m.end() : j - 1]
+        if key not in out:
+            out.append(key)
+    return out
+
+
+def _acc_note_unless_filled(body: str) -> str:
+    """Wrap the red [ACC] note (:func:`acc_placeholder_note` through :func:`note`) so that it is
+    typeset only while at least one ``\\acc`` key of the table is undefined. The test uses
+    ``\\rb@accifdef`` of main.tex, the lookup ``\\acc`` itself uses, on the same key text; when
+    main.tex's macros are absent the note is always printed."""
+    i = body.find(ACC_NOTE_TEXT)
+    if i < 0:
+        return body
+    start = body.rfind("\\par\\smallskip\n", 0, i)
+    end = body.find("\\par}", i)
+    if start < 0 or end < 0:
+        return body
+    end += len("\\par}")
+    keys = acc_keys(body[:start] + body[end:])
+    tests = "".join(r"\rb@accifdef{" + k + r"}{\@gobble}{\gdef\rbaccunfilled{1}}%" + "\n"
+                    for k in keys)  # fmt: skip
+    cond = ("% the red note below prints only while a key of this table has no value "
+            "(acceptance_values.tex, fill_acceptance.py)\n"
+            r"\makeatletter\gdef\rbaccunfilled{}\ifdefined\rb@accifdef" + "%\n" + tests
+            + r"\else\gdef\rbaccunfilled{1}\fi\makeatother" + "%\n"
+            + r"\ifx\rbaccunfilled\empty\else" + "%\n" + body[start:end] + "%\n" + r"\fi")
+    return body[:start] + cond + body[end:]
 
 
 def preamble(*, acc_cells: bool = False, marks: bool = False) -> str:

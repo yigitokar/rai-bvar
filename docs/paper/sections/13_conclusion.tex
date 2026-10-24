@@ -1,17 +1,17 @@
 \section{Conclusion}\label{sec:conclusion}
-% Drafting notes (not typeset): the only outcome-dependent statement is the \acc{} slot in the first
-% paragraph (grammar: header of 11_replication.tex). Nothing else here may depend on the acceptance run.
+% Drafting notes (not typeset): the only outcome-dependent statement is the sentence with the \acc{}
+% slot in the first paragraph (grammar: header of 11_replication.tex). Nothing else here may depend on
+% the acceptance run.
 
-A model comparison is only as credible as its weakest link: the sampler, convergence at every
-origin, the Monte Carlo error of the score, the variable ordering, the validity of the test, and
+A model comparison is only as credible as its weakest link: the sampler, convergence at the
+origins, the Monte Carlo error of the score, the variable ordering, the validity of the test, and
 choices made after the scores were seen. \pkg{rai-bvar} makes each of these links checkable. The
 econometrics is not new; the contribution is the integration, the contracts between the components,
-and the evidence, with its measured power and its stated gaps, that the samplers target the intended
-posteriors. The validation code behind that evidence ships with the library. % [V] src/rai_bvar/validation/ (part of the package; dossier 01 §2, commitment 4)
+and the evidence, with its stated gaps, that the samplers target the intended posteriors. The validation code behind that evidence ships with the library. % [V] src/rai_bvar/validation/ (part of the package; dossier 01 §2, commitment 4)
 In the pre-registered replication of \citet{clark2015macroeconomic}, the acceptance run's outcome
-by criterion is \acc{criteria[*].met}. \todo{One clause stating which criteria the
-acceptance run met and, if any failed, which, from \code{criteria[*].met}; no further
-outcome-dependent claim.}
+as coded is: \acc{criteria[*].met}; the path-integrated RB unemployment gain is larger at $h = 8$
+than at $h = 1$, mostly through three crisis origins, while on the original's Gaussian score it
+shrinks, as there (\cref{sec:replication-results}). % [ACC: criteria[*].met; criteria[id=4].rule, .detail (UR h1 +0.160 -> h8 +0.273; Gaussian +0.122 -> -0.526; pre-crisis GDP h8 Gaussian -0.001)]; three origins: 72% of the sum, recomputed from dlps_top, dlps, n (§11.5)
 
 \paragraph{A checklist.}
 Lessons for forecasters and for implementers of the same algorithms:
@@ -30,17 +30,22 @@ Lessons for forecasters and for implementers of the same algorithms:
     % [V] tests/mutation/mutants.py: M1 (CCM-2019 triangular step), M2 (Primiceri 2005 Alg. 1 indicator order); M7 with the COARSE1 table
   \item Treat numerical failures as values: never add jitter; fix the kernel, not the test prior
     (\cref{sec:robustness}).
-  \item Gate verdicts on convergence at every origin, and size the MCMC budget with fit-only
+  \item Gate verdicts on the share of origins (95\% by default) at which a fit's primary
+    quantities converged, say which quantities those are, and size the MCMC budget with fit-only
     diagnostics before any score exists (\cref{sec:eval-verdict,sec:replication-prereg}).
   \item Do not read the delta-method MCSE of an RB log score as a bound on its tail error: inspect
-    the effective number of weights \citep{kish1965survey}; at $h > 1$, integrate the path out and
-    use enough forecast draws (\cref{sec:eval-tail}).
+    the Kish effective number of weights $\mathrm{ESS}_{\mathrm{K}}$ \citep{kish1965survey}; at
+    $h > 1$, integrate the path out and use enough forecast draws (\cref{sec:eval-tail}).
   \item Report RB and Gaussian-approximation scores side by side, the ordering spread next to the
-    gain, and an order-invariant negative control (\cref{sec:replication-design,sec:replication-results}).
+    gain, how concentrated a gain is across origins, and an order-invariant negative control
+    (\cref{sec:replication-design,sec:replication-results}); state a replication's criteria on the
+    target's own scoring rule, or on both, and with an allowance for the uncertainty of the
+    estimates they compare.
   \item Treat Diebold--Mariano $p$-values under expanding windows as descriptive, and state which
-    route produced each verdict (\cref{sec:eval-tests}).
-  \item Pre-register settings as code, say how blind the pre-registration is, and check the absence
-    of look-ahead at run time (\cref{sec:replication-data,sec:replication-prereg}).
+    route produced each verdict and which models formed the comparison set (\cref{sec:eval-tests,sec:eval-verdict}).
+  \item Pre-register settings as code, deposit or push the pre-registration before launch, say how
+    blind it is, and check the absence of look-ahead at run time
+    (\cref{sec:replication-data,sec:replication-prereg}).
 \end{enumerate}
 
 \paragraph{Roadmap and availability.}
@@ -52,3 +57,4 @@ Apache-2.0.
 \todo{TODO 20: repository URL, release tag and commit hash, Zenodo DOI for the release and the
 replication outputs, and the single command that rebuilds every table and figure
 (the \code{Makefile} in \code{docs/paper}).}
+\label{sec:conclusion-end}% page counting (REVIEW_RESPONSE.md); not referenced

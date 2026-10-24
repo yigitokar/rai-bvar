@@ -2,8 +2,8 @@
 
 Data: one JSON line per mutant x tier check, as written by ``tests/mutation/test_mutants.py`` with
 ``RAI_BVAR_VALIDATION_RECORD=<dir>`` (``<dir>/mutation.jsonl``). Default input: the local record
-in ``docs/paper/figures/data/validation_record/mutation.jsonl``, which is uncommitted and carries no
-commit or machine field (the CI's weekly job sets no ``RAI_BVAR_VALIDATION_RECORD``), so it is not
+in ``docs/paper/figures/data/validation_record/mutation.jsonl``, which is tracked on branch
+paper-draft (33dd9f8) but not on main and carries no commit or machine field (the CI's weekly job sets no ``RAI_BVAR_VALIDATION_RECORD``), so it is not
 a release record; the figure then says so in a footer. The release record
 (``docs/paper/data/release/mutation.jsonl``, OUTLINE TODO 7) replaces it via ``--record``.
 

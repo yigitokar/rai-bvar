@@ -17,8 +17,9 @@ Data:
   coverage decision adds: row 205 from ``docs/paper/NOTES.md`` item 13 of the main repository
   (G-full 2.76, SBC min p 0.018; [R]) and row 18 from DESIGN section 9.5 (row 18 note), the module
   docstring of ``tests/sbc/test_sbc_compositions.py`` and the commit message of 7f410dc ([R], Apple
-  M5 Max under load). Every other result cell is a red [REL] mark. The uncommitted local records in
-  ``docs/paper/figures/data/validation_record/`` are not used (no commit or machine field; TODO 7).
+  M5 Max under load). Every other result cell is a red [REL] mark. The local records in
+  ``docs/paper/figures/data/validation_record/`` (tracked on paper-draft, not on main) are not used
+  (no commit or machine field; TODO 7).
 * composition-level Tier B (``tests/sbc/test_block_tier.py``) has no record hook (TODO 7): [REL].
 
 Usage: tab_geweke_full_sbc.py [--outdir DIR] [--records DIR]
