@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rai-bvar"
-version = "0.0.1"
+version = "0.2.0"
 description = "Ablation-ready Bayesian VARs: composable mean, volatility and prior components with a fair out-of-sample verdict engine."
 readme = "README.md"
 license = "Apache-2.0"
