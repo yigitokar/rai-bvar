@@ -17,8 +17,14 @@ def set_cpu_devices(k: int) -> None:
 
     Must run before JAX initialises its backend, i.e. right after ``import rai_bvar`` and before
     any fit or JAX computation. Afterwards it raises ``RuntimeError`` unless the backend already
-    has exactly ``k`` CPU devices (then it is a no-op). Draws do not depend on the device count
-    (DESIGN §5.2).
+    has exactly ``k`` CPU devices (then it is a no-op).
+
+    Exposing devices changes no draw by itself: fits still run on one device unless
+    ``Runtime(devices=...)`` asks for sharding (``Runtime.devices`` defaults to 1). A sharded fit
+    equals the one-device fit only to rounding, not bit for bit: XLA vectorises the SV and CCCM
+    reductions differently for another per-device batch size (``rtol 1e-9`` on short runs of the
+    production kernels), and over a long run a last-bit difference can flip an accept/reject
+    decision, after which the chains agree only in distribution (DESIGN §5.2, §5.6).
     """
     if isinstance(k, bool) or not isinstance(k, numbers.Integral) or k < 1:
         raise ValueError(f"k must be a positive integer, got {k!r}")

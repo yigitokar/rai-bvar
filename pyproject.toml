@@ -47,13 +47,13 @@ packages = ["src/rai_bvar"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
-    "slow: long-running statistical tests (nightly)",
-    "network: downloads data from the internet (nightly)",
+    "slow: long-running statistical tests (weekly tier)",
+    "network: downloads data from the internet (weekly tier)",
     "geweke: Geweke joint-distribution tests of the MCMC engine (docs/phase2/DESIGN.md §9.5)",
-    "sbc: simulation-based calibration of the MCMC engine (DESIGN §9.6; nightly)",
+    "sbc: simulation-based calibration of the MCMC engine (DESIGN §9.6; weekly tier)",
     "mutation: mutation suite, every mutant must fail some tier (DESIGN §9.7; weekly)",
     "bench: performance benchmarks such as BENCH-P2 (DESIGN §10; pre-release)",
-    "parity_long: long parity runs against R oracles (DESIGN §9.9; nightly)",
+    "parity_long: long parity runs against R oracles (DESIGN §9.9; weekly tier)",
     "weekly: weekly-tier tests (DESIGN §9.10)",
 ]
 filterwarnings = ["error::RuntimeWarning"]
