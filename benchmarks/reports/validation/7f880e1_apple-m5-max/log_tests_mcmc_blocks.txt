@@ -1,0 +1,23 @@
+...............................                                          [100%]
+============================= slowest 20 durations =============================
+66.72s call     tests/mcmc/blocks/test_sv_core.py::test_block_geweke_power_against_stale_w_nightly
+13.64s call     tests/mcmc/blocks/test_cccm.py::test_a7_production[4-2]
+9.89s call     tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta[4-2]
+9.65s call     tests/mcmc/blocks/test_cccm.py::test_a7_production[4-1]
+8.32s call     tests/mcmc/blocks/test_cccm.py::test_a7_production[3-2]
+7.12s call     tests/mcmc/blocks/test_cccm.py::test_a7_production_detects_ccm2019
+6.98s call     tests/mcmc/blocks/test_cccm.py::test_a7_production[3-1]
+6.57s call     tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta[4-1]
+6.51s call     tests/mcmc/blocks/test_cccm.py::test_a7_production[2-2]
+6.15s call     tests/mcmc/blocks/test_cccm.py::test_a7_production[2-1]
+5.64s call     tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta[3-2]
+4.48s call     tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta[3-1]
+4.36s call     tests/mcmc/blocks/test_cccm.py::test_a7_detects_ccm2019
+4.28s call     tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta[2-2]
+3.92s call     tests/mcmc/blocks/test_cccm.py::test_a7_swa_vs_cta[2-1]
+3.65s call     tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed
+2.56s call     tests/mcmc/blocks/test_sv_core.py::test_block_geweke_variants_nightly[False-spec_kw3]
+2.40s call     tests/mcmc/blocks/test_sv_core.py::test_block_geweke_variants_nightly[False-spec_kw0]
+2.39s call     tests/mcmc/blocks/test_sv_core.py::test_block_geweke_variants_nightly[True-spec_kw3]
+2.02s call     tests/mcmc/blocks/test_sv_core.py::test_block_geweke_variants_nightly[True-spec_kw0]
+31 passed, 547 deselected in 197.67s (0:03:17)

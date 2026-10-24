@@ -1,0 +1,29 @@
+...........................................                              [100%]
+=============================== warnings summary ===============================
+tests/geweke/test_geweke_compositions.py: 12 warnings
+  tests/geweke/test_geweke_compositions.py:243: PytestWarning: record_property is incompatible with junit_family 'xunit2' (use 'legacy' or 'xunit1')
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 20 durations =============================
+1339.53s call     tests/geweke/test_geweke_compositions.py::test_g_full_inexact_recorded[structural_sv_outliers_t]
+470.06s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_sv]
+278.56s call     tests/geweke/test_geweke_compositions.py::test_g_full[reduced_sv_outliers_t]
+277.22s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_sv_outliers_t]
+269.99s call     tests/geweke/test_geweke_compositions.py::test_g_full_inexact_recorded[reduced_sv_outliers_t]
+221.97s call     tests/geweke/test_geweke_compositions.py::test_g_full[reduced_sv_t]
+219.75s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_sv_t]
+217.52s call     tests/geweke/test_geweke_compositions.py::test_g_full_inexact_recorded[reduced_sv_t]
+209.18s call     tests/geweke/test_geweke_compositions.py::test_g_full_inexact_recorded[structural_sv_t]
+120.75s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_iw_equivalent_dummies]
+107.40s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_constant_dummies]
+106.64s call     tests/geweke/test_geweke_compositions.py::test_g_full[reduced_sv_outliers]
+102.84s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_constant]
+101.30s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_sv_outliers]
+98.50s call     tests/geweke/test_geweke_compositions.py::test_g_full_inexact_recorded[reduced_sv_outliers]
+92.33s call     tests/geweke/test_geweke_compositions.py::test_g_full_inexact_recorded[structural_sv_outliers]
+59.10s call     tests/geweke/test_geweke_compositions.py::test_g_full[reduced_sv]
+54.99s call     tests/geweke/test_geweke_compositions.py::test_g_full[structural_sv_dummies]
+54.70s call     tests/geweke/test_geweke_compositions.py::test_g_full_inexact_recorded[reduced_sv]
+52.79s call     tests/geweke/test_geweke_compositions.py::test_g_full[reduced_sv_rw]
+43 passed, 18 deselected, 12 warnings in 4980.18s (1:23:00)

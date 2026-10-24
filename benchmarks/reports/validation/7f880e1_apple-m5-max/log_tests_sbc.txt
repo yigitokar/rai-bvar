@@ -1,0 +1,29 @@
+........................................................................ [100%]
+=============================== warnings summary ===============================
+tests/sbc/test_sbc_compositions.py: 23 warnings
+  tests/sbc/test_sbc_compositions.py:177: PytestWarning: record_property is incompatible with junit_family 'xunit2' (use 'legacy' or 'xunit1')
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 20 durations =============================
+673.56s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_sv_outliers_t]
+591.67s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv_invgamma]
+584.59s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv_outliers_t]
+440.42s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_sv_t]
+406.56s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_sv_outliers]
+394.66s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv_t]
+341.89s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv_outliers]
+326.53s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_sv_rw]
+219.85s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_sv]
+183.97s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv]
+181.55s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv_dummies]
+139.01s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv_rw]
+126.52s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_sv_fixed_b0]
+54.20s call     tests/sbc/test_sbc_compositions.py::test_sbc[zero_sv]
+39.86s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_constant]
+36.58s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_iw_equivalent]
+35.49s call     tests/sbc/test_sbc_compositions.py::test_sbc[reduced_constant_dummies]
+24.87s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_iw_equivalent_dummies]
+20.61s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_constant_dummies]
+17.85s call     tests/sbc/test_sbc_compositions.py::test_sbc[structural_iw_equivalent]
+72 passed, 1 deselected, 23 warnings in 4928.15s (1:22:08)

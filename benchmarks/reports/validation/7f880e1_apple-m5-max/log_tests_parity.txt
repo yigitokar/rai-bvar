@@ -1,0 +1,42 @@
+...s........x..                                                          [100%]
+=============================== warnings summary ===============================
+tests/parity/test_bayesianvars.py::test_swa_parity_long[bvars_swa_n3p2_sv]
+  /Users/yigitokar/rai-bvar-release/tests/parity/test_bayesianvars.py:263: UserWarning: non-centred sign fold in more than 1% of sweeps for ['y2'] (fractions [0.0106]): near-homoskedastic equation(s), where stochvol and bayesianVARs differ from rai-bvar (D-7)
+    fit = fit_mcmc(
+
+tests/parity/test_bayesianvars.py::test_swa_parity_long[bvars_swa_n7p4_sv]
+  /Users/yigitokar/rai-bvar-release/tests/parity/test_bayesianvars.py:263: UserWarning: non-centred sign fold in more than 1% of sweeps for ['y4', 'y7'] (fractions [0.0268, 0.0715]): near-homoskedastic equation(s), where stochvol and bayesianVARs differ from rai-bvar (D-7)
+    fit = fit_mcmc(
+
+tests/parity/test_bayesianvars.py::test_swa_parity_long[bvars_swa_n7p4_sv]
+  /Users/yigitokar/rai-bvar-release/tests/parity/test_bayesianvars.py:263: UserWarning: this composition is not order-invariant: with 7 variables its results depend on their ordering (R8; N08 §B2); gauge how much with rai_bvar.ordering_sensitivity(model, data, mode='prior') (N08 §B4)
+    fit = fit_mcmc(
+
+tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_iii_defaults]
+  /Users/yigitokar/rai-bvar-release/tests/parity/test_stochvol.py:391: UserWarning: non-centred sign fold in more than 1% of sweeps for ['y'] (fractions [0.0107]): near-homoskedastic equation(s), where stochvol and bayesianVARs differ from rai-bvar (D-7)
+    fit = fit_mcmc(
+
+tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_v_t5]
+  /Users/yigitokar/rai-bvar-release/tests/parity/test_stochvol.py:391: UserWarning: Student-t ν has posterior mass ≥ 0.5 at the grid bound 5 for ['y'] (mass [1.0]): near-Gaussian tails, SV may suffice (report only; mass at ν = 5 is normal, N03 §6)
+    fit = fit_mcmc(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 20 durations =============================
+52.30s call     tests/parity/test_bayesianvars.py::test_swa_parity_long[bvars_swa_n7p4_sv]
+23.01s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_v_t5]
+19.22s call     tests/parity/test_bayesianvars.py::test_swa_parity_long[bvars_swa_n3p2_sv]
+15.22s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_i_exact]
+14.35s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_iv_exact]
+11.85s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_i_main]
+10.83s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_i_defaults]
+10.79s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_ii_main]
+10.79s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_iv_main]
+10.77s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_iii_main]
+10.77s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_ii_defaults]
+10.77s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_iv_defaults]
+10.76s call     tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_iii_defaults]
+5.97s call     tests/parity/test_bayesianvars.py::test_swa_parity_long[bvars_swa_n3p2_const]
+0.01s call     tests/parity/test_bayesianvars.py::test_bayesianvars_parity[bvars_bayesianvars_*]
+
+(5 durations < 0.005s hidden.  Use -vv to show these durations.)
+13 passed, 1 skipped, 349 deselected, 1 xfailed, 5 warnings in 220.60s (0:03:40)
