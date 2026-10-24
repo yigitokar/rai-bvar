@@ -932,8 +932,11 @@ def run_chains(
     signature) is required exactly when ``static.store.in_loop_forecast > 0`` and must have that
     horizon (DESIGN §5.8; every fit of a fit axis uses the same plan). Raises
     ``MCMCNumericalError`` on a numerical failure and ``StorageBudgetError`` before sampling when
-    the stored draws exceed the memory budget.
+    the stored draws exceed the memory budget. ``settings.draws=None`` (the composition default)
+    is resolved from ``static.vol`` by ``MCMCSettings.with_default_draws`` (D-35), as ``BVAR`` does.
     """
+    if getattr(settings, "draws", 0) is None:
+        settings = settings.with_default_draws(sv=static.vol.persistent == "sv")
     t_start = time.perf_counter()
     # one OpenBLAS thread for jaxlib's LAPACK calls while the chains run: oversubscription
     # removed; results unchanged below a 128 × 128 factor (engines.mcmc._blas; WP24)

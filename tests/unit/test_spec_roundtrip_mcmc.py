@@ -247,7 +247,7 @@ def test_spec_layout_of_an_sv_model():
     assert spec["vol"]["class"] == "SV"
     assert spec["vol"]["outlier_prior"] == {"class": "Beta", "a": 1.0, "b": 50.0}
     assert spec["vol"]["nu_prior"] == {"class": "DiscreteUniform", "low": 3, "high": 40}
-    assert spec["mcmc"] == dataclasses.asdict(rb.MCMCSettings())
+    assert spec["mcmc"] == dataclasses.asdict(rb.MCMCSettings(draws=10_000))  # D-35 SV default
     assert "contemp" not in spec["mean"]["prior"]
 
 

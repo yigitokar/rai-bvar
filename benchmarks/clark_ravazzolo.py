@@ -78,8 +78,9 @@ What it does (N08 §C):
 
 The six acceptance criteria of N08 §C5 are evaluated with the operational definitions printed in
 the report. ``--config acceptance`` uses 4 chains × 20,000 kept draws (burn 1000) and the
-path-integrated LPD; ``--config full`` 4 × 5000 (burn 1000); ``--config quick`` the library's
-default ``MCMCSettings()`` (4 × 2000, burn 1000); all three use every origin, ``acceptance``
+path-integrated LPD; ``--config full`` 4 × 5000 (burn 1000); ``--config quick`` 4 × 2000 (burn
+1000; the library default before D-35, now explicit, so its models and cache keys are unchanged;
+the SV default is 4 × 10,000 since D-35); all three use every origin, ``acceptance``
 8000 forecast draws per origin and the other two 1000. ``benchmarks/reports/clark_ravazzolo_quick.md`` is a ``quick`` main-stage report
 (no ordering stage), labelled as not the acceptance run. ``--config smoke`` only checks that the
 script runs (tiny chains, every 8th origin; its numbers mean nothing). Everything is cached (``--cache``), so an interrupted run
@@ -199,8 +200,9 @@ CONFIGS = {
     ),
     # 5000 kept draws: the SV hyperparameters come close to the R-hat < 1.01 / ESS > 400 targets
     "full": Config("full", MCMCSettings(chains=4, draws=5000, burn=1000), 1000, 1),
-    # the library's default MCMCSettings (4 × 2000, burn 1000)
-    "quick": Config("quick", MCMCSettings(), 1000, 1),
+    # 4 × 2000, burn 1000: the library default before D-35 (the SV default is now 4 × 10,000),
+    # explicit so the quick report's models, specs and cache keys stay as they were
+    "quick": Config("quick", MCMCSettings(draws=2000), 1000, 1),
     # end-to-end check of the script only (meaningless numbers)
     "smoke": Config("smoke", MCMCSettings(chains=2, draws=100, burn=100), 100, 8, 1, 8),
 }

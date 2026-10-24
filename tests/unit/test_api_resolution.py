@@ -123,7 +123,9 @@ def test_resolution_table(row):
         with pytest.raises(ValueError, match="analytic engine"):
             static_parts(model)
         return
-    assert model.mcmc == rb.MCMCSettings()
+    # D-35: the default budget is resolved per composition and stored
+    draws = 2000 if isinstance(resolved_vol, rb.Constant) else 10_000
+    assert model.mcmc == rb.MCMCSettings(draws=draws)
     parts = static_parts(model)
     assert isinstance(parts, StaticParts)
     assert (parts.struct.contemp_scaling, parts.mean_kind, parts.coef_scaling) == mode
@@ -376,7 +378,7 @@ def test_capability_flags_follow_the_engine():
 
 
 def test_mcmc_settings_are_resolved_and_validated():
-    assert bvar(vol=rb.SV()).mcmc == rb.MCMCSettings()
+    assert bvar(vol=rb.SV()).mcmc == rb.MCMCSettings(draws=10_000)  # D-35
     from_mapping = bvar(vol=rb.SV(), mcmc={"chains": 2, "draws": np.int64(100)})
     assert from_mapping.mcmc == rb.MCMCSettings(chains=2, draws=100)
     with pytest.raises(TypeError, match="mcmc must be an MCMCSettings"):

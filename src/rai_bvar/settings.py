@@ -3,8 +3,10 @@
 Pure Python, so ``import rai_bvar`` stays free of JAX (D-31).
 
 * ``MCMCSettings`` is **part of the model spec** (``BVAR.mcmc``): every field can change the
-  draws, so it enters the spec hash and the backtest cache key. ``gram`` and ``const_path`` are
-  resolved by deterministic shape rules (DESIGN §3.7.2, §10.5), never by machine properties.
+  draws, so it enters the spec hash and the backtest cache key. ``draws=None`` is resolved per
+  composition by ``BVAR`` and stored (D-35), so a spec always holds a number; ``gram`` and
+  ``const_path`` are resolved by deterministic shape rules (DESIGN §3.7.2, §10.5), never by
+  machine properties.
 * ``Runtime`` is **not** in the spec: it holds execution knobs whose invariance is tested
   (bitwise: chunk size, storage location, replay copies; to rounding: the device layout, so
   ``devices`` defaults to one device; DESIGN §5.1, §5.2, §5.6).
@@ -13,6 +15,7 @@ Pure Python, so ``import rai_bvar`` stays free of JAX (D-31).
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import os
 from dataclasses import dataclass
@@ -64,8 +67,12 @@ class MCMCSettings:
     """Sampler settings; part of the spec because results depend on every field.
 
     ``burn`` sweeps are run exactly (never rounded to a chunk), then ``draws`` kept draws per chain,
-    one every ``thin`` sweeps. ``warm_burn`` (default ``max(250, burn // 4)``) replaces ``burn``
-    for warm-started backtest fits (DESIGN §5.5). Parameter draws are stored every
+    one every ``thin`` sweeps. ``draws=None`` (the default) is the composition's default budget,
+    resolved and stored by ``BVAR`` (D-35): :data:`SV_DEFAULT_DRAWS` (10,000) for a stochastic-
+    volatility composition (``SV``, with or without outliers, Student-t tails or a random walk),
+    else :data:`DEFAULT_DRAWS` (2,000); see :func:`default_draws`. An explicit ``draws`` is kept
+    as given. ``warm_burn`` (default ``max(250, burn // 4)``) replaces ``burn`` for warm-started
+    backtest fits (DESIGN §5.5). Parameter draws are stored every
     ``⌈draws/store_max⌉``-th kept draw; ``store="paths"`` also stores latent paths every
     ``path_thin``-th stored draw (DESIGN §5.3). ``t_bucket`` pads ``T_eff`` up to a multiple
     (``T_pad``) so one compiled program serves many windows (D-23). ``converged`` needs every
@@ -73,7 +80,7 @@ class MCMCSettings:
     """
 
     chains: int = 4
-    draws: int = 2000
+    draws: int | None = None  # None → default_draws(sv) at BVAR construction (D-35)
     burn: int = 1000
     thin: int = 1
     warm_burn: int | None = None
@@ -90,7 +97,6 @@ class MCMCSettings:
     def __post_init__(self) -> None:
         for name, minimum in (
             ("chains", 1),
-            ("draws", 1),
             ("burn", 0),
             ("thin", 1),
             ("seed", 0),
@@ -99,6 +105,7 @@ class MCMCSettings:
             ("t_bucket", 1),
         ):
             _int(self, name, minimum)
+        _int(self, "draws", 1, optional=True)
         _int(self, "warm_burn", 0, optional=True)
         if self.seed >= 2**63:
             raise ValueError(f"MCMCSettings.seed must be below 2**63, got {self.seed}")
@@ -109,6 +116,8 @@ class MCMCSettings:
             raise ValueError("MCMCSettings.rhat_max must exceed 1")
         if not _float(self, "ess_min") >= 0.0:
             raise ValueError("MCMCSettings.ess_min must be non-negative")
+        if self.draws is None:  # checked again once BVAR resolves draws (``replace`` re-runs this)
+            return
         sweeps = max(self.burn, self.resolved_warm_burn) + self.draws * self.thin
         if sweeps >= _U32:
             raise ValueError(
@@ -124,7 +133,36 @@ class MCMCSettings:
     @property
     def store_thin(self) -> int:
         """Kept draws per stored parameter draw: ``⌈draws/store_max⌉``."""
-        return -(-self.draws // self.store_max)
+        return -(-self._resolved_draws("store_thin") // self.store_max)
+
+    def with_default_draws(self, *, sv: bool) -> MCMCSettings:
+        """These settings with ``draws=None`` replaced by :func:`default_draws` (``sv``: the
+        composition has stochastic volatility); unchanged when ``draws`` is set (D-35)."""
+        if self.draws is not None:
+            return self
+        return dataclasses.replace(self, draws=default_draws(sv=sv))
+
+    def _resolved_draws(self, what: str) -> int:
+        if self.draws is None:
+            raise ValueError(
+                f"MCMCSettings.{what} needs draws: draws=None is the composition's default "
+                "budget, resolved by BVAR (or with_default_draws(sv=...)); D-35"
+            )
+        return self.draws
+
+
+SV_DEFAULT_DRAWS = 10_000
+"""Default kept draws per chain of a stochastic-volatility composition (D-35; DESIGN Q14): the
+budget below which ``BVAR.fit`` of an ``SV`` composition warns (``fit.warnings``)."""
+
+DEFAULT_DRAWS = 2_000
+"""Default kept draws per chain of every other MCMC composition (``Constant`` volatility)."""
+
+
+def default_draws(*, sv: bool) -> int:
+    """The default ``MCMCSettings.draws`` of a composition with (``sv=True``) or without
+    stochastic volatility (D-35)."""
+    return SV_DEFAULT_DRAWS if sv else DEFAULT_DRAWS
 
 
 @dataclass(frozen=True)
@@ -181,4 +219,11 @@ class FitPlan:
         _int(self, "seed", 0)
 
 
-__all__ = ["FitPlan", "MCMCSettings", "Runtime"]
+__all__ = [
+    "DEFAULT_DRAWS",
+    "SV_DEFAULT_DRAWS",
+    "FitPlan",
+    "MCMCSettings",
+    "Runtime",
+    "default_draws",
+]

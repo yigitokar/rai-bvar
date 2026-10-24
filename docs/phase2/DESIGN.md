@@ -78,6 +78,7 @@ numerical oracles only, run offline by `tools/make_r_fixtures.R` (SPEC §2.1, §
 | D-32 | Backtest warm starts are opt-in in Phase 2 | SPEC §9.1 | open question Q6 |
 | D-33 | `converged` is decided by a **primary** monitor set (log-likelihood, own first lag of `B`, SV parameters, `h_T`, `log λ`); every `a_ij`, `h_1`, `h_mid`, `p`, `ν` are secondary (reported, never gating) | performance §8.1; judges | avoids multiplicity false alarms |
 | D-34 | **Opt-in path-integrated LPD** (`log_pred_density(…, lpd_method="integrated")`; the default `"conditioned"` is the SPEC §7 estimator, unchanged): draw `s` is conditioned on its parameters and its drawn latent scale path only, and `y_{T+1..T+h−1}` is integrated out analytically, `y_{T+h} | θ_s, λ_s ~ N(m_h, M_h M_hᵀ)` with `m_h = cond_mean_h − Σ_{k<h} Φ_{h−k} u_k`, `M_h = [Φ_{h−1} L_1 | … | Φ_0 L_h]`; subset factors by QR of `M_h[idx]ᵀ`. Needs the new accelerator variable `lag_coefs` (MCMC forecasts of linear or zero means); `h = 1` runs the conditioned code (bitwise); `rb_transitory` at `h > 1` and forecasts without `lag_coefs` raise. **Plumbing:** `score_forecast`, `backtest`, `estimate_cost`, `compare` and `ordering_sensitivity` take `lpd_method` (default `"conditioned"`: scores, layout and cache keys unchanged); `"integrated"` adds `"lpd": "integrated-v1"` to backtest cache keys and the conditioned estimator's columns to the scores (§11.6); the Clark–Ravazzolo `acceptance` config (4 × 20,000 draws) uses it in every stage. Review amendments (2026-10-23) in §7.3, §11.6 and §13 WP23 | WP23 review (2026-10-23); `docs/paper/NOTES.md` 8b; `benchmarks/reports/clark_ravazzolo_preregistration.md` | the conditioned estimator degenerates in the tails at `h > 1` (Constant UR h = 8 at 2008Q2: −93.6 with 1000 draws vs −19.1 path-integrated on 1000 draws) while its MCSE stays ≈ 1; the integrated one is exact given each draw's parameters and volatility path but still a Monte Carlo average over the draws (§7.3); contract fields and SPEC §7 unchanged; analytic, benchmark and ordering-pooled forecasts carry no `lag_coefs` (§7.3) |
+| D-35 | **Composition-aware default MCMC budget and the SV budget warning** (resolves Q14, §12.2). `MCMCSettings.draws` defaults to `None`, which `BVAR.__post_init__` resolves and stores (the D-19 rule: no unresolved default survives construction): **4 chains × 10,000 kept draws** (`settings.SV_DEFAULT_DRAWS`) for every composition with stochastic volatility (`SV`, `SV(rw=True)`, `SV(outliers=True)`, `SV(tails="t")`, in structural or reduced form), 4 × 2,000 (`settings.DEFAULT_DRAWS`, the old value) for `Constant` volatility. An explicit `draws` (in an `MCMCSettings` or a mapping) is kept as given; settings that leave `draws` unset get the composition's default whatever else they set. `MCMCSettings.with_default_draws(sv=…)` is the one rule; `fit_mcmc` and `run_chains` apply it too (`sv` ⇔ `static.vol.persistent == "sv"`) for engine-level callers, and `MCMCSettings().store_thin` raises while `draws` is unset. **Warning** (§8.3): `resolve()` sets `warning_inputs["sv_budget"] = (chains, draws)` when an `SV` composition has fewer than 10,000 kept draws per chain (`draws`; `thin` and `chains` are not credited, and `chains < 2` keeps its own row), and `warning_catalogue` appends `monitor.sv_budget_message`, which names the Q14 evidence and the remedy `mcmc=MCMCSettings(draws=10_000)`; it reaches `fit.warnings`, a `UserWarning`, forecast attrs and the backtest aggregation like every §8.3 row. It never fires for `Constant` volatility, the analytic engine, the SV default or an explicit budget of 10,000 or more; engine-level fits (`fit_mcmc` called directly) carry no flag. **Hashes:** Phase 1 (analytic) specs and every `Constant` MCMC spec are unchanged (their `draws` resolves to 2000; pinned in `tests/unit/test_default_budget.py` with the hashes recorded at `ae5f8d6`). An SV model whose settings leave `draws` unset (the default, or e.g. `MCMCSettings(seed=1)`) now records `draws = 10000` in its spec, so its spec hash and every backtest cache key of it change: the one unavoidable change (scores cached at the old SV default are not served to the new default). `mcmc=MCMCSettings(draws=2000)` reproduces the old SV spec and hash exactly, so its caches are served; its name gains the `mcmc=` suffix because it is no longer the default, and conversely an SV model with an explicit `MCMCSettings(draws=10_000)` (BENCH-P2's budget) now equals the default and loses it (names label results and forecast attrs `model`; they enter no spec hash or cache key). Explicit budgets are unaffected: BENCH-P2 (4 × 10,000), the Clark–Ravazzolo `acceptance` (4 × 20,000), `full` (4 × 5,000) and `smoke` configs, the README `compare()` (`draws=20_000`); the CR `quick` config, which was `MCMCSettings()`, is now the explicit `MCMCSettings(draws=2000)`, so its models and cache keys stay as they were. The `converged` rule (§8.2), the SPEC §10.6 thresholds and `compare()`'s 95% rule are unchanged (Q14 options 3–5 not adopted) | owner decision 2026-10-24 (Q14 "as recommended"); evidence §12.2 Q14 (BENCH-P2, README quick start, Clark–Ravazzolo) | a default SV fit samples 5× as many kept draws as the old default (with the 1,000 burn-in sweeps, 11,000 against 3,000 sweeps, about 3.7×), and its diagnostics take about 7 s instead of 1 s at `n = 20` SV-O-t (§8.2); 4 × 10,000 raises the floor, it is not a convergence guarantee (BENCH-P2 still misses the gate on 4 of 101 primary quantities; the README example converges at 10 of 11 origins); `dataclasses.replace(model, vol=SV())` on a `Constant` MCMC model keeps its stored 2,000 draws (stored-resolved rule) and so warns |
 
 ### 0.2 Errata: every judge finding and its resolution
 
@@ -143,8 +144,9 @@ src/rai_bvar/
 ├── __init__.py                          [WP2]  + SV, MCMCSettings, Runtime, FitPlan, set_cpu_devices,
 │                                                 enable_compilation_cache, ordering_sensitivity, sv_priors
 ├── api.py                               [WP2]  auto resolution, engine rules, BVAR.mcmc, fit(seed, init, runtime, plan),
-│                                                 harmonise_grid, spec/from_spec
+│                                                 harmonise_grid, spec/from_spec  [D-35] stores the resolved draws
 ├── settings.py                    new   [WP2]  MCMCSettings, Runtime, FitPlan (pure Python)
+│                                        [D-35] draws=None → default_draws(sv): 10,000 with SV, else 2,000
 ├── _devices.py                    new   [WP1]  set_cpu_devices(k), enable_compilation_cache(path)
 ├── components/                          components.py becomes a package; import paths unchanged
 │   ├── __init__.py                new   [WP2]  re-exports Linear, Constant, SV (no JAX)
@@ -194,9 +196,10 @@ src/rai_bvar/
 │       ├── storage.py             new   [WP14] storage plan, host store (preallocated or memmap), DataTree
 │       ├── warmstart.py           new   [WP14] FinalState, remap onto a new window
 │       ├── results.py             new   [WP14] MCMCFit, fit_mcmc (forecast/irf delegate to forecast.py)
-│       ├── monitor.py             new   [WP15] monitored sets, converged rule, warning catalogue
+│       ├── monitor.py             new   [WP15] monitored sets, converged rule, warning catalogue  [D-35] SV budget
 │       ├── forecast.py            new   [WP17] forecast core, forecast / irf / draw_parameters from a fit
 │       ├── resolve.py             new   [WP18] BVAR + VARData → (StaticConfig, EngineData, PriorArrays, hyper, notes)
+│       │                                [D-35] warning_inputs["sv_budget"]
 │       └── eb.py                  new   [WP18] EB via the Phase 1 twin and structural_nig
 ├── forecast/result.py                   [WP17] ESS-adjusted LPD MCSE, leading-block fast path, optional extra
 │                                                 variables, opt-in transitory RB
@@ -216,6 +219,7 @@ tools/make_sv_parity_data.py       new   [WP8]  NumPy generator of the parity da
 benchmarks/pilot/                  new   [WP3]  clean-room pilot prototypes (timing only)
 benchmarks/phase2_perf.py          new   [WP24] BENCH-P2 driver
 benchmarks/clark_ravazzolo.py      new   [WP23] replication report (N08 §C)  [D-34] acceptance config, --lpd
+                                         [D-35] quick config: explicit 4 × 2000
 docs/phase2/09_pilot.md            new   [WP3]  pilot measurements and frozen defaults
 pyproject.toml                           [WP1]  pytest markers only
 .github/workflows/ci.yml                 [WP24] PR / nightly / weekly tiers
@@ -241,7 +245,7 @@ tests/mcmc/unit/          [WP1] test_keys, test_state, test_config, test_import_
 tests/priors/             [WP6] test_scales, test_structural_prior, test_reduced_prior, test_sv_arrays
 tests/unit/               [WP2] test_specs_phase2, test_phase1_hash_golden, test_api_resolution, test_grid_harmonise,
                                 test_spec_roundtrip_mcmc      [WP18] test_fit_mcmc_api   [D-34] test_lpd_integrated,
-                                test_scores_lpd_method, test_clark_ravazzolo_script
+                                test_scores_lpd_method, test_clark_ravazzolo_script   [D-35] test_default_budget
 tests/validation/         [WP7] test_uniformity, test_geweke_selftest, test_sbc_selftest, test_sequential, test_identities_toy
                           [WP9] test_reference_moments, test_simulate, test_log_joint, test_mixture_transcription
 tests/mcmc/blocks/        [WP10] test_recursive, test_linear_structural, test_linear_fastpaths, test_zero_mean
@@ -686,7 +690,8 @@ this list is the index.
    `AnalyticFit.forecast` (SPEC R8, §7; WP17 amendment); the docstrings of `rai_bvar.set_cpu_devices` (sharded
    draws equal the one-device draws only to rounding, §5.2) and `engines/mcmc/_blas.py` (the largest BENCH-P2
    factor is the 100 × 100 structural precision, not 81 × 81) are corrected.
-10. Open question Q14 (§12.2): the default convergence policy for SV fits (pilot decision 6).
+10. Open question Q14 (§12.2): the default convergence policy for SV fits (pilot decision 6). Resolved by the owner on
+    2026-10-24: D-35 (SV compositions default to 4 × 10,000 kept draws and warn below it).
 11. Repository hygiene: `docs/.DS_Store` (committed in `3802295`) is removed from the repository, and `.DS_Store`
     is in `.gitignore`.
 
@@ -1773,12 +1778,13 @@ Tail ESS is reported, not gated. Acceptance rates never gate (E21). Single-chain
 R-hat cannot see between-chain disagreement), consistent with the Phase 1 MH rule. The flag goes into forecast
 attrs `converged`, so the backtest score `converged` and `compare()`'s "≥ 95% of origins" rule (SPEC §9.5) work
 unchanged. Cost (Stage 2 amendment, measured): about 1 s CPU for flag, table and warnings at n = 20 SV-O-t
-(392 quantities) and the default 4 × 2000 draws; about 7 s at 4 × 10,000 draws, split between the rank
+(392 quantities) and 4 × 2000 draws (the default before D-35); about 7 s at 4 × 10,000 draws, split between the rank
 normalisation (two argsorts and a sort per quantity, ~40%) and the five FFT-based ESS per quantity (~25–40%). Each quantity is evaluated once per fit (content-addressed memo); a
 memoised value equals a recomputation to rounding (the FFT's last bits depend on the batch it ran in).
 
-With the default settings this flag is routinely `False` for SV fits; the default policy is open question Q14
-(§12.2).
+With the pre-D-35 default of 4 × 2,000 kept draws this flag was routinely `False` for SV fits (Q14, §12.2). D-35
+(2026-10-24) makes 4 × 10,000 the default of SV compositions and adds a warning below it (§8.3); the flag itself is
+unchanged and can still be `False` at 4 × 10,000 (BENCH-P2: 4 of 101 primary quantities).
 
 ### 8.3 Warnings (`fit.warnings`, copied into forecast attrs, aggregated by the backtest)
 
@@ -1787,6 +1793,7 @@ With the default settings this flag is routinely `False` for SV fits; the defaul
 | primary R-hat or ESS fails | five worst `(quantity, R-hat, ESS)`; "increase draws, burn or thin" |
 | secondary: > 5% of `a_ij` with R-hat > 1.01 | fraction and worst three (informational) |
 | `chains == 1` | split R-hat cannot detect between-chain disagreement |
+| SV composition with fewer than 10,000 kept draws per chain (D-35; resolution-step input `sv_budget`, so `BVAR.fit` only) | the budget against the SV default, the Q14 evidence (4 × 2,000: README example 0 of 11 origins; CR `SV(rw)` 68% at 4 × 5,000, 106/106 at 4 × 20,000; BENCH-P2 4 of 101 at 4 × 10,000); "raise the budget with `mcmc=MCMCSettings(draws=10_000)` or more, or leave draws unset" |
 | exact-`h` acceptance < 0.5, or longest rejection run > 50 sweeps, any equation | mixture-correction mixing (N01 §10.2): acceptance alone is not enough |
 | NC fold fraction > 1% | near-homoskedastic equation; stochvol/bayesianVARs differ there (D-7) |
 | ν posterior mass ≥ 0.5 at the grid bound 40 | "near-Gaussian; SV may suffice" (report only; mass at 3 is normal, N03 §6) |
@@ -2189,8 +2196,8 @@ new fingerprint resets `main` to `k` = 0 (the three entries saved at `888f620` d
 *Status:* the changed workflow has not run on GitHub yet (no push from the closeout session); the first PR run
 and the first `main` run after the merge give the first measurements. *Not adopted* (owner decisions): sharing
 buckets between 3.12 and 3.13 (both write zlib payloads; relies on JAX-internal codec behaviour), and
-`XLA_FLAGS=--xla_cpu_max_isa=AVX2` (portable entries across x86 runners, at the cost of not testing AVX-512 code
-generation; the flag enters the JAX cache key).
+`XLA_FLAGS=--xla_cpu_max_isa=AVX2` (expected to make entries portable across x86 runners; it does not, and was
+reverted after a brief adoption on 2026-10-24: amendment below).
 
 **Amendment (Phase 2 closeout, 2026-10-23): PR-tier budget.** The 10–15 min figure assumed a warm persistent
 cache and was never measured in CI, where every PR-tier job through `888f620` ran cold. Measured cold, per job
@@ -2203,7 +2210,33 @@ once). Warm, projected (not measured): about one third of a job's cold time, fro
 runner classes. The measurement is the run summary's XLA cache block, which requires `main` to hold an entry
 for the job's (Python, ISA) bucket first; the first warm runs replace the projection. The budget is not a gate:
 no test leaves the PR tier to meet it. If warm runs miss, the levers are sharding (pytest-xdist, or one Python
-running the MCMC-heavy modules) or pinning `--xla_cpu_max_isa` (open).
+running the MCMC-heavy modules) or pinning `--xla_cpu_max_isa` (adopted 2026-10-24, but it is no lever: JAX
+keys entries on the runner's CPU features; amendment below).
+
+**Amendment (2026-10-24): AVX2 cap adopted, then reverted.** The owner approved `XLA_FLAGS=--xla_cpu_max_isa=AVX2`
+for the `test` and `nightly` jobs on the expectation that it would make cache entries portable across the x86
+runner pool, at the cost of AVX-512 code-generation coverage. The review below showed that the cap gives no
+caching benefit, so it was reverted before merging: the jobs compile for the host ISA again (AVX-512 coverage
+kept), and the cache buckets stay per CPU model. The analysis is kept for the record.
+What the cap does (XLA `d8679698`, the revision jax 0.12.0.1 pins; `xla/backends/cpu/codegen/cpu_features.cc`,
+`xla/backends/cpu/target_machine_options.cc`): XLA:CPU removes the host's AVX-512, AMX, AVX10.2 and APX features
+from the LLVM target, and on a host that has any of them (every pool model except the EPYC 7763) it also sets the
+target CPU to `haswell`; extensions that XLA does not order under an ISA level (GFNI, VAES, AVX-VNNI, vendor
+extensions) stay enabled. *Review finding (2026-10-24): the cap does not make cache entries portable.* The
+decision expected one cache bucket for every x86 runner. In jax 0.12.0.1 the persistent-cache key of an
+executable includes the CPU topology fingerprint (`jax._src.cache_key._hash_accelerator_config`), and XLA's CPU
+topology serialises the target machine it compiles for: triple, target CPU name and the host's whole `+`/`-`
+feature list after the cap's filtering (`xla/pjrt/plugin/xla_cpu/cpu_topology.cc`; `xla/pjrt/cpu/cpu_client.cc`
+builds it from `XLA_FLAGS`). The pool's models still differ in that list under the cap (GFNI, for one: the EPYC
+7763 lacks it; the 7763 also keeps its own target CPU, `znver3`), so JAX serves an entry only to a runner with the
+same target, whatever the Actions bucket; by the same mechanism a load across CPU models was never possible,
+with or without the cap. A single shared `avx2cap` bucket would therefore have gained no hits and accumulated every
+model's entries (about 0.25 GiB each) in one Actions entry, tripping the 1 GiB wipe and saving up to 1 GiB per job
+against the 10 GB quota. With no caching benefit left, the cap would only have made every runner compile for the
+same ISA level at the cost of AVX-512 coverage, so it was reverted: `<isa>` is the per-CPU md5 of the "model
+name" and "flags" lines, and the bucket count and the hit-rate arithmetic above apply. The run summary's XLA
+cache block prints the ISA bucket and `XLA_FLAGS`, and the weekly `meta.json` records `xla_flags` (both empty
+unless a job sets the flag).
 
 **Amendment (Phase 2 closeout, 2026-10-23): weekly validation record and concurrency.** The weekly job sets
 `RAI_BVAR_VALIDATION_RECORD=$RUNNER_TEMP/validation-record`; the tests append `geweke.jsonl`, `sbc.jsonl` and
@@ -2369,7 +2402,7 @@ delivered SOC/SUR on the MCMC engine on 2026-10-22, D-21, so `api.py` no longer 
 @dataclass(frozen=True)
 class MCMCSettings:                 # part of the spec: results depend on every field
     chains: int = 4
-    draws: int = 2000               # kept draws per chain
+    draws: int | None = None        # kept draws per chain; None → 10,000 with SV, else 2,000 (D-35)
     burn: int = 1000                # exact number of burn-in sweeps (never rounded)
     thin: int = 1
     warm_burn: int | None = None    # None → max(250, burn // 4); warm starts only
@@ -2399,8 +2432,9 @@ class FitPlan:                      # in-loop forecasting (§5.8)
     seed: int = 0
 ```
 
-`BVAR.mcmc: MCMCSettings | None = None`; it resolves to `MCMCSettings()` for MCMC compositions and is stored
-resolved, so the spec contains it.
+`BVAR.mcmc: MCMCSettings | None = None`; it resolves to `MCMCSettings()` for MCMC compositions, with an unset `draws`
+resolved per composition (`MCMCSettings.with_default_draws`, D-35: 10,000 kept draws per chain with `SV`, 2,000
+with `Constant`), and is stored resolved, so the spec contains it.
 
 ### 11.3 `fit` and `MCMCFit`
 
@@ -2527,11 +2561,11 @@ class MCMCFit:
 | R14 | Geweke power against M2/M7 unverified (N06 §12 item 6) | weak guard on step order and ASIS | structural enforcement (`s` local); quadrature toys; catch tiers recorded |
 | R15 | Eigen path on near-singular `G̃` (many `g ≈ 0`) | rounding differences vs Cholesky | exact algebra; deterministic mean/covariance test at 1e-12; `const_path="cholesky"` escape hatch |
 | R16 | Phase 3 CommonSV needs a JAX NIW draw (Phase 1 engine is NumPy); Phase 4 `bartz` may not vmap and has float32 leaves | rewrite pressure | `GlobalStep`, coupling channel, `Batching.MAP`, `float32_leaves`, in-loop forecast hook exist now |
-| R17 | Host storage at 4 × 10,000 draws | memory pressure | `store_max`, latent moments, memmap, storage plan raises early |
+| R17 | Host storage at 4 × 10,000 draws (the SV default since D-35) | memory pressure | `store_max`, latent moments, memmap, storage plan raises early |
 
 ### 12.2 Open questions for the orchestrator
 
-**Decisions (2026-10-22):** every recommendation below is accepted as stated. Q2: the target is defined as in §10.1. Q12: the SPEC owner updates SPEC §4.2/§8 in the Phase 2 PR. (Q12 was executed at the Phase 2 closeout, 2026-10-23, in SPEC v2.2. Q14, added then, has no accepted recommendation: it is open.)
+**Decisions (2026-10-22):** every recommendation below is accepted as stated. Q2: the target is defined as in §10.1. Q12: the SPEC owner updates SPEC §4.2/§8 in the Phase 2 PR. (Q12 was executed at the Phase 2 closeout, 2026-10-23, in SPEC v2.2. Q14, added then, was resolved by the owner on 2026-10-24 as recommended: D-35.)
 
 | ID | Question | Recommendation |
 | :--- | :--- | :--- |
@@ -2548,9 +2582,9 @@ class MCMCFit:
 | Q11 | `Constant` with transitory components user-facing | engine supports it (test vehicle); keep it engine-level in Phase 2 |
 | Q12 | Replace the SPEC §4.2 interface sketch by §3 of this design; correct SPEC §8's "all without a loop" attribution (N07 §8.3) | yes, by the SPEC owner |
 | Q13 | Pull `AsymmetricConjugate` (Chan 2022) into Phase 2 as an analytic composition, since `structural_nig.py` exists | user-facing prior and engine rule in Phase 3; the closed form ships in Phase 2 |
-| Q14 | Default convergence policy for SV fits (WP3 pilot decision 6, escalated and never answered; added at the Phase 2 closeout, 2026-10-23) | **Open: the owner decides.** No recommendation is adopted; the options and the evidence are below. Owners of the change: WP2 (settings), WP15 (monitors), WP18 |
+| Q14 | Default convergence policy for SV fits (WP3 pilot decision 6, escalated; added at the Phase 2 closeout, 2026-10-23) | **Resolved (owner, 2026-10-24): D-35.** Option 2 below as a composition-dependent default (SV compositions: 4 chains × 10,000 kept draws; `Constant`: 4 × 2,000, unchanged) plus a fit warning for SV fits below it; options 3–5 not adopted, the gate unchanged. Owners of the change: WP2 (settings), WP15 (monitors), WP18 |
 
-**Q14 in detail.** With the defaults (`MCMCSettings`: 4 chains × 2,000 kept draws, `rhat_max = 1.01`,
+**Q14 in detail** (the evidence as escalated; "the defaults" are the pre-D-35 ones). With the defaults (`MCMCSettings`: 4 chains × 2,000 kept draws, `rhat_max = 1.01`,
 `ess_min = 400`) and the SV parameters `φ_i`, `σ_i` in the primary monitor set (D-33, §8.1), `converged = False`
 is routine for SV fits, and `compare()` then returns `inconclusive` for any SV comparison (its gate needs
 converged fits at ≥ 95% of origins, SPEC §9.5). Evidence:
@@ -2586,6 +2620,13 @@ Options (not exclusive):
    1.01. A SPEC-level change of the convergence definition for those quantities.
 5. **Sample until the gate passes**, up to a cap (an adaptive number of kept draws). The draws then depend on a
    stopping rule; it needs a design for reproducibility, storage and cache keys.
+
+**Decision (owner, 2026-10-24): option 2, composition-dependent, with a warning (D-35).** `MCMCSettings.draws=None`
+resolves to 10,000 kept draws per chain for SV compositions and to 2,000 for `Constant` volatility, so only SV
+models whose settings leave `draws` unset (the default, or e.g. `MCMCSettings(seed=1)`) change spec hash and
+backtest cache keys (an explicit `MCMCSettings(draws=2000)` reproduces the old ones); an SV fit below 10,000 kept draws per chain warns with this evidence and the remedy. The
+README example's SV arm, which converged at 10 of 11 origins at 4 × 10,000, keeps its explicit 4 × 20,000 for the
+verdict.
 
 ---
 
@@ -3205,7 +3246,8 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
   The earlier x86 datum (the provisional baseline of `d37e059`: 311 s on a loaded 4-core Xeon) is superseded by
   the first CI bench report at the release commit. A run on an idle 4–8 core x86 laptop stays open under Q2.
 - **Status (2026-10-23)**: BENCH-P2 52.3 s cold, 49.6 s warm on the reference laptop (Apple M5 Max, `reference:
-  true`; not idle, 1-minute load average 2.4–6.3; every timed run `converged = False`, Q14); baseline committed;
+  true`; not idle, 1-minute load average 2.4–6.3; every timed run `converged = False`, Q14, resolved by D-35 without
+  changing the gate); baseline committed;
   the bench job has never been dispatched, so the x86 report does not exist yet; the PR tier ran cold through
   `888f620` (40–85 min per job), and the cache fix of §9.10 is not yet verified in CI.
 

@@ -59,7 +59,7 @@ from rai_bvar.engines.mcmc.state import (
     GaussianDiag,
     PriorArrays,
 )
-from rai_bvar.settings import MCMCSettings
+from rai_bvar.settings import SV_DEFAULT_DRAWS, MCMCSettings
 
 Array = jax.Array
 Program = Any  # compose.Program (WP14): structure, mean, coef, vol, global_pre, global_post, eq_map
@@ -553,7 +553,9 @@ class DiagnosticsInput:
     rows whose outlier scale sat at ``K`` (``(n,)`` or ``(chains, n)``); ``None`` averages the
     monitor's auxiliary ``outlier_at_max`` field over chains and draws. ``covers_2020`` and
     ``tcode_clash`` come from the resolution step (the Phase 1 checks); ``eb_warnings`` are the
-    conjugate twin's messages, appended verbatim.
+    conjugate twin's messages, appended verbatim. ``sv_budget`` (``(chains, draws)``, from the
+    resolution step) is set only for a stochastic-volatility composition fitted with fewer kept
+    draws per chain than ``SV_DEFAULT_DRAWS`` (D-35); engine-level fits leave it ``None``.
     """
 
     static: StaticConfig
@@ -570,6 +572,7 @@ class DiagnosticsInput:
     covers_2020: bool = False
     tcode_clash: tuple[str, ...] = ()
     order_invariant: bool | None = None
+    sv_budget: tuple[int, int] | None = None
 
 
 def _acc_names(acc: Mapping[str, Any]) -> dict[str, np.ndarray]:
@@ -606,6 +609,21 @@ def _values(x: np.ndarray, mask: np.ndarray, digits: int = 3) -> list[float]:
     return [round(float(v), digits) for v in x[mask]]
 
 
+def sv_budget_message(chains: int, draws: int) -> str:
+    """The D-35 warning of a stochastic-volatility fit below the SV default budget (DESIGN §8.3):
+    the evidence behind the default (DESIGN Q14) and how to raise the draws."""
+    return (
+        f"stochastic-volatility fit with {chains} × {draws:,} kept draws, fewer than the SV "
+        f"default of {SV_DEFAULT_DRAWS:,} per chain (D-35): the SV parameters mix slowly. In the "
+        "Phase 2 evidence (DESIGN Q14) SV fits at 4 × 2,000 missed the R-hat/ESS gate routinely "
+        "(the README example at 0 of 11 origins), Clark–Ravazzolo SV(rw) converged at 68% of "
+        "origins at 4 × 5,000 and at all 106 at 4 × 20,000, and BENCH-P2 (n = 20, T = 300) "
+        "still misses R-hat < 1.01 on 4 of 101 primary quantities at 4 × 10,000. Raise the "
+        f"budget with mcmc=MCMCSettings(draws={SV_DEFAULT_DRAWS:_}) or more, or leave draws "
+        "unset for the default"
+    )
+
+
 def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
     """Every warning of the DESIGN §8.3 table that applies, in the table's order.
 
@@ -637,6 +655,8 @@ def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
             error=inputs.error,
             eb_converged=inputs.eb_converged,
         )[1]
+    if inputs.sv_budget is not None:
+        out.append(sv_budget_message(*inputs.sv_budget))
     acc = _acc_names(inputs.acc)
     if vol.persistent == "sv" and vol.exact and ("h" in acc or "rej_run_max" in acc):
         rate = _per_equation(acc["h"], n, "min") if "h" in acc else np.full(n, np.nan)

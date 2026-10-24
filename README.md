@@ -23,7 +23,7 @@ fit.forecast(horizon=8, draws=2000, seed=0).quantiles([0.05, 0.5, 0.95])
 fit.irf(horizon=20, draws=1000, seed=0).median()
 
 # MCMC engine: stochastic volatility with an outlier component (Minnesota() resolves to the
-# structural form; 4 chains × 2,000 draws by default)
+# structural form; SV compositions default to 4 chains × 10,000 kept draws, DESIGN D-35)
 sv_fit = rb.BVAR(vol=rb.SV(outliers=True), lags=4).fit(data)
 sv_fit.converged                               # R-hat / ESS gate (DESIGN §8.2): False here (see below)
 sv_fit.diagnostics                             # R-hat, ESS and MCSE per monitored quantity
@@ -46,7 +46,7 @@ res.table()
 res.verdict()                                  # SV(outliers) vs Constant along "vol", per horizon
 ```
 
-On the 2026-09 vintage `res.verdict()` returned `better` at both horizons (Apple M5 Max, 2026-10-23; MCMC draws are reproducible on one platform, not across platforms, SPEC §8). A verdict is one of `better`, `worse` or `inconclusive`, with its reasons. It is only issued between two models that differ along exactly one axis (SPEC §3 R2, §9.5): `Constant("ig")` keeps both arms on the MCMC engine with the same structural Minnesota prior, while `Constant()` would select the analytic conjugate model and change the prior too. Comparing, say, `rb.RandomWalk()` with a BVAR gives `not comparable`, because they differ in the mean, prior, volatility, lags and more. The verdict also requires converged fits at 95% of the origins or more. At the default 4 × 2,000 draws the SV fits of this example miss the gate (R-hat < 1.01 and bulk ESS > 400 on the primary monitors, mostly the SV σ and the log-likelihood) at every origin, as the full-sample `sv_fit` above does, and the verdict is then `inconclusive` with the convergence reason listed; the default convergence policy is open question Q14 (DESIGN §12.2).
+On the 2026-09 vintage `res.verdict()` returned `better` at both horizons (Apple M5 Max, 2026-10-23; MCMC draws are reproducible on one platform, not across platforms, SPEC §8). A verdict is one of `better`, `worse` or `inconclusive`, with its reasons. It is only issued between two models that differ along exactly one axis (SPEC §3 R2, §9.5): `Constant("ig")` keeps both arms on the MCMC engine with the same structural Minnesota prior, while `Constant()` would select the analytic conjugate model and change the prior too. Comparing, say, `rb.RandomWalk()` with a BVAR gives `not comparable`, because they differ in the mean, prior, volatility, lags and more. The verdict also requires converged fits at 95% of the origins or more. SV posteriors mix slowly, so SV compositions default to 4 chains × 10,000 kept draws (`Constant` volatility: 4 × 2,000), and an SV fit with fewer kept draws per chain warns (DESIGN D-35, the resolution of Q14). The default is not always enough for the gate (R-hat < 1.01 and bulk ESS > 400 on the primary monitors, mostly the SV σ and the log-likelihood): the full-sample `sv_fit` above misses it on one of 16 primary quantities (σ of GDP, R-hat 1.012; Apple M5 Max, 2026-10-24), and in the comparison the SV arm converges at 10 of 11 origins at 4 × 10,000 (h = 1 then `inconclusive` at 91%) and at 11 of 11 at 4 × 20,000, hence `draws=20_000`. At the old default of 4 × 2,000 it converged at none of the 11 origins, and both horizons were `inconclusive` with the convergence reason listed.
 
 ## Development
 
