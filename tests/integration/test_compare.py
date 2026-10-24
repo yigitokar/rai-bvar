@@ -1,10 +1,12 @@
+import dataclasses
+
 import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
 
 from rai_bvar.data.dataset import VARData
-from rai_bvar.evaluation import Entry, Expanding, Origins, Rolling, compare, grid
+from rai_bvar.evaluation import CompareResult, Entry, Expanding, Origins, Rolling, compare, grid
 from rai_bvar.models import OLSVAR, RandomWalk
 
 matplotlib.use("Agg")
@@ -49,6 +51,56 @@ def test_var_beats_random_walk_on_stationary_data(rw_vs_var):
     verdict = rw_vs_var.verdict()
     assert (verdict["verdict"] == "better").all()
     assert (verdict["dlpd"] > 0).all()
+
+
+def _with_converged(res: CompareResult, name: str, converged: np.ndarray) -> CompareResult:
+    """``res`` with the per-origin ``converged`` flags of ``name`` replaced (a copy: the module
+    fixture is not touched)."""
+    r = res.results[name]
+    scores = r.scores.assign(converged=("origin", converged))
+    results = {**res.results, name: dataclasses.replace(r, scores=scores)}
+    return CompareResult(res.entries, results, res.horizons, res.baseline, res.window, res.freq)
+
+
+@pytest.mark.parametrize("baseline, expected", [("RW", "better"), ("VAR1", "worse")])
+@pytest.mark.parametrize("side", ["model", "reference"])
+def test_min_converged_gates_the_verdict(rw_vs_var, baseline, expected, side):
+    """SPEC §9.5 item 4: the converged share of a pair (the smaller of the two shares over the
+    common origins) below ``min_converged`` turns an otherwise ``better`` verdict, and with the
+    baseline swapped an otherwise ``worse`` one, into ``inconclusive`` and says so; at or above
+    the threshold the verdict and every other field stand, and ``min_converged=0.0`` disables
+    the gate even when no origin converged."""
+    f = rw_vs_var
+    res = CompareResult(f.entries, f.results, f.horizons, baseline, f.window, f.freq)
+    name = baseline if side == "reference" else next(n for n in res.results if n != baseline)
+    k = 6
+    origins = res.results[name].scores["origin"].values
+    converged = np.ones(origins.size)
+    converged[:k] = 0.0
+    gated = _with_converged(res, name, converged)
+    never = _with_converged(res, name, np.zeros(origins.size))
+    for h in res.horizons:
+        want = res.verdict(horizons=[h]).iloc[0]
+        assert want["verdict"] == expected and want["reference"] == baseline and want[side] == name
+        common = gated.common(h)[name]["origin"].values
+        assert set(origins[:k]) <= set(common)
+        share = float(np.mean(converged[np.isin(origins, common)]))
+        assert share == (common.size - k) / common.size < 0.95
+        note = f"; converged at only {share:.0%} of origins"
+        default, just_above = (
+            gated.verdict(horizons=[h]).iloc[0],  # min_converged=0.95
+            gated.verdict(horizons=[h], min_converged=np.nextafter(share, 1.0)).iloc[0],
+        )
+        for row in (default, just_above):
+            assert row["verdict"] == "inconclusive" and row["reasons"] == want["reasons"] + note
+            pd.testing.assert_series_equal(
+                row.drop(["verdict", "reasons"]), want.drop(["verdict", "reasons"])
+            )
+        for threshold in (share, share - 0.05, 0.0):  # at and below the share
+            row = gated.verdict(horizons=[h], min_converged=threshold).iloc[0]
+            pd.testing.assert_series_equal(row, want)
+        pd.testing.assert_series_equal(never.verdict(horizons=[h], min_converged=0.0).iloc[0], want)
+        assert never.verdict(horizons=[h]).iloc[0]["verdict"] == "inconclusive"
 
 
 def test_expanding_window_tests_are_descriptive(data):
