@@ -49,15 +49,19 @@ jobs:
       # executable the same program compiles to, so it changes no result. Key = stable prefix
       # xla-<os>-py<ver>-<isa>-<uv.lock>- plus a per-run suffix; restore-keys = the prefix, so a run
       # restores the newest entry of its bucket from its own ref, else from its PR base or main.
-      # <isa> hashes the CPU model name AND the /proc/cpuinfo flags line: XLA:CPU compiles for the
-      # host's instruction set, so an entry built on one ISA is never loaded on another (the runner
-      # pool mixes AMD EPYC 7763/9V74/9V45 and Intel Xeon 8370C/8573C). py stays in the key: JAX 0.12
-      # compresses entries with zstd on 3.14 and zlib on 3.12/3.13 under the same JAX key.
+      # <isa> = md5 of the /proc/cpuinfo "model name" and "flags" lines, one bucket per runner CPU
+      # (the pool mixes AMD EPYC 7763/9V74/9V45 and Intel Xeon 8370C/8573C). JAX's own key (jax
+      # 0.12.0.1) hashes XLA_FLAGS and the CPU topology: the target CPU name and the host's whole
+      # feature list. An entry is only served to a runner with the same features, so a bucket shared
+      # by CPU models would gain no hits, only size; an ISA cap (--xla_cpu_max_isa) does not change
+      # that and was reverted (DESIGN §9.10, 2026-10-24). py stays in the key: JAX 0.12 compresses
+      # entries with zstd on 3.14 and zlib on 3.12/3.13 under the same JAX key.
       - name: XLA cache key
         id: xla
         run: |
           isa=$({ grep -m1 '^model name' /proc/cpuinfo; grep -m1 '^flags' /proc/cpuinfo; } | md5sum | cut -c1-12)
-          echo "runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU, ISA $isa"
+          echo "runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU, ISA $isa, XLA_FLAGS ${XLA_FLAGS:-none}"
+          echo "isa=$isa" >> "$GITHUB_OUTPUT"
           echo "prefix=xla-${RUNNER_OS}-py${{ matrix.python-version }}-${isa}-${{ hashFiles('uv.lock') }}-" >> "$GITHUB_OUTPUT"
       - name: Restore XLA cache
         id: xla-restore
@@ -93,12 +97,14 @@ jobs:
         if: always()
         env:
           MATCHED: ${{ steps.xla-restore.outputs.cache-matched-key }}
+          ISA: ${{ steps.xla.outputs.isa }}
         run: |
           added=$(( $(find "$RUNNER_TEMP/jax-xla" -type f | wc -l) - ${XLA_ENTRIES_BEFORE:-0} ))
           echo "added=$added" >> "$GITHUB_OUTPUT"
           {
             echo "### XLA cache, Python ${{ matrix.python-version }}"
             echo "- runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU"
+            echo "- ISA bucket: ${ISA:-unknown}; XLA_FLAGS: ${XLA_FLAGS:-none}"
             echo "- restored: ${MATCHED:-nothing (cold run)}"
             echo "- entries restored: ${XLA_ENTRIES_BEFORE:-0}; written by this run: $added"
             echo "- fast suite wall time: ${PYTEST_SECONDS:-not measured} s"
@@ -137,12 +143,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --group dev
-      # Same persistent XLA compilation cache as the fast suite (own prefix: different programs).
+      # Same persistent XLA compilation cache and <isa> rule as the fast suite (own prefix: different
+      # programs).
       - name: XLA cache key
         id: xla
         run: |
           isa=$({ grep -m1 '^model name' /proc/cpuinfo; grep -m1 '^flags' /proc/cpuinfo; } | md5sum | cut -c1-12)
-          echo "runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU, ISA $isa"
+          echo "runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU, ISA $isa, XLA_FLAGS ${XLA_FLAGS:-none}"
           echo "prefix=xla-slow-${RUNNER_OS}-py3.12-${isa}-${{ hashFiles('uv.lock') }}-" >> "$GITHUB_OUTPUT"
       - name: Restore XLA cache
         id: xla-restore
@@ -162,7 +169,8 @@ jobs:
           echo "XLA_ENTRIES_BEFORE=$(find "$dir" -type f | wc -l)" >> "$GITHUB_ENV"
       # Validation record (geweke.jsonl, sbc.jsonl, mutation.jsonl, ...: the tests append one JSON
       # line per run to $RAI_BVAR_VALIDATION_RECORD/<kind>.jsonl), uploaded as an artifact so the
-      # results can be committed; meta.json names the commit, run, runner and versions they belong to.
+      # results can be committed; meta.json names the commit, run, runner, versions and XLA_FLAGS
+      # they belong to.
       - name: Validation record metadata
         env:
           RAI_BVAR_VALIDATION_RECORD: ${{ runner.temp }}/validation-record
@@ -192,6 +200,7 @@ jobs:
               "python": platform.python_version(),
               "versions": {p: version(p) for p in ("jax", "jaxlib", "numpy", "scipy")},
               "rai_bvar_env": {k: env[k] for k in sorted(env) if k.startswith("RAI_BVAR_")},
+              "xla_flags": env.get("XLA_FLAGS", ""),
           }
           with open(os.path.join(env["RAI_BVAR_VALIDATION_RECORD"], "meta.json"), "w") as fh:
               json.dump(meta, fh, indent=1)

@@ -71,6 +71,8 @@ def test_acceptance_config_and_the_existing_ones(cr):
     full = cr.CONFIGS["full"]
     assert full.mcmc == MCMCSettings(chains=4, draws=5000, burn=1000)
     assert (full.draws, full.ordering_step, full.origin_step) == (1000, 1, 1)
+    # explicit 4 × 2000: the SV default budget of D-35 (4 × 10,000) does not reach the quick run
+    assert cr.CONFIGS["quick"].mcmc == MCMCSettings(chains=4, draws=2000, burn=1000)
     for name in ("full", "quick", "smoke"):
         assert cr.CONFIGS[name].lpd_method == "conditioned", name
     assert cr.reliability_note("conditioned") == cr.RELIABILITY_NOTE

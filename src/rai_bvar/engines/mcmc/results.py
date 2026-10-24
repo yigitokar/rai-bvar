@@ -502,8 +502,11 @@ def fit_mcmc(
     ``FitPlan``; keyword addition) requests in-loop forecasts and needs
     ``static.store.in_loop_forecast = plan.horizon`` (DESIGN §5.8; ``fit.in_loop_forecast``).
     ``_overrides`` is the test seam of DESIGN §4.9 (kernel slots or internals); production code
-    never passes it.
+    never passes it. ``settings.draws=None`` (the composition default) is resolved from
+    ``static.vol`` as ``BVAR`` resolves it (D-35).
     """
+    if getattr(settings, "draws", 0) is None:
+        settings = settings.with_default_draws(sv=static.vol.persistent == "sv")
     with _jax.x64():
         fns = make_runner(static, overrides=_overrides)
         if init is not None:

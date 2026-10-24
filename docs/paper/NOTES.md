@@ -198,6 +198,23 @@ re-derived before it goes into the paper).
     Evidence: `tests/mcmc/blocks/test_sv_core.py::test_rw_awol_at_a_tiny_sigma` (60-digit
     reference) and `::test_rw_step_at_a_tiny_sigma_is_ok`. Status: verified (Apple M5 Max).
 
+## F. Defaults and the convergence gate
+
+18. **A convergence-gated verdict needs a composition-aware MCMC budget.** With one default for
+    every composition (4 chains × 2,000 kept draws) the SV fits routinely missed the R-hat < 1.01 /
+    bulk ESS > 400 gate, so `compare()` answered `inconclusive` for every SV comparison although
+    ΔLPD was large (README example: +85.2, MCSE 1.1, at h = 1; the SV arm converged at 0 of 11
+    origins). The SV parameters drive it: φ and σ have ESS ≈ 22–28 per 1,000 sweeps per chain (WP3
+    pilot). The budget, not the gate, was changed (D-35): SV compositions default to 4 × 10,000,
+    and an SV fit below that warns. Even that raises the floor without guaranteeing the gate
+    (README example: 10 of 11 origins at 4 × 10,000, 11 of 11 at 4 × 20,000; Clark–Ravazzolo
+    `SV(rw)`: 72 of 106 at 4 × 5,000, 106 of 106 at 4 × 20,000; BENCH-P2, n = 20, T = 300: 4 of 101
+    primary quantities still miss at 4 × 10,000; the README's full-sample fit: 1 of 16, σ of GDP
+    at R-hat 1.012). A methods point: the gate does its job (it refuses verdicts the draws cannot
+    support), and the default budget has to follow the slowest-mixing block of the composition.
+    Evidence: DESIGN §12.2 Q14 and D-35; `tests/unit/test_default_budget.py` for the policy.
+    Status: recorded (Apple M5 Max, one run each; BENCH-P2 under load).
+
 ## Before submission
 
 - Re-run every "recorded" / "to check" item on the release commit and cite the commit hash.
