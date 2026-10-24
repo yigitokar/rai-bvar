@@ -31,6 +31,8 @@ the continuous-integration job named ``nightly'' runs weekly and carries the res
 of observables and the log joint density) comes from a work package whose owner wrote no kernel
 code, except the SOC/SUR dummy-row reference, which the kernels' owners added later from the
 model. % [R] docs/phase2/DESIGN.md §13 WP9 ("owner writes no kernel"), WP25 ("Done jointly by the owners of WP6, WP10 and WP11"; delivered validation/dummies.py); src/rai_bvar/validation/dummies.py docstring l.1-4
+The owners were separate AI agent instances, not people: the rule secures separate code paths, not
+independent judgement (\cref{app:process}). % [R] DESIGN front matter ("the implementing agents"); docs/phase2/09_pilot.md l.38 (software referee major 8)
 No reference imports a kernel module; a subprocess test enforces this. % [V] tests/validation/test_log_joint.py::test_references_never_import_kernels
 The algebra differs too: references are joint densities on the natural parameters and kernels
 conditional formulas, and for the dummy rows the reference works in covariance form ($m\times m$

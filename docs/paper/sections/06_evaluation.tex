@@ -81,7 +81,7 @@ For an outcome far in the tail, only draws whose paths wandered towards it recei
 limit one draw ($\mathrm{ESS}_{\mathrm{K}} \approx 1$). The mixture $\hat p_h$ is unbiased for
 $p_h$, so by Jensen's inequality its logarithm is biased low, and the bias is large exactly when the
 weights are heavy-tailed; \eqref{eq:mcse} estimates the spread, not this bias.
-In the replication of \cref{sec:cr} (Constant arm, unemployment, $h = 8$, origin 2008Q2), a review
+In the replication of \cref{sec:cr} (Constant arm, unemployment, $h = 8$, origin 2008Q2), an agent review
 of the quick run, recorded in the repository notes, found $-93.6$ with 1000 forecast draws, $-46$
 to $-63$ with 8000 and $-36$ with 64{,}000, against $-19.1$ for the path-integrated estimator below
 on the same 1000 draws (itself a Monte Carlo estimate), while the MCSE stayed near 1 nat.
@@ -123,7 +123,7 @@ $h = 2, \dots, 8$ to $10^{-10}$ (\cref{fig:lpd-estimators} and \cref{app:mcse-bo
 
 \paragraph{Residual error.}
 The integrated estimator is still an average over draws whose weights concentrate in the tails:
-at the same cell, a review recorded in the repository notes found $\mathrm{ESS}_{\mathrm{K}}$ of
+at the same cell, an agent review recorded in the repository notes found $\mathrm{ESS}_{\mathrm{K}}$ of
 2--6 for the Constant arm with 1000 forecast draws, so the pre-registered acceptance run uses 8000
 (\cref{app:prereg}).
 % [R] main-repo docs/paper/NOTES.md 8b D-34 addendum (D-34 review, finding math-2); [PREREG] benchmarks/reports/clark_ravazzolo_preregistration.md item 3 (c823d20)

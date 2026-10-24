@@ -268,8 +268,18 @@
 % ------------------------------------------------------------------------- title
 \title{\texorpdfstring{\pkg{rai-bvar}}{rai-bvar}: Composable Bayesian VARs with Stochastic
   Volatility, Validated Samplers and a Fair Out-of-Sample Verdict Engine in Python}
-\author{Yigit Okar\\[2pt]
-  {\small\todo{affiliation and contact address}}}
+% Two affiliations, names and locations as the author gave them on 2026-10-24 (Rational AI, Inc.:
+% the legal name in the rationalai.co footer; New York per its LinkedIn/Crunchbase profiles, confirmed
+% by the author). No e-mail address on the title page (author's decision).
+% Superscript marks by hand (no authblk), so the pdfTeX branch needs no new package.
+% The footnote states only what App. J does not leave to an author \todo (no "directed the work").
+\author{Yigit Okar\textsuperscript{1,2}\thanks{Written with AI coding agents (Claude, Anthropic,
+    used through Claude Code); the author is responsible for its content.
+    \protect\Cref{app:process} states what the agents did and what the record shows of the
+    author's part.}\\[2pt]
+  {\small\parbox{0.95\textwidth}{\centering
+    \textsuperscript{1}Rational AI, Inc., New York, NY, USA\\
+    \textsuperscript{2}Care Artificial Intelligence Research and Consulting LLC, Brooklyn, NY, USA}}}
 \date{\ifdraftmarks Draft of \today\else\today\fi}
 
 % bookmarks (PDF strings): plain text for the markup macros

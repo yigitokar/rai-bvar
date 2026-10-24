@@ -62,6 +62,26 @@ STATUS = {
     4: "Open. The script and the 520 + 424 fit records are tracked on branch `paper-draft` (since "
        "33dd9f8) under `docs/paper/figures/data/convergence_diagnostic/`, not on `main` (888f620); "
        "commit them to the main repository.",
+    30: "Drafted from the record (2026-10-23), for the author to confirm and approve. App. J "
+        "(app:process, also labelled app:disclosure) now states, role by role, what the AI coding agents "
+        "did (notes, design and judges, work packages, reviews, runs, the overnight queue of issue #3, "
+        "the paper's dossiers, outline judges, section fact-checkers and three agent referees), the "
+        "commit record (61 of 66 commits carry the agent's Co-Authored-By trailer; the other 5 are the "
+        "GitHub merges of PRs 1, 2, 4, 5, 6), what 'independent' means (separate agent instances, not "
+        "people) and what that does and does not secure, a licensing caveat (training data), and "
+        "the authorship statement. Independence wording is qualified in Sections 6.4 and 8.1 and in "
+        "App. D, F, H and I. The title page has the two affiliations (Rational AI; CARE AI Research "
+        "and Consulting, provisional) and a footnote pointing to App. J. An adversarial verify pass "
+        "(2026-10-23) checked every claim against git, PRs 1-6 and issue #3 and moved what the record "
+        "cannot show into `author:` marks: who wrote SPEC.md (v1 is not in the repository) and the "
+        "Phase 0-1 code; that you initiated the work (the title footnote no longer says 'directed'); "
+        "how you took the owner's decisions (Q14 is open at ae5f8d6 and is being resolved as an "
+        "agent recommended). Open (the `author:` marks): the exact names and "
+        "capitalisation of both affiliations and a contact address; your own contribution; how "
+        "far you reviewed the code, the derivations and the text; approval of the pre-registered "
+        "settings; the owner's decisions; the merges; that no person took part in the reviews, or "
+        "the human reviewers and acknowledgements; a final check against arXiv's policy and the "
+        "venue's.",
     31: "Not needed under tectonic (XeTeX, TU encoding prints < and >); `main.tex` loads T1 only "
         "under pdfTeX, which is untested here. arXiv compiles with pdfLaTeX, so test that branch "
         "before submitting (`make arxiv` packages the sources; its --test build uses tectonic).",
@@ -71,7 +91,12 @@ ASSEMBLY_NOTES = r"""
 These came up while assembling and integrating the draft and are not (or not only) `\todo` marks in
 the text.
 
-1. **Length after the referee revision (2026-10-23).** The main text (title page to the end of
+1. **Length after the AI-use statement (2026-10-23).** The title page now carries the two
+   affiliations, a draft mark for them and a footnote, and Section 8.1 one sentence more. In the
+   draft build Section 13 now ends on page 35 (about six lines run over); with the `\todo` boxes
+   hidden it still ends on page 34, as before. App. J grew from 0.4 to about 3 pages, and the
+   draft PDF has 105 pages (101 before; 102 with the `\todo` boxes hidden).
+   **Length after the referee revision (2026-10-23).** The main text (title page to the end of
    Section 13) ends on page 34 of the draft build, against page 33 before the revision; the
    appendices run from page 35 to page 93 and the PDF has 101 pages (REVIEW_RESPONSE.md). The page
    ends with almost no slack, so any addition to Sections 11-13 moves the end to page 35. Earlier
@@ -209,7 +234,8 @@ majors 1-2, 8 and minors 6-9, 13)**
     match.
 21. TODO 30: write App. J role by role (design, kernels, references, reviews, dossiers, drafting, and
     what the author verified), and qualify "a work package whose owner wrote no kernel code"
-    (08:30-33) and "independent review" (App. J, App. D) to match.
+    (08:30-33) and "independent review" (App. J, App. D) to match. Drafted on 2026-10-23 (see the
+    status of OUTLINE TODO 30); what remains are the `author:` marks of App. J.
 22. TODO 11 and TODO 15: prior-art searches and literature checks (including C3's estimator and the
     mutation release gate); drop any citation that cannot be checked; TODO 8; R licence checks.
 23. arXiv: rebuild with `make arxiv` as the last step, check that the tarball holds only the listed

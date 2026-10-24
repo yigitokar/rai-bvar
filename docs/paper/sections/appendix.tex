@@ -1758,17 +1758,18 @@ $\sigma^2$ step against the model prior is a plausible detector.
 % [V] tests/mutation/mutants.py _ALL (M2 l.771-773, M3 l.774-776, M5 l.780-782, M16 l.815-818)
 The design expected U catches for nine mutants; the suite confirmed fourteen, and G for all eighteen.
 % [V] DESIGN section 9.7 expected-catcher column vs _ALL
-The independent x86-64 review also caught four further hand-injected dummy-row errors (Mode~II rows
-weighted $1/\bar\sigma^2$, rows counted twice in the $\lambda$ step, CCCM rows weighted by
-$(\Sigma^{-1})_{jj}$, a fixed-factor weight $2w$); these are not registered mutants.
-% [R] NOTES 15
+In a review of the dummy-row work by a separate agent instance on x86-64 Linux (\cref{app:process}),
+the tests also caught four further dummy-row errors that the reviewing agent injected ad hoc
+(Mode~II rows weighted $1/\bar\sigma^2$, rows counted twice in the $\lambda$ step, CCCM rows weighted
+by $(\Sigma^{-1})_{jj}$, a fixed-factor weight $2w$); these are not registered mutants.
+% [R] NOTES 15; GitHub issue #3 body (WP25 "got an independent review on x86-64 Linux": "Four injected bugs were all caught"), written by the cloud session
 
 \cref{fig:FigD1} shows, for each mutant and tier, the mutant's statistic relative to the
 tier's decision threshold, and \cref{fig:FigD2} places the G statistics of the mutants against
 the per-composition controls (G-full rows of the validation record and the mutation suite's
 G-small controls).
-Recorded runs at earlier commits, M1--M16 and then M17--M18 on x86-64 Linux, also caught every
-mutant; statistics agree across machines to two or three significant figures, not bitwise (M2:
+Recorded runs at earlier commits on x86-64 Linux, made in cloud agent sessions (M1--M16, then
+M17--M18; \cref{app:process}), also caught every mutant; statistics agree across machines to two or three significant figures, not bitwise (M2:
 702 / 2.48 in the committed evidence, labelled M1 Pro; 705 / 2.48 on the M5 Max; 705 / 2.47 on
 x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 [REL: mutation_x86.jsonl]
 
@@ -2143,6 +2144,8 @@ The pre-registration is reproduced below as committed at c823d20, in the file
 \code{benchmarks/reports/clark_ravazzolo_preregistration.md}.
 Only the typography has changed (Markdown to \LaTeX); the words, numbers and structure are those of
 the file.
+It was written in an agent session, and the reviews it mentions were agent reviews
+(\cref{app:process}).
 % [PREREG] c823d20: every number in the quotation below is from the committed pre-registration
 
 \begin{quote}\footnotesize
@@ -2402,8 +2405,9 @@ In order: a quick run with the library's default MCMC settings ($4\times2000$), 
 four-core x86-64 virtual machine, main stage only, labelled as not the acceptance run; the first full
 attempt on 8a622c5 ($4\times5000$), which aborted in the SV(rw) ordering stage on F2; the fixes
 93f2bcd (failure replay) and f60d736 (excess-pivot recursion); the second full run on 4bb978a, which
-contains both fixes and the QR $a$-row draw 3d3f51b, report committed in 551f181; the follow-ups of
-an independent review of f60d736 in 4fc0162 (including the random-walk auxiliary likelihood), committed
+contains both fixes and the QR $a$-row draw 3d3f51b, report committed in 551f181; the follow-ups in
+4fc0162 of a review of f60d736 by a separate agent instance (including the random-walk auxiliary
+likelihood), committed
 after the second run had started and therefore not part of it; the path-integrated estimator in
 b9c66c0; the pre-registration and acceptance configuration in c823d20; and the acceptance run.
 % [R] issue #3 (timestamps 01:34Z-10:44Z on 2026-10-23); commit metadata; report headers;
@@ -2427,7 +2431,8 @@ The deterministic replay that should have attached diagnostics itself raised (F3
 reconstructed by a separate replay, which showed $\sigma = 4.98\times10^{-9}$ for GDP.
 The fix f60d736 replaced the assembled factorisation by the excess-pivot recursion, and the second
 full run, on 4bb978a, completed all 24 orderings without a crash.
-An independent review of f60d736 found no defect; its follow-ups (4fc0162) came after that run had
+A review of f60d736 by a separate agent instance (\cref{app:process}) found no defect; its
+follow-ups (4fc0162) came after that run had
 started and left the 656-array invariance set bitwise unchanged, so the run's report stands.
 % [R] issue #3 ("Item 7: the full run crashed" and following comments); commits 93f2bcd, f60d736, 4fc0162;
 % [V] tests/mcmc/blocks/test_sv_core.py tiny-sigma tests
@@ -2439,6 +2444,8 @@ the old path; they serve only as context, including as one run of the yardstick 
 \centering\small
 \caption{Run history of the replication: commit, configuration, machine and load, wall time
 and outcome of each run, from the quick run to the acceptance run.}
+% The commit subjects are quoted as committed: the "independent review" of 4fc0162 is the agent review of
+% f60d736 (App. J, app:process; the text above says so). A longer caption makes this float too large.
 \label{tab:TabF1}
 % [R] headers of clark_ravazzolo_quick.json and clark_ravazzolo.json (config, versions, seconds); issue #3;
 % commit metadata; [ACC] config, versions, seconds; run log (TODO 2); docs/paper/figures/tab_runs.py
@@ -3031,6 +3038,8 @@ notes) their source was read to pin down an oracle's behaviour, defaults or cons
 implementation code.
 \end{quote}
 % [V] wording: dossier 01 section 6.2 (fact-checked against the notes listed in Table H.1)
+The sessions that read source and those that wrote code were AI agent sessions; what the practice
+cannot exclude for code written by language models is stated in \cref{app:process}.
 \cref{tab:H-notes} lists the repository notes in which GPL or unlicensed source was read, with
 the versions and the purpose each note records, and the notes in which none was read.
 The versions in the table are those of the source that was read; the parity fixtures were produced
@@ -3083,15 +3092,15 @@ loader, and the committed fixtures, use only U.S. federal-agency series.
 \section{Design-review errata relevant to numerics and reproducibility}\label{app:errata}
 % -------------------------------------------------------------------------------------
 
-The Phase~2 design was reviewed before implementation, and its errata table maps each of the 28
-findings of the reviews (E1--E28) to its resolution.
+The Phase~2 design was reviewed before implementation by two judge agents (\cref{app:process}),
+and its errata table maps each of their 28 findings (E1--E28) to its resolution.
 Four of those that concern numerics and reproducibility are listed below; each was found in the
 proposals and resolved in the design before the code it concerned was written.
 % [V] docs/phase2/DESIGN.md section 0.2; NOTES C.11
 \begin{description}\small
 \item[E7] The counter $it_0 + j\cdot\mathrm{thin} + r$ promotes to int64 under 64-bit mode. All counters are uint32 with explicit casts, \code{step_key} raises on any other counter type, and the host checks that the sweep count stays below $2^{32}$ (\cref{alg:C-driver}).
 % [V] tests/mcmc/runner/test_sweep.py::test_counter_must_be_uint32
-\item[E9] An earlier proposal validated the samplers with the blocks' own prior samplers and log priors. The design adopted an independent reference registry with separate owners, which became the two-implementation rule of \cref{sec:validation}.
+\item[E9] An earlier proposal validated the samplers with the blocks' own prior samplers and log priors. The design adopted an independent reference registry with separate owners (separate agent instances, \cref{app:process}), which became the two-implementation rule of \cref{sec:validation}.
 % [V] tests/validation/test_log_joint.py::test_references_never_import_kernels
 \item[E14] Two ``runtime'' settings, the Gram mode and padding to a maximum length, were not bitwise-neutral. The Gram mode is now resolved by a fixed shape rule and stored in the specification, there is no padding to a maximum, and \code{Runtime} holds only settings that have an invariance test, bitwise except for the device count, which is to rounding (\cref{tab:TabG1}).
 \item[E23] $2\log|e_t|$ is $-\infty$ on padded rows and produced NaN. The residual is masked before the logarithm (\cref{alg:C-vol}).
@@ -3100,29 +3109,190 @@ The review process is described in \cref{app:process}; the generic lessons for o
 implementations are in \cref{sec:robustness}.
 
 % -------------------------------------------------------------------------------------
-\section{Development process and AI-assistance disclosure}\label{app:process}
+\section{Development process and AI-use statement}\label{app:process}\label{app:disclosure}
 % -------------------------------------------------------------------------------------
+% Drafted on 2026-10-23 by an agent session from the record named in the tags: the git history of all
+% refs at main ae5f8d6 and paper-draft a3478d4, gh pr view 1, 2, 4, 5, 6, gh issue view 3 --comments,
+% the DESIGN.md front matter and the headers of the notes and dossiers (OUTLINE TODO 30; referee
+% software major 8). No model version is named, by the repository's rule (issue #3, "No model IDs in
+% any file").
 
-\todo{TODO 30: the author writes and approves this appendix, including the AI-assistance statement,
-worded to arXiv policy and to the target venue's; an AI system is not an author.}
-The following facts about the process are recorded in the repository and may be used.
-The Phase~2 design was produced from three competing proposals (correctness-first,
-performance-first and extensibility-first), ranked by two independent reviews (``judges''); the
-highest-ranked proposal was taken as the base and elements of the other two were grafted onto it, and
-every technical error either review listed was mapped to a resolution (errata E1--E28,
-\cref{app:errata}).
-% [V] docs/phase2/DESIGN.md front matter and section 0.2
-The implementation was split into work packages with separate owners, under the two-implementation
-rule: the references of the validation harness were written by packages that wrote no kernel (one
-later reference, for the SOC/SUR dummy rows, was written by the kernels' owners from the model;
-\cref{sec:validation-harness}), and a test enforces that no reference imports a kernel
-module.
-% [V] DESIGN section 9.1 (D-22); tests/validation/test_log_joint.py::test_references_never_import_kernels
-Independent review runs on x86-64 Linux re-executed parts of the validation suite, including the
-mutation suite, and caught further injected errors.
-% [R] tests/mutation/mutants.py EVIDENCE header; NOTES 15
-\todo{TODO 30: state how AI assistance was used (design, implementation, review, the dossiers and
-drafting of this paper), who verified what, and the authorship and acknowledgements.}
+\paragraph{Statement.}
+\pkg{rai-bvar} and this paper were written with AI coding agents: Claude (Anthropic), used through
+Claude Code, in local sessions and in cloud sessions on a four-core x86-64 Linux virtual machine.
+% [R] GitHub issue #3, body ("Overnight work queue for the local session ..., written by the cloud orchestrator session at the user's request"; "the loaded 4-core x86 cloud box"); committer "Claude" on the 16 cloud commits (below)
+% Verify pass (2026-10-23): "on the author's computer" dropped; the record has two local committer identities and
+% M1 Pro / M5 Max machine labels (TODO 8), so which local machines were the author's is not on record.
+Every commit except the five pull-request merges was made in an agent session (below).
+The agents wrote the algorithm notes and the Phase~2 design, implemented and reviewed the Phase~2
+work packages (the benchmark and replication scripts among them) and drafted this paper with its
+figure and table scripts, this appendix included (below); the specification (\code{SPEC.md}) and
+the code of Phases~0 and~1 were committed from agent sessions as well.
+They also ran the tests, benchmarks, replication runs and reviews described below.
+% [R] commit trailers (below); docs/phase2/DESIGN.md front matter ("the document the implementing agents work from"; "Both judges"); OUTLINE.md l.1418 ("The repository shows a multi-agent design and review process"); 09_pilot.md l.38; commit messages of cbfcc5b, 33dd9f8, e66b6be, a3478d4; SPEC.md at 5882cc2 is "Version 2.1 (revision of v1)", and v1 is not in the repository
+The author takes responsibility for the content of the paper and of the software, including any
+error that the agents made and the checks did not catch.
+An AI system is not an author of this paper.
+The author set the product idea and the requirements; the specification (its v1 is not in the
+repository) and all of the code, that of Phases~0 and~1 included, were written by the agents under
+his direction.
+% [R] author's statement in the session of 2026-10-24 ("I set the idea, agents wrote it")
+\todo{author: add, in one sentence, what you did yourself (for example reading code, checking
+derivations, reading this paper in full) once your reading is complete.}
+
+\paragraph{The commit record.}
+At \code{main} ae5f8d6 and \code{paper-draft} a3478d4 the repository has 66 commits, made between
+21 October 2026 (21:54 UTC) and 24 October (02:16 UTC).
+Sixty-one carry a \code{Co-Authored-By} trailer that names the agent: both commits of Phase~0, both
+of Phase~1, 53 of the 57 commits of Phase~2 (with its close-out) and the four commits of the paper
+branch.
+The other five are the merge commits of the five pull requests, made on GitHub.
+% [V] git log --all --format='%h|%ce|%(trailers:key=Co-Authored-By,valueonly)': 66 commits, 61 with the trailer; the 5 without have committer "GitHub <noreply@github.com>" (888f620, 698ea24, 62d15f6, 08e1eda, ae5f8d6: PRs 1, 2, 4, 5, 6); Phase 0 = 5882cc2, bc3c075; Phase 1 = cded45e, bce0db3 (+ the PR 1 merge 888f620); Phase 2 = the other 57 commits of main; paper = git log paper-draft --not main (33dd9f8, e66b6be, 75db8a7, a3478d4); first commit 2026-10-21 17:54 -0400 (21:54Z), last 2026-10-23 22:16 -0400 (2026-10-24 02:16Z, the PR 6 merge)
+Every commit has the author's name in its author field.
+On the 16 commits made in cloud sessions the author address is an Anthropic no-reply address and the
+committer is the agent (12 of them also link their session); on the other 45 non-merge commits
+author and committer are the author's own name and address, as on commits from local sessions.
+On those 45 only the trailer marks a commit made in an agent session, and no trailer shows how much
+of a commit, if anything, the author wrote.
+% [V] git log --all --format='%an <%ae> / %cn <%ce>': author name "Yigit Okar" or "yigitokar" on all 66; author address noreply@anthropic.com and committer "Claude <noreply@anthropic.com>" on 16 (2026-10-22 18:48Z to 2026-10-23 02:46Z); a "Claude-Session:" link in 12 of the 16 messages (not deb3929, d37e059, 1093932, 2e09567); the author's own name and address as author and committer on 45; committer GitHub on 5
+
+\paragraph{Who did what.}
+\begin{description}
+\item[Algorithm notes.] The eight notes \code{docs/phase2/01}--\code{08}, from which the samplers were
+implemented, were written in agent sessions from the papers and package documentation and, in the
+notes that \cref{app:licensing} lists, from package source read for constants and behaviour.
+Each records an independent cross-check that re-read the sources and re-ran numerical checks with
+scripts of its own; four of the notes (02--05) say that a second agent made it, and the others do
+not say who did.
+% [R] 02_sv_sampler.md l.8 and 04_cccm_corrected.md l.7 ("Cross-checked ... by a second agent"); 03_sv_outliers_t.md l.566 and 05_structural_equation_sampler.md l.967 ("second agent"); 01 l.673-677, 06 l.3 and §14, 07 l.9 and 08 l.16 and l.710 say "independent cross-check" without naming the party; every cross-check script path given is in an agent-session scratch directory (/private/tmp/claude-501/..., session 2cd712bc where the full path is given)
+\item[Design.] Three competing design proposals (correctness-, performance- and extensibility-first)
+were written by agents and ranked by two judge agents; the highest-ranked became the base of
+\code{docs/phase2/DESIGN.md}, and every finding of the judges was mapped to a resolution (errata
+E1--E28, \cref{app:errata}).
+% [R] DESIGN.md front matter and section 0.2; cbfcc5b ("judge-panel design of the JAX MCMC engine")
+\item[Implementation.] The design splits Phase~2 into 25 work packages, each owning its files.
+Agents of a multi-agent workflow implemented the packages, several at a time on the same machine,
+coordinated by an orchestrating session that also recorded the design amendments; the references of
+the validation harness came from packages whose agents wrote no kernel code
+(\cref{sec:validation-harness}).
+% [R] DESIGN section 1.2 ("Every file has exactly one owner"), section 13 WP9 and WP19 ("owner writes no kernel"); docs/phase2/09_pilot.md l.38 ("Other workflow agents implemented Phase 2 work packages"); ed502d4, ef46564 ("Orchestrator: DESIGN amendments")
+\item[Reviews.] Phase~1: three adversarial review rounds by 63, 49 and 10 agents found and fixed 96
+defects before the Phase~1 commit.
+% [R] cded45e commit message; PR #1 ("three workflow rounds of review, refutation and fix (122 agents)")
+Phase~2: in the first Phase~2 pull request (WP1--WP22) each stage was reviewed before the next
+began; the backtest and replication script (WP23) and the benchmark work (WP24) were reviewed
+together, with the fixes made in the cloud, the dummy-row work (WP25) in the cloud on x86-64 Linux,
+the fix f60d736 and the estimator D-34 by further agents (D-34 by a ``four-lens'' review that found
+two defects), and the close-out by a verifier agent that checked 131 changed statements against the
+code and corrected 13.
+% [R] PR #2 ("Work packages WP1-WP22 ... are done, and each stage was reviewed independently before the next one started"); 8a622c5 (cloud commit: "WP23/WP24 review fixes"); issue #3 (WP23 "being reviewed independently in the cloud"; WP25 "got an independent review on x86-64 Linux, with no defects"; f60d736 "An independent review ... found no defect"); b9c66c0 and PR #5 ("An independent four-lens review found two defects"); 16fc36a and PR #6 ("An independent verifier checked 131 changed statements against the code and corrected 13")
+\item[Runs.] Agents ran, or started through continuous integration, the tests, benchmarks and
+replication runs reported here. The x86-64 runs (the
+mutation suite at earlier commits, BENCH-P2 under load, the quick replication run) were made in
+cloud sessions, the Apple runs in local sessions.
+% [R] issue #3 body (x86 BENCH-P2 311 / 285 s on "the loaded 4-core x86 cloud box"; the M17/M18 x86 figures); 00524a9 ("the orchestrator's" x86 reproduction); b27c7bb (cloud commit: "mutation suite re-run independently"); TabF1 (quick run on a shared 4-core x86-64 VM)
+On the night of 22 to 23 October the cloud session wrote a work queue for a local session at the
+author's request (``The user is asleep: don't wait for their input''). The local session ran the
+reference benchmark, the weekly tier and the full replication runs, diagnosed the crash F2 and
+wrote its fix (\cref{sec:robustness-f2}), took over the orchestration and opened one combined pull
+request. The queue told the local session not to open a pull request or merge (the orchestrator was
+to combine the work into one pull request), not to install system software, and not to change
+priors, settings or criteria to make anything pass; the orchestrator left the merge to the author.
+% [R] GitHub issue #3, body and comments of 2026-10-23 01:24Z-10:44Z ("Never open a PR or merge. The orchestrator combines everything into one PR"; "R package only, no system-level installs"; "Don't change priors, settings or criteria to make anything pass"; "The local session is now also the orchestrator"; "It is not merged; merging is the user's decision")
+The pre-registration of the acceptance run (c823d20) was written in an agent session before the run
+was launched.
+The author did not review those settings before the launch: the session fixed them under the
+author's standing instruction of 2026-10-23 to complete the replication and its evaluation.
+% [R] session record of 2026-10-23 (the author's instruction to do whatever the replication needed; the settings were chosen and committed by the session, c823d20)
+% [R] c823d20 (trailer); the run log's first line follows that commit by 11 s (app:cr-provenance)
+\item[This paper.] Agents drafted the paper in stages: six evidence dossiers on the repository, each
+fact-checked against it by a separate agent; three competing outlines, of which two judge agents
+chose one, with parts of the other two grafted onto it (\code{docs/paper/OUTLINE.md} \S0); nine
+section writers, each followed by a fact-checker; an assembly pass; a cut to the page budget, checked
+claim by claim against the earlier draft; and a review round in which three agents wrote referee
+reports from the standpoints of computational statistics, macro-econometrics and research software
+(67 comments; the triage is in \code{docs/paper/REVIEW_RESPONSE.md}, the reports themselves are not
+committed).
+% [R] 33dd9f8 ("six evidence dossiers, each adversarially fact-checked against the repository; an outline chosen by a two-judge panel from three independent proposals; nine section writers, each followed by a fact-checker; one assembly pass"); e66b6be ("563 evidence-tagged units matched"); a3478d4 ("Three referee reports (computational statistics, macro-econometrics, research software): 67 comments triaged"); the dossier headers
+An agent compiled the bibliography and checked each entry against an authoritative record: Crossref
+for entries with a DOI, otherwise the arXiv, CRAN, PyPI or GitHub record, a publisher's or library
+record, or for two books a review that states the details
+(\code{docs/paper/dossiers/99_bibliography_report.md}; each entry's source is named in
+\code{refs.bib}).
+% [R] 99_bibliography_report.md §2 (96 Crossref lookups; arXiv API, CRAN, PyPI, GitHub, OpenAlex, Library of Congress, DOI-registered book reviews) and §3 (124 entries); refs.bib "% verified:" lines; refs.bib unchanged since 33dd9f8
+By the drafting rule, every number carries an evidence tag in a comment of the \LaTeX{} source that
+names the test, file, commit or run it rests on, and the acceptance-run numbers were filled by a
+script from the report and checked against it (\cref{app:cr-provenance}).
+% [V] fill_acceptance.py; check_acceptance_numbers.py; [R] OUTLINE section 0.5 ("Every number in the draft carries one of these tags"; the tag is a rule, not a census of sentences)
+This appendix was drafted by an agent from the git history, the pull requests and issue~\#3.
+\end{description}
+
+\paragraph{What ``independent'' means in this paper.}
+Where this paper calls a review, re-run, cross-check, fact-check or reference implementation
+independent, or says that work packages had separate owners (the design judges, the notes'
+cross-checks, the work-package owners of the two-implementation rule, the reviews of WP23/WP24,
+WP25, f60d736 and D-34, the close-out verifier, the x86-64 re-runs, the dossiers' fact-checks, the
+outline judges and the referee reports), the parties were separate instances of the same AI coding
+agents (sessions, or agents started by a session's workflow), each with its own context, and not
+independent people.
+The record says so in words for the Phase~1 review rounds, four of the notes' cross-checks and the
+work-package implementers; elsewhere it names a judge, reviewer, verifier or fact-checker without
+saying who that was, but every such record was written in an agent session and none names a person.
+% [R] cded45e and PR #1 ("122 agents"); notes 02-05 ("second agent"); 09_pilot.md l.38 ("Other workflow agents implemented Phase 2 work packages") and DESIGN front matter ("the implementing agents"); the other records: DESIGN front matter and §0.2 ("judges"), PR #2, issue #3, 4fc0162, b9c66c0, 16fc36a, 33dd9f8, a3478d4, OUTLINE §0, the dossiers ("fact-check"), all in trailer-carrying commits or written by agent sessions
+That secures some things and not others.
+It secures separate code paths: a test enforces that no reference imports a kernel module, and the
+references use other algebra than the kernels (\cref{sec:validation-harness}); the dummy-row
+reference, though, was written by the kernels' owners.
+% [V] tests/validation/test_log_joint.py::test_references_never_import_kernels; [R] §8.1 (SOC/SUR dummy-row reference added by the owners of WP6, WP10 and WP11)
+The mechanical checks (identities, Geweke and SBC tests, analytic twins, the mutation suite) reach
+the same verdict whoever runs them and can be re-run from the committed tests, and a run on a second
+platform is a genuine re-execution.
+It does not give independent human judgement.
+Instances of the same agents can share blind spots and misreadings, and all of them worked from the
+same documents (\code{SPEC.md}, \code{DESIGN.md}, the notes), so an error in a shared document, or
+one misreading of a paper, can enter a kernel and its reference alike; the Geweke and SBC tests in
+addition share our prior and simulator (\cref{sec:validation-harness}).
+Fewer checks have a reference external to the agents: the third-party oracles of Tier~P
+(\pkg{stochvol}, R \pkg{BVAR}, the Bank of England \pkg{bvar}), library routines used as oracles in
+some tests (SciPy's distributions, for example), and published constants and formulas; even for
+these the agents wrote the comparison code and chose what to compare.
+% [R] sec:validation-parity; git grep "scipy.stats" in tests/ (35 files at main), e.g. test_transitory.py::test_outlier_pmf_collapsed_matches_scipy_t
+No reviewer other than the agents is on record for the code or for this paper (no pull request has a
+GitHub review).
+% [V] gh pr view N --json reviews for N = 1, 2, 4, 5, 6: 0 reviews each
+No person took part in the reviews, judgements and fact-checks listed above: every one was an
+agent instance.
+% [R] session record (the orchestrating session launched each review, judge and fact-check as an agent)
+
+\paragraph{Licensing.}
+The source-reading practice of \cref{app:licensing} records what the sessions read and wrote.
+The agents are language models whose training data are not known to the author and may include
+GPL-licensed code, so that practice cannot exclude that their output resembles such code; no check
+for such resemblance is recorded.
+
+\paragraph{Authorship and responsibility.}
+Yigit Okar is the sole author.
+On record, he directed the agents (the overnight queue, for example, was written at his request), and
+the design leaves some decisions to him as the project's owner: DESIGN Q14, the default convergence
+policy for SV fits, is marked ``the owner decides'' and is open at ae5f8d6.
+% [R] issue #3 body ("written by the cloud orchestrator session at the user's request"); DESIGN section 12.2 at ae5f8d6 (Q14: "Open: the owner decides. No recommendation is adopted"). "Initiated" is not on record: moved to the Statement \todo.
+Q14 was resolved as an agent recommended, at the author's instruction of 2026-10-24 (D-35); DESIGN
+\S12.2 records that the recommendations for the earlier open questions were ``accepted as stated''
+on 2026-10-22, without saying by whom.
+% [R] session record of 2026-10-24 ("Q14 önerine göre yap"); DESIGN D-35
+Merging was reserved for him (``merging is the user's decision'', issue~\#3), and all five pull
+requests were merged from his GitHub account.
+% [V] gh pr list --state all --json mergedBy: yigitokar for #1, #2, #4, #5 and #6; issue #3 last comment ("PR #4 merged into phase-1-conjugate by the user")
+Pull requests \#1, \#4, \#5 and \#6 were merged by an agent session at the author's explicit
+instruction in that session; who merged \#2 is not on record beyond the account.
+% [R] session record of 2026-10-23/24 (the author's "pr merge", "merge devammm", "PR #1'i de merge et", "merge et")
+\todo{author: say how far you reviewed the pull requests, once your reading is complete.}
+The record does not show how far he read the code, re-derived the mathematics or read this text
+himself.
+\todo{author: state this.}
+He is responsible for the paper and for the software.
+\todo{author: approve this appendix and the authorship statement, check both against arXiv's policy
+and the target venue's, and add any acknowledgements.}
 
 % -------------------------------------------------------------------------------------
 % Appendix K (TODO for the author) is kept out of the compiled paper: it mirrors OUTLINE.md section 16.
