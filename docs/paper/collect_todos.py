@@ -35,13 +35,17 @@ file to upload (tested with pdfLaTeX) and the submission steps; these two releas
 1. **Your own statement for App. J (optional).** The paper makes no claim about how far you read the
    code, the derivations, the pull requests or the paper: the earlier `author:` marks and the
    sentence "The record does not show how far he read ..." were removed, and no statement replaces
-   them. If you want one, add it to the paragraph "Authorship and responsibility" of App. J
+   them. Nor does it say whether you reviewed the acceptance run's pre-registered settings before
+   the launch (the clause "The author did not review those settings before the launch" was removed
+   from App. J, paragraph "Runs"; the paper says only that the session fixed them under your
+   standing instruction). If you want a statement, add it to the paragraph "Authorship and
+   responsibility" of App. J
    (`sections/appendix.tex`, label `app:process`) in your own words, together with your approval of
    App. J and the authorship statement against arXiv's policy and the target venue's, and any
    acknowledgements.
 
 2. **Release: public repository, paper branch, tag, PyPI, Zenodo.** No tag exists on origin (checked
-   2026-10-24 07:32Z and 08:27Z: `git ls-remote --tags origin`, `gh api .../tags` and
+   2026-10-24 07:32Z, 08:27Z and 09:28Z: `git ls-remote --tags origin`, `gh api .../tags` and
    `.../releases` empty), so the paper names release 0.2.0 by its commit and pins the full hash in
    the install line of App. G:
    `pip install git+https://github.com/yigitokar/rai-bvar@4ac796997df80157d086c568714168fc2387f093`.
@@ -52,7 +56,10 @@ file to upload (tested with pdfLaTeX) and the submission steps; these two releas
      point to that branch.
    - Optionally create and push the tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093 (and a
      GitHub release); the install line can then read `@v0.2.0` (App. G, `sections/appendix.tex`,
-     "Code and data availability").
+     "Code and data availability"). Both forms were checked offline on 2026-10-24 from a scratch
+     clone (`uv pip install --offline --no-deps "git+file://<clone>@<hash>"`, and `@v0.2.0` after
+     tagging 4ac7969 in that clone only): each installs rai-bvar 0.2.0. Keep the hash line until the
+     tag is on origin.
    - A PyPI release and Zenodo DOIs (the release, and the replication outputs) do not exist and the
      paper claims none ("there is no PyPI release and no archived DOI", App. G; "it is not on PyPI",
      Section 12, "Release state"). If you create them, update those two places and the install line.

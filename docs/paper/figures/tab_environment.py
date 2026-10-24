@@ -97,7 +97,8 @@ def pyproject_version(commit: str) -> str:
 
 def release_equivalence() -> list[str]:
     """Files that differ between 7f880e1 and the release 4ac7969, outside benchmarks/reports/:
-    must be the version string only."""
+    must be the version string only (pyproject.toml; in uv.lock the project's version line, beside
+    uv's lock-format rewrite, which moves no dependency version)."""
     files = tc.git("diff", "--name-only", tc.RELEASE_COMMIT, tc.RELEASE_TAG_COMMIT).split()
     other = [f for f in files if not f.startswith("benchmarks/reports/")]
     assert sorted(other) == ["pyproject.toml", "uv.lock"], other
@@ -144,8 +145,8 @@ def main() -> None:
           f"BENCH-P2 machines & \\multicolumn{{2}}{{l}}{{{tc.tex(bench['cpu'])}, {bench['physical_cores']} cores "
           f"(reference baseline); {tc.tex(x86['cpu'])}, {x86['logical_cpus']} vCPU (CI runner)}} \\\\",
           f"Release & \\multicolumn{{2}}{{l}}{{{pyproject_version(tc.RELEASE_TAG_COMMIT)}, "
-          f"{tc.code(tc.RELEASE_TAG_COMMIT)} on \\code{{main}}: {tc.code(tc.RELEASE_COMMIT)} plus the version "
-          r"string} \\",
+          f"{tc.code(tc.RELEASE_TAG_COMMIT)} on \\code{{main}}: the code of {tc.code(tc.RELEASE_COMMIT)}, with the "
+          r"version string set} \\",
           r"\bottomrule", r"\end{tabular}"]  # fmt: skip
 
     mv = make_vars()

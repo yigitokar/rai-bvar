@@ -52,7 +52,7 @@ REPO_ROOT = PAPER.parent.parent  # the repository that holds docs/paper (branch 
 RELEASE_DIR = REPO_ROOT / "benchmarks" / "reports" / "validation" / "7f880e1_apple-m5-max"
 RELEASE = RELEASE_DIR / "record"  # geweke.jsonl, sbc.jsonl, mutation.jsonl
 RELEASE_COMMIT = "7f880e1"  # the commit the records were taken at (meta.json "commit")
-RELEASE_TAG_COMMIT = "4ac7969"  # main at release 0.2.0: 7f880e1 plus the version string (PR #10)
+RELEASE_TAG_COMMIT = "4ac7969"  # main at release 0.2.0: the code of 7f880e1 with the version string set (PR #10)
 # the CI run whose fast suite (pytest -m "not slow and not network and not bench") passed at
 # 7f880e1 on ubuntu-latest, Python 3.12, 3.13 and 3.14 (gh run view 40061724239)
 CI_FAST_RUN = "40061724239"

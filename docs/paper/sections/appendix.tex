@@ -1870,9 +1870,11 @@ The harness code in \code{src/rai_bvar/validation/} has 4,233 lines on the relea
 c823d20, before row~18).
 % [V] wc -l over git show 7f880e1:src/rai_bvar/validation/*.py (4233, as at 7f410dc; row 18 adds three lines to joint.py)
 In continuous integration on the release commit (Linux, Python 3.12, 3.13 and 3.14) the fast suite
-gave 4,761 passed, 9 skipped and 1 expected failure in each job, with no failures, in 49--72\,min;
+gave 4,761 passed, 9 skipped and 1 expected failure in each job, with no failures, in 49--72\,min
+at 7f880e1 and, with the same counts, in 80--85\,min at 4ac7969 itself;
 the skips are six live ArviZ comparisons (ArviZ not installed) and three phase-gating checks.
 % [REL] CI run 40061724239 (excerpt docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt): "4761 passed, 9 skipped, 485 deselected, 1 xfailed" in 3879.98 s (3.12), 4334.52 s (3.13), 2964.81 s (3.14); SKIPPED [6] test_diagnostics_ext.py (arviz), [2] + [1] test_specs_phase2.py ("is part of this build")
+% [REL] CI run 40073897904 (push to main at 4ac7969; excerpt docs/paper/figures/data/provenance/ci_run_40073897904_fast_suite.txt, written in stage 4 by the extraction that reproduces the 40061724239 excerpt line for line): "4761 passed, 9 skipped, 485 deselected, 1 xfailed" in 5071.84 s (3.12), 4772.87 s (3.13), 4935.96 s (3.14), i.e. 79.5-84.5 min, printed 80-85; the same 6 + 2 + 1 skips and the stochvol_v_t5 xfail
 The weekly tiers of the release validation record took about three hours on the Apple M5 Max:
 83~min for \code{tests/geweke} (G-full 18\,s to 7.8\,min per composition), 82~min for
 \code{tests/sbc} (SBC 16\,s to 11.2\,min per composition), and 2--6~min each for the mutation
@@ -2013,7 +2015,8 @@ production fit of F2; of the replication's runs, only the quick run predates the
 Three sources of performance numbers exist in the repository, and only the third measures the
 production engine: the stand-in scratch scripts of the design stage (a simplified SV block, data
 closed over as constants), the prototypes of the pilot (the real SV block, on a loaded
-machine), and the BENCH-P2 baseline of the engine itself through \code{BVAR.fit}.
+machine), and the BENCH-P2 runs of the engine itself through \code{BVAR.fit} (the reference
+baseline and the continuous-integration report below).
 The paper quotes only the third and never blends them.
 % [R] DESIGN section 10.2; docs/phase2/09_pilot.md; tests/bench/baseline.json (dossier 03 section 13.6)
 BENCH-P2 fits structural Linear $\times$ SV with fixed hyperparameters to a simulated VAR(4) with SV
@@ -2082,10 +2085,10 @@ design budget lines.}
 
 \emph{Not measured on the production engine.}
 The 4-device stretch target (only pilot projections exist), the reduced-form CCCM sampler, SV($t$)
-and SV with outliers and $t$, Linear $\times$ Constant without dummy rows, and an idle x86 machine;
-the only x86 baseline in the history was measured under heavy load on four cores and is labelled
-provisional.
-% [R] dossier 03 sections 13.7-13.8 (git show d37e059:tests/bench/baseline.json)
+and SV with outliers and $t$, Linear $\times$ Constant without dummy rows, and an idle x86 machine.
+An earlier x86 baseline in the history, measured under heavy load on four cores and labelled
+provisional, is superseded by the continuous-integration report and not quoted.
+% [R] dossier 03 sections 13.7-13.8 (git show d37e059:tests/bench/baseline.json: "PROVISIONAL", Intel Xeon @ 2.10GHz, 4 logical CPUs, load average 11.7/11.1/10.0, commit 1093932); stage 4 (2026-10-24): "the only x86 baseline" became "an earlier x86 baseline", since the CI report of tab:TabE2 is an x86 baseline too
 
 \emph{One OpenBLAS thread while chains run.}
 On CPU, jaxlib lowers Cholesky factorisations and triangular solves to LAPACK and BLAS calls into
@@ -2840,14 +2843,16 @@ and the iw\_equivalent baseline are hypotheses that we did not test. % [FULL: re
 \emph{Code and data availability.}
 \pkg{rai-bvar} is developed at \url{https://github.com/yigitokar/rai-bvar} under Apache-2.0.
 This paper describes release 0.2.0, commit 4ac7969 on \code{main} (the full hash is in the
-install line below), which differs from commit 7f880e1 only in the version string and in the
-committed reports of the validation run below. It needs Python 3.12 or later and installs with
+install line below). Its code is that of commit 7f880e1, to which it changes only the version string (in
+\code{pyproject.toml} and in the lock file, which uv also rewrote in its newer format without
+changing any locked dependency version) and adds the committed reports below. It needs Python 3.12
+or later and installs with
 \begin{center}\footnotesize
 \mbox{\code{pip install git+https://github.com/yigitokar/rai-bvar@4ac796997df80157d086c568714168fc2387f093}}
 \end{center}
 (there is no PyPI release and no archived DOI).
-% [V] git show 4ac7969:pyproject.toml (name rai-bvar, version 0.2.0, requires-python >=3.12, license Apache-2.0); git diff --name-only 7f880e1 4ac7969 (pyproject.toml and uv.lock: the version line only, no dependency version changed; benchmarks/reports/bench_p2_x86_github_779957f.json and benchmarks/reports/validation/7f880e1_apple-m5-max/, PR #9); PR #10 "Release 0.2.0: package version bump"
-% [V] install check, 2026-10-24: from git archive 4ac7969, uv build --offline gives rai_bvar-0.2.0-py3-none-any.whl (91 files under rai_bvar/; Requires-Dist jax>=0.12, numpy>=2.0, pandas>=2.2, scipy>=1.15, scoringrules>=0.11, xarray>=2024.10), which installs offline into a fresh Python 3.12 environment and imports as rai_bvar 0.2.0; the git+https line itself was not run (no network install; the repository is private until release)
+% [V] git show 4ac7969:pyproject.toml (name rai-bvar, version 0.2.0, requires-python >=3.12, license Apache-2.0); git diff --name-only 7f880e1 4ac7969 (pyproject.toml: the version line only; uv.lock: rai-bvar's version line plus uv's lock-format rewrite, "revision = 3", upload-time fields, three added kiwisolver graalpy wheel entries and provides-extras = ["plot"], with no name or version line of any dependency changed, checked 2026-10-24 by diffing the two lock files with the upload-time fields removed; commit message of 02c56c3: "no dependency version changes"; benchmarks/reports/bench_p2_x86_github_779957f.json and benchmarks/reports/validation/7f880e1_apple-m5-max/, PR #9); PR #10 "Release 0.2.0: package version bump"
+% [V] install check, 2026-10-24: from git archive 4ac7969, uv build --offline gives rai_bvar-0.2.0-py3-none-any.whl (91 files under rai_bvar/; Requires-Dist jax>=0.12, numpy>=2.0, pandas>=2.2, scipy>=1.15, scoringrules>=0.11, xarray>=2024.10), which installs offline into a fresh Python 3.12 environment and imports as rai_bvar 0.2.0; the git+https line itself was not run (no network install; the repository is private until release); stage 4 (2026-10-24): uv pip install --offline --no-deps "git+file://<scratch clone>@4ac796997df80157d086c568714168fc2387f093" into a fresh Python 3.12 venv installs rai-bvar 0.2.0, and so does "@v0.2.0" after tagging 4ac7969 in that scratch clone (the tag does not exist on origin)
 % [V] no tag on origin at 2026-10-24 07:32Z and 08:27Z (git ls-remote --tags origin, gh api repos/yigitokar/rai-bvar/tags and /releases: empty), so the release is named by its commit and the install line pins the full hash (pip's git+https@<ref> accepts a full commit SHA); a tag v0.2.0 at 4ac7969 is an author step after submission (AUTHOR_TODO.md). No PyPI project: https://pypi.org/pypi/rai-bvar/json returned 404 (07:44Z); no Zenodo DOI (release facts)
 The repository holds, under \code{benchmarks/reports/}, the reports of the Clark--Ravazzolo runs
 (the quick run, the first full run, and the acceptance run with its log;
@@ -3217,7 +3222,7 @@ Sixty-eight carry a \code{Co-Authored-By} trailer that names the agent: both com
 both of Phase~1, 57 of the 65 commits of Phase~2 (with its close-out and the release) and the seven
 commits of the paper branch.
 The other nine are the merge commits of the nine pull requests, made on GitHub.
-% [V] git log 4ac7969 fd8a3f7 --format='%h|%ce|%(trailers:key=Co-Authored-By,valueonly)' (= git rev-list --all, 77): 68 with the trailer; the 9 without have committer "GitHub <noreply@github.com>" (888f620, 698ea24, 62d15f6, 08e1eda, ae5f8d6, 99f658a, 7f880e1, e92a31b, 4ac7969: PRs 1, 2, 4-10); Phase 0 = 5882cc2, bc3c075; Phase 1 = cded45e, bce0db3 (+ the PR 1 merge 888f620); Phase 2 = the other 65 commits of main (70 in all), 8 of them PR merges; paper = git log fd8a3f7 --not 4ac7969 (33dd9f8, e66b6be, 75db8a7, a3478d4, f42714c, 945e43c, fd8a3f7); first commit 2026-10-21 17:54 -0400 (21:54Z), last fd8a3f7 (committed 2026-10-24 03:26 -0400, 07:26Z); on main the last is the PR 10 merge (07:22Z). Commits after fd8a3f7 on paper-draft are not counted here
+% [V] git log 4ac7969 fd8a3f7 --format='%h|%ce|%(trailers:key=Co-Authored-By,valueonly)' (= git rev-list --all at fd8a3f7's time, 77; the paper-draft commits after fd8a3f7 add to --all, so the two-ref form is the one to rerun: 77 again on 2026-10-24 in stage 4): 68 with the trailer; the 9 without have committer "GitHub <noreply@github.com>" (888f620, 698ea24, 62d15f6, 08e1eda, ae5f8d6, 99f658a, 7f880e1, e92a31b, 4ac7969: PRs 1, 2, 4-10); Phase 0 = 5882cc2, bc3c075; Phase 1 = cded45e, bce0db3 (+ the PR 1 merge 888f620); Phase 2 = the other 65 commits of main (70 in all), 8 of them PR merges; paper = git log fd8a3f7 --not 4ac7969 (33dd9f8, e66b6be, 75db8a7, a3478d4, f42714c, 945e43c, fd8a3f7); first commit 2026-10-21 17:54 -0400 (21:54Z), last fd8a3f7 (committed 2026-10-24 03:26 -0400, 07:26Z); on main the last is the PR 10 merge (07:22Z). Commits after fd8a3f7 on paper-draft are not counted here
 Every commit has the author's name in its author field.
 On the 16 commits made in cloud sessions the author address is an Anthropic no-reply address and the
 committer is the agent (12 of them also link their session); on the other 52 commits outside GitHub,
@@ -3274,9 +3279,10 @@ priors, settings or criteria to make anything pass; the orchestrator left the me
 % [R] GitHub issue #3, body and comments of 2026-10-23 01:24Z-10:44Z ("Never open a PR or merge. The orchestrator combines everything into one PR"; "R package only, no system-level installs"; "Don't change priors, settings or criteria to make anything pass"; "The local session is now also the orchestrator"; "It is not merged; merging is the user's decision")
 The pre-registration of the acceptance run (c823d20) was written in an agent session before the run
 was launched.
-The author did not review those settings before the launch: the session fixed them under the
-author's standing instruction of 2026-10-23 to complete the replication and its evaluation.
+The session fixed its settings under the author's standing instruction of 2026-10-23 to complete the
+replication and its evaluation.
 % [R] session record of 2026-10-23 (the author's instruction to do whatever the replication needed; the settings were chosen and committed by the session, c823d20)
+% Stage 4 (2026-10-24): the clause "The author did not review those settings before the launch" was dropped: it was a claim about the author's reading, on which the paper says nothing either way (AUTHOR_TODO.md item 1)
 % [R] c823d20 (trailer); the run log's first line follows that commit by 11 s (app:cr-provenance)
 \item[This paper.] Agents drafted the paper in stages: six evidence dossiers on the repository, each
 fact-checked against it by a separate agent; three competing outlines, of which two judge agents

@@ -1,14 +1,15 @@
 # arXiv submission of the rai-bvar paper
 
 What to paste into the arXiv form, which file to upload, and how that file was tested with arXiv's
-engine (pdfLaTeX). State of 2026-10-24, from the sources of the commit that adds this file on
-branch `paper-draft`. Every number below comes from a build or a command run that day; the
-commands are given so that they can be repeated.
+engine (pdfLaTeX). State of 2026-10-24, from the sources of the latest commit that changes this
+file on branch `paper-draft` (first written in 8511b6c; Sections 0, 1 and 4 updated after the final
+adversarial check of the same day). Every number below comes from a build or a command run that
+day; the commands are given so that they can be repeated.
 
 ## 0. Before you submit (blocking)
 
 The paper cannot go out yet. It gives the repository URL and points readers to the branch
-`paper-draft`, and at 2026-10-24 09:06Z neither can be reached (read-only checks:
+`paper-draft`, and at 2026-10-24 09:06Z and again at 09:32Z neither can be reached (read-only checks:
 `gh repo view yigitokar/rai-bvar --json visibility`, `git ls-remote origin`):
 
 1. **Make the repository public.** `gh repo view` reports `"visibility":"PRIVATE"`. The paper gives
@@ -21,19 +22,23 @@ The paper cannot go out yet. It gives the repository URL and points readers to t
 3. Optional: the tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093 and a GitHub release.
    origin has no tags and no releases (`git ls-remote --tags origin` empty;
    `gh api repos/yigitokar/rai-bvar/releases` returns 0), so the paper names release 0.2.0 by
-   its commit and pins the full hash in the install line of App. G. See AUTHOR_TODO.md, item 2,
-   if you create the tag.
+   its commit and pins the full hash in the install line of App. G, not `@v0.2.0`. Both forms
+   install offline from a scratch clone (the tag form after tagging that clone only). See
+   AUTHOR_TODO.md, item 2, if you create the tag.
 4. Optional: your own statement for App. J (AUTHOR_TODO.md, item 1). The paper makes no claim
-   about how far you read the code or the paper.
+   about how far you read the code or the paper, nor about whether you reviewed the acceptance
+   run's pre-registered settings before its launch.
 5. Your call: `\date{\today}` in `main.tex`. The title page prints the date on which the PDF is
    compiled. arXiv compiles the source when you submit (and again if it ever reprocesses it), so
    the PDF will carry arXiv's compile date. Put a literal date in `\date{...}` if you want it fixed.
 
 ## 1. The file to upload
 
-`docs/paper/arxiv.tar.gz`: 48 files, 572,202 bytes, SHA-256
-`ce1bb294144aa58e698d4e40711f695794fd476524d03f15130e55902bffcb59` (the tarball tested below). It
-is not committed (`.gitignore`). Rebuild and test it with
+`docs/paper/arxiv.tar.gz`: 48 files, 573,257 bytes, SHA-256
+`cf5c28e2a253c0db5f76a391dd6538c5dfda83b74f25eab181853315a93233ae` (the tarball tested below,
+built 2026-10-24 09:34Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`; each of its 48
+files is byte-identical to the committed source). It is not
+committed (`.gitignore`). Rebuild and test it with
 
 ```sh
 cd docs/paper
@@ -80,7 +85,7 @@ unpacks the tarball twice, each time into a fresh temporary directory, and compi
   One of them quotes the code name `TracerArrayConversionError`, which is text from the paper,
   not a TeX error.
 
-## 3. What was changed for pdfLaTeX (in this commit)
+## 3. What was changed for pdfLaTeX (in commit 8511b6c)
 
 Before these changes the package compiled under pdfLaTeX without errors, but the PDF was wrong in
 three ways (items 2 to 4). With items 1 to 4 alone, its text still differed from the tectonic
@@ -124,8 +129,13 @@ Compared by text extraction (PyMuPDF) and by the `.aux` label tables of the two 
 2. **Page drift.** 240 of the 245 labels fall on the same page. Five are one page off:
    `sec:walk-mcmc` (p. 19 in tectonic, p. 18 in pdfLaTeX), `sec:validation-cost` and
    `sec:validation-tiers` (20, 19), `app:licensing` (92, 93) and `app:errata` (93, 94).
-   - Pages 1–18 and 36–90 have the same text, up to the extraction differences of item 4 (a
-     word-sequence similarity of at least 0.97 per page).
+   - Pages 1–18, 36–41 and 44–89 have the same text, up to the extraction differences of item 4
+     (a word-sequence similarity of at least 0.97 per page: PyMuPDF text, whitespace-split words,
+     Python's difflib). On pp. 41–42 one line of App. B.5 crosses the page break (pdfLaTeX sets it
+     on p. 41), which, with the math of App. B.5 and B.6, puts pp. 42–43 at 0.956 and 0.960; no
+     label moves there. The sources of 211fc2d, built the same way, give the same page ranges, so
+     this line was already there before the final check (an earlier version of this note said
+     pp. 36–90).
    - The drift starts after Listings 1 and 2 (pp. 18–19) and after Listings G.1–G.4
      (pp. 89–91). It ends at the page break before the appendices and at the end of the document.
    - The code listings use different typewriter fonts in the two engines: DejaVu Sans Mono under
