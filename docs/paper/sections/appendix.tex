@@ -2848,12 +2848,13 @@ install line below). Its code is that of commit 7f880e1, to which it changes onl
 changing any locked dependency version) and adds the committed reports below. It needs Python 3.12
 or later and installs with
 \begin{center}\footnotesize
-\mbox{\code{pip install git+https://github.com/yigitokar/rai-bvar@4ac796997df80157d086c568714168fc2387f093}}
+\mbox{\code{pip install git+https://github.com/yigitokar/rai-bvar@v0.2.0}}
 \end{center}
-(there is no PyPI release and no archived DOI).
+(the tag \code{v0.2.0} points to commit 4ac7969 and carries a GitHub release; there is no PyPI release
+and no archived DOI).
 % [V] git show 4ac7969:pyproject.toml (name rai-bvar, version 0.2.0, requires-python >=3.12, license Apache-2.0); git diff --name-only 7f880e1 4ac7969 (pyproject.toml: the version line only; uv.lock: rai-bvar's version line plus uv's lock-format rewrite, "revision = 3", upload-time fields, three added kiwisolver graalpy wheel entries and provides-extras = ["plot"], with no name or version line of any dependency changed, checked 2026-10-24 by diffing the two lock files with the upload-time fields removed; commit message of 02c56c3: "no dependency version changes"; benchmarks/reports/bench_p2_x86_github_779957f.json and benchmarks/reports/validation/7f880e1_apple-m5-max/, PR #9); PR #10 "Release 0.2.0: package version bump"
 % [V] install check, 2026-10-24: from git archive 4ac7969, uv build --offline gives rai_bvar-0.2.0-py3-none-any.whl (91 files under rai_bvar/; Requires-Dist jax>=0.12, numpy>=2.0, pandas>=2.2, scipy>=1.15, scoringrules>=0.11, xarray>=2024.10), which installs offline into a fresh Python 3.12 environment and imports as rai_bvar 0.2.0; the git+https line itself was not run (no network install; the repository is private until release); stage 4 (2026-10-24): uv pip install --offline --no-deps "git+file://<scratch clone>@4ac796997df80157d086c568714168fc2387f093" into a fresh Python 3.12 venv installs rai-bvar 0.2.0, and so does "@v0.2.0" after tagging 4ac7969 in that scratch clone (the tag does not exist on origin)
-% [V] no tag on origin at 2026-10-24 07:32Z and 08:27Z (git ls-remote --tags origin, gh api repos/yigitokar/rai-bvar/tags and /releases: empty), so the release is named by its commit and the install line pins the full hash (pip's git+https@<ref> accepts a full commit SHA); a tag v0.2.0 at 4ac7969 is an author step after submission (AUTHOR_TODO.md). No PyPI project: https://pypi.org/pypi/rai-bvar/json returned 404 (07:44Z); no Zenodo DOI (release facts)
+% [V] tag v0.2.0 created and pushed on 2026-10-24 (annotated tag object 8e7fb32, git ls-remote --tags origin: refs/tags/v0.2.0^{} = 4ac796997df80157d086c568714168fc2387f093), GitHub release https://github.com/yigitokar/rai-bvar/releases/tag/v0.2.0; repository public the same day (gh repo view --json visibility: PUBLIC). No PyPI project: https://pypi.org/pypi/rai-bvar/json returned 404 (07:44Z); no Zenodo DOI (release facts)
 The repository holds, under \code{benchmarks/reports/}, the reports of the Clark--Ravazzolo runs
 (the quick run, the first full run, and the acceptance run with its log;
 \cref{sec:replication,app:cr}) and the pre-registration of the acceptance run

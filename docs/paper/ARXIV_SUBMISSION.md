@@ -6,37 +6,23 @@ file on branch `paper-draft` (first written in 8511b6c; Sections 0, 1 and 4 upda
 adversarial check of the same day). Every number below comes from a build or a command run that
 day; the commands are given so that they can be repeated.
 
-## 0. Before you submit (blocking)
+## 0. Before you submit
 
-The paper cannot go out yet. It gives the repository URL and points readers to the branch
-`paper-draft`, and at 2026-10-24 09:06Z and again at 09:32Z neither can be reached (read-only checks:
-`gh repo view yigitokar/rai-bvar --json visibility`, `git ls-remote origin`):
+Done on 2026-10-24:
+- **Repository public:** https://github.com/yigitokar/rai-bvar (`gh repo view --json visibility` returns `PUBLIC`).
+- **Tag and release:** tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093, with a GitHub release (https://github.com/yigitokar/rai-bvar/releases/tag/v0.2.0). The install line in App. G uses `@v0.2.0`.
+- **Branch pushed:** `paper-draft`, which holds the paper's sources, figure and table scripts and data that App. F, App. G and Fig. F.1 point to.
+- **Date:** the title-page date is fixed to "October 2026" (`main.tex`, submission build), so arXiv's compile date does not appear.
 
-1. **Make the repository public.** `gh repo view` reports `"visibility":"PRIVATE"`. The paper gives
-   https://github.com/yigitokar/rai-bvar in Section 1, Section 13 and App. G, and the Comments
-   field below repeats it.
-2. **Push the branch `paper-draft`.** origin/paper-draft is at 945e43c; the submitted sources are
-   local commits ahead of it. App. F (the convergence diagnostic), App. G (the paper's sources and
-   the figure and table scripts) and the caption of Fig. F.1 (the per-origin export) point to that
-   branch.
-3. Optional: the tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093 and a GitHub release.
-   origin has no tags and no releases (`git ls-remote --tags origin` empty;
-   `gh api repos/yigitokar/rai-bvar/releases` returns 0), so the paper names release 0.2.0 by
-   its commit and pins the full hash in the install line of App. G, not `@v0.2.0`. Both forms
-   install offline from a scratch clone (the tag form after tagging that clone only). See
-   AUTHOR_TODO.md, item 2, if you create the tag.
-4. Optional: your own statement for App. J (AUTHOR_TODO.md, item 1). The paper makes no claim
-   about how far you read the code or the paper, nor about whether you reviewed the acceptance
-   run's pre-registered settings before its launch.
-5. Your call: `\date{\today}` in `main.tex`. The title page prints the date on which the PDF is
-   compiled. arXiv compiles the source when you submit (and again if it ever reprocesses it), so
-   the PDF will carry arXiv's compile date. Put a literal date in `\date{...}` if you want it fixed.
+Still yours, both optional:
+- Your own statement for App. J (AUTHOR_TODO.md, item 1). The paper makes no claim about how far you read the code or the paper, nor about whether you reviewed the acceptance run's pre-registered settings before its launch.
+- A Zenodo DOI or a PyPI release, if wanted (neither exists; the paper says so).
 
 ## 1. The file to upload
 
-`docs/paper/arxiv.tar.gz`: 48 files, 573,257 bytes, SHA-256
-`cf5c28e2a253c0db5f76a391dd6538c5dfda83b74f25eab181853315a93233ae` (the tarball tested below,
-built 2026-10-24 09:34Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`; each of its 48
+`docs/paper/arxiv.tar.gz`: 48 files, 573,197 bytes, SHA-256
+`316570fb298fc0259156223657605f47348209db34c0f9d06b48728a6bd8641f` (the tarball tested below,
+built 2026-10-24 09:38Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`; each of its 48
 files is byte-identical to the committed source). It is not
 committed (`.gitignore`). Rebuild and test it with
 
