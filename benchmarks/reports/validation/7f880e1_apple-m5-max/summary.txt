@@ -1,0 +1,9 @@
+tests/geweke rc=0 5008s 43 passed, 18 deselected, 12 warnings in 4980.18s (1:23:00)
+tests/sbc rc=0 4936s 72 passed, 1 deselected, 23 warnings in 4928.15s (1:22:08)
+tests/mutation rc=0 151s 37 passed, 1 deselected, 37 warnings in 145.20s (0:02:25)
+tests/parity rc=0 226s 13 passed, 1 skipped, 349 deselected, 1 xfailed, 5 warnings in 220.60s (0:03:40)
+tests/analytic rc=0 328s 43 passed, 256 deselected in 323.40s (0:05:23)
+tests/mcmc/blocks rc=0 203s 31 passed, 547 deselected in 197.67s (0:03:17)
+tests/validation rc=5 6s 
+tests/contract rc=0 27s 130 passed, 222 deselected in 22.09s
+DONE

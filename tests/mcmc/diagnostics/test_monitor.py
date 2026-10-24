@@ -891,7 +891,7 @@ def counted(monkeypatch):
 
 @pytest.mark.parametrize(
     ("n", "draws"),
-    [(4, 400), (20, 2000)],  # n = 20 SV-O-t at the default 4 × 2000: 392 quantities (DESIGN §8.2)
+    [(4, 400), (20, 2000)],  # n = 20 SV-O-t at 4 × 2000 (pre-D-35 default): 392 quantities, §8.2
 )
 def test_flag_table_and_warnings_evaluate_each_quantity_once(counted, n, draws):
     """The fit's sequence (results.py: ``converged``, ``diagnostics_table``, then
@@ -1105,9 +1105,9 @@ def test_outliers_at_the_grid_maximum_from_the_monitor():
 
 def test_outliers_at_the_grid_maximum_threshold_is_strict():
     """``> 1% of rows`` (DESIGN §8.3): a posterior mean of exactly 1% at ``K`` is quiet, the next
-    float above it warns. At the default 4 × 2000 draws a plain float mean over chains and draws
-    of ``0.01`` (one of 100 rows at ``K`` in every draw) rounds to ``0.010000000000000503``, so
-    the decision must not rest on it."""
+    float above it warns. At 4 × 2000 draws (the pre-D-35 default) a plain float mean over chains
+    and draws of ``0.01`` (one of 100 rows at ``K`` in every draw) rounds to
+    ``0.010000000000000503``, so the decision must not rest on it."""
     static = make_static("zero-sv-o")
     spec = M.monitor_spec(static, variables(2))
     above = np.nextafter(0.01, 1.0)

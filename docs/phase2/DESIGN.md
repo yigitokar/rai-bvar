@@ -48,7 +48,7 @@ numerical oracles only, run offline by `tools/make_r_fixtures.R` (SPEC §2.1, §
 | D-2 | Offset `c_i = c_rel·ψ_i`, `c_rel = 1e-12`, fixed per run and window (R9); `y*_t = logaddexp(log ẽ_t², log c_i)`; absolute offsets (`0`, `1e-4`, `1e-3`) are parity options | N01 §0 item 3, §7.2 | bias ≈ 2.5e-6; no `log 0` while `ψ_i > 0` |
 | D-3 | OCSN 10-component mixture, effective means stored once (no extra −1.2704 shift); KSC-7 only as `mixture="ksc7"` | N01 §5.3, §6 | — |
 | D-4 | Indicator draw by **inverse CDF** on max-subtracted log weights, one float64 uniform per `(eq, t)`, `≤` comparison, clamp to `J−1`; frozen | N07 §9.2 (S3) | 3.5–4.4× faster than Gumbel-max |
-| D-5 | SV core: joint `(T+1)`-state AWOL system computed in **non-centred** form (`Q̃ = σ²Q`), two `lax.scan`s; GIS-C ASIS in the rotated order `s → h → θ_C → θ_NC` | N02 §3.2, §5.2–5.3, §8; N07 §8.3 | — |
+| D-5 | SV core: joint `(T+1)`-state AWOL system computed in **non-centred** form (`Q̃ = σ²Q`), two `lax.scan`s; GIS-C ASIS in the rotated order `s → h → θ_C → θ_NC` | N02 §3.2, §5.2–5.3, §8; N07 §8.3 | RW path amended (`f60d736`, `4fc0162`; WP25 queue item 7): still the scaled form `Q̃ = σ²Q`, but factored as a path-graph Laplacian plus a diagonal, with the pivots carried as their excess over the next edge, in **three** `lax.scan`s (`linalg.laplacian_precision_sample`: pivots, forward, reverse); the AR path keeps the two scans (§3.7.4) |
 | D-6 | Centred `(γ, φ)` step: 2-block MH with **centred** cross-products for `b_T`, `B₀ = diag(1e12, 1e8)` used in proposal and ratio; `σ²` independence MH | N02 §6.1 | uncentred `b_T` is biased; KFS-printed 3-block φ ratio fails Geweke |
 | D-7 | NC sign: measure-preserving fold `(σ, h̃) ↦ (−σ, −h̃)` when `σ < 0` | N02 §7 | stochvol's `|σ|` without the flip is a documented oracle deviation |
 | D-8 | Student-t: **standardized** `τ_t ~ IG(ν/2, (ν−2)/2)`; ν on the static grid `{3..40}` with prior weights as data; collapsed exact discrete Gibbs (`ν | e,h,o` with τ integrated, then `τ | ν`). `t_scale="unit"` is a replication option. A continuous ν prior is deferred (open question Q8); SV-t parity uses a fixed ν | N03 §0, §4.3a, §4.4, §7.4 | N06 §2.1 writes `ω ~ Gamma(ν/2, rate ν/2)`; the validation simulators use the sampler's parametrisation |
@@ -57,7 +57,7 @@ numerical oracles only, run offline by `tools/make_r_fixtures.R` (SPEC §2.1, §
 | D-11 | Reduced form (CCCM 2022): combined-weight conditional, precisions factored in parallel, sequential `fori_loop` over `j` for means; coefficient prior = moment-matched independent Minnesota; `(A, λ)` prior identical to the structural one, so the two forms differ only in the coefficient prior | N04 §5.3, §6.1–6.3 | deterministic prior variance `κ_d ψ_j` (NIW marginal), not raw `var_const` |
 | D-12 | **Minnesota hyperparameters are fixed during MCMC.** `hierarchy="fixed"`: as given. `hierarchy="eb"` (default): plug-in mode from the **Phase 1 `AnalyticFit` on the conjugate twin at `cross = 1`**; Chan (2022) structural NIG ML only for `form="structural"`, `cross ≠ 1`; `form="reduced"`, `cross ≠ 1` uses the `cross = 1` twin with a recorded note (no error). `hierarchy="mh"` raises (Phase 3 global step) | N05 §9; §6.5 here | — |
 | D-13 | SV defaults: `μ_i ~ N(log(ψ_ι/ι), 10)`, `(φ+1)/2 ~ Beta(20, 1.5)`, `σ² ~ 1·χ²₁`, stationary `h_0`; RW: `h_0 ~ N(log(ψ_ι/ι), 4)`, `σ² ~ 0.1·χ²₁`. stochvol/bayesianVARs priors by explicit arguments | N02 §8.2, §10.2; N05 §4.4; N01 §12.1 | open question Q3 |
-| D-14 | Gaussian draws in precision form with exact Jacobi scaling and two triangular solves: `s = diag(K)^{−½}`, `L = chol(sKs)`, `θ = s ⊙ L⁻ᵀ(L⁻¹(s⊙b) + z)` | N05 §7.2; N07 §8.2 | — |
+| D-14 | Gaussian draws in precision form with exact Jacobi scaling and two triangular solves: `s = diag(K)^{−½}`, `L = chol(sKs)`, `θ = s ⊙ L⁻ᵀ(L⁻¹(s⊙b) + z)` | N05 §7.2; N07 §8.2 | One exception (`3d3f51b`; §2.10 WP25 amendment 6, §3.7.1): `Recursive.contemp_step` draws `a_i` by Householder QR of the whitened rows (`linalg.lstsq_draw`, `R` the upper Cholesky factor of `K_a`, so the same function of `z` to rounding) without forming `K_a`; it serves the non-fusing means (reduced form), and `precision_draw` is used again when `contemp_conditional` is overridden. The fused structural `(δ_i, a_i)` draw and CCCM keep D-14 |
 | D-15 | Padding is exact by construction: masked coefficient slots get prior `N(0,1)`, zero data columns and are zeroed after the draw; padded rows have weight 0; padded SV states are decoupled `N(0,1)` dummies (right padding); **padded rows are masked before any `log`** | N07 §2.2–2.3, §9.4 item 3; N05 §7.1 | — |
 | D-16 | PRNG: threefry2x32 typed keys; `fold_in` chain `seed → stream → data salt → chain → absolute sweep → block → equation → sub-draw`; **all counters uint32 with explicit casts**; no key in any carry; `rbg` forbidden; the backtest passes a per-origin fit seed in addition to the data salt | N07 §4 | — |
 | D-17 | Every kernel = pure core with injected noise + thin key wrapper; every exact draw exposes its conditional parameters | N04 §6.4; N06 §5.1; N07 §13.1 | — |
@@ -78,6 +78,7 @@ numerical oracles only, run offline by `tools/make_r_fixtures.R` (SPEC §2.1, §
 | D-32 | Backtest warm starts are opt-in in Phase 2 | SPEC §9.1 | open question Q6 |
 | D-33 | `converged` is decided by a **primary** monitor set (log-likelihood, own first lag of `B`, SV parameters, `h_T`, `log λ`); every `a_ij`, `h_1`, `h_mid`, `p`, `ν` are secondary (reported, never gating) | performance §8.1; judges | avoids multiplicity false alarms |
 | D-34 | **Opt-in path-integrated LPD** (`log_pred_density(…, lpd_method="integrated")`; the default `"conditioned"` is the SPEC §7 estimator, unchanged): draw `s` is conditioned on its parameters and its drawn latent scale path only, and `y_{T+1..T+h−1}` is integrated out analytically, `y_{T+h} | θ_s, λ_s ~ N(m_h, M_h M_hᵀ)` with `m_h = cond_mean_h − Σ_{k<h} Φ_{h−k} u_k`, `M_h = [Φ_{h−1} L_1 | … | Φ_0 L_h]`; subset factors by QR of `M_h[idx]ᵀ`. Needs the new accelerator variable `lag_coefs` (MCMC forecasts of linear or zero means); `h = 1` runs the conditioned code (bitwise); `rb_transitory` at `h > 1` and forecasts without `lag_coefs` raise. **Plumbing:** `score_forecast`, `backtest`, `estimate_cost`, `compare` and `ordering_sensitivity` take `lpd_method` (default `"conditioned"`: scores, layout and cache keys unchanged); `"integrated"` adds `"lpd": "integrated-v1"` to backtest cache keys and the conditioned estimator's columns to the scores (§11.6); the Clark–Ravazzolo `acceptance` config (4 × 20,000 draws) uses it in every stage. Review amendments (2026-10-23) in §7.3, §11.6 and §13 WP23 | WP23 review (2026-10-23); `docs/paper/NOTES.md` 8b; `benchmarks/reports/clark_ravazzolo_preregistration.md` | the conditioned estimator degenerates in the tails at `h > 1` (Constant UR h = 8 at 2008Q2: −93.6 with 1000 draws vs −19.1 path-integrated on 1000 draws) while its MCSE stays ≈ 1; the integrated one is exact given each draw's parameters and volatility path but still a Monte Carlo average over the draws (§7.3); contract fields and SPEC §7 unchanged; analytic, benchmark and ordering-pooled forecasts carry no `lag_coefs` (§7.3) |
+| D-35 | **Composition-aware default MCMC budget and the SV budget warning** (resolves Q14, §12.2). `MCMCSettings.draws` defaults to `None`, which `BVAR.__post_init__` resolves and stores (the D-19 rule: no unresolved default survives construction): **4 chains × 10,000 kept draws** (`settings.SV_DEFAULT_DRAWS`) for every composition with stochastic volatility (`SV`, `SV(rw=True)`, `SV(outliers=True)`, `SV(tails="t")`, in structural or reduced form), 4 × 2,000 (`settings.DEFAULT_DRAWS`, the old value) for `Constant` volatility. An explicit `draws` (in an `MCMCSettings` or a mapping) is kept as given; settings that leave `draws` unset get the composition's default whatever else they set. `MCMCSettings.with_default_draws(sv=…)` is the one rule; `fit_mcmc` and `run_chains` apply it too (`sv` ⇔ `static.vol.persistent == "sv"`) for engine-level callers, and `MCMCSettings().store_thin` raises while `draws` is unset. **Warning** (§8.3): `resolve()` sets `warning_inputs["sv_budget"] = (chains, draws)` when an `SV` composition has fewer than 10,000 kept draws per chain (`draws`; `thin` and `chains` are not credited, and `chains < 2` keeps its own row), and `warning_catalogue` appends `monitor.sv_budget_message`, which names the Q14 evidence and the remedy `mcmc=MCMCSettings(draws=10_000)`; it reaches `fit.warnings`, a `UserWarning`, forecast attrs and the backtest aggregation like every §8.3 row. It never fires for `Constant` volatility, the analytic engine, the SV default or an explicit budget of 10,000 or more; engine-level fits (`fit_mcmc` called directly) carry no flag. **Hashes:** Phase 1 (analytic) specs and every `Constant` MCMC spec are unchanged (their `draws` resolves to 2000; pinned in `tests/unit/test_default_budget.py` with the hashes recorded at `ae5f8d6`). An SV model whose settings leave `draws` unset (the default, or e.g. `MCMCSettings(seed=1)`) now records `draws = 10000` in its spec, so its spec hash and every backtest cache key of it change: the one unavoidable change (scores cached at the old SV default are not served to the new default). `mcmc=MCMCSettings(draws=2000)` reproduces the old SV spec and hash exactly, so its caches are served; its name gains the `mcmc=` suffix because it is no longer the default, and conversely an SV model with an explicit `MCMCSettings(draws=10_000)` (BENCH-P2's budget) now equals the default and loses it (names label results and forecast attrs `model`; they enter no spec hash or cache key). Explicit budgets are unaffected: BENCH-P2 (4 × 10,000), the Clark–Ravazzolo `acceptance` (4 × 20,000), `full` (4 × 5,000) and `smoke` configs, the README `compare()` (`draws=20_000`); the CR `quick` config, which was `MCMCSettings()`, is now the explicit `MCMCSettings(draws=2000)`, so its models and cache keys stay as they were. The `converged` rule (§8.2), the SPEC §10.6 thresholds and `compare()`'s 95% rule are unchanged (Q14 options 3–5 not adopted) | owner decision 2026-10-24 (Q14 "as recommended"); evidence §12.2 Q14 (BENCH-P2, README quick start, Clark–Ravazzolo) | a default SV fit samples 5× as many kept draws as the old default (with the 1,000 burn-in sweeps, 11,000 against 3,000 sweeps, about 3.7×), and its diagnostics take about 7 s instead of 1 s at `n = 20` SV-O-t (§8.2); 4 × 10,000 raises the floor, it is not a convergence guarantee (BENCH-P2 still misses the gate on 4 of 101 primary quantities; the README example converges at 10 of 11 origins); `dataclasses.replace(model, vol=SV())` on a `Constant` MCMC model keeps its stored 2,000 draws (stored-resolved rule) and so warns |
 
 ### 0.2 Errata: every judge finding and its resolution
 
@@ -143,8 +144,9 @@ src/rai_bvar/
 ├── __init__.py                          [WP2]  + SV, MCMCSettings, Runtime, FitPlan, set_cpu_devices,
 │                                                 enable_compilation_cache, ordering_sensitivity, sv_priors
 ├── api.py                               [WP2]  auto resolution, engine rules, BVAR.mcmc, fit(seed, init, runtime, plan),
-│                                                 harmonise_grid, spec/from_spec
+│                                                 harmonise_grid, spec/from_spec  [D-35] stores the resolved draws
 ├── settings.py                    new   [WP2]  MCMCSettings, Runtime, FitPlan (pure Python)
+│                                        [D-35] draws=None → default_draws(sv): 10,000 with SV, else 2,000
 ├── _devices.py                    new   [WP1]  set_cpu_devices(k), enable_compilation_cache(path)
 ├── components/                          components.py becomes a package; import paths unchanged
 │   ├── __init__.py                new   [WP2]  re-exports Linear, Constant, SV (no JAX)
@@ -172,7 +174,8 @@ src/rai_bvar/
 │   ├── reduced.py                 new   [WP6]  moment-matched independent Minnesota for CCCM; explicit() parity hook
 │   └── sv_arrays.py               new   [WP6]  ConstantPrior / SVPrior / TransitoryPrior arrays (data-centred, per window)
 ├── engines/
-│   ├── analytic.py                      —      unchanged (read-only: _ar_residual_variances, AnalyticFit for EB)
+│   ├── analytic.py                      —      unchanged (read-only: _ar_residual_variances, AnalyticFit for EB;
+│   │                                             Phase 2 closeout: + forecast attrs["ordering"], §2.10)
 │   ├── structural_nig.py          new   [WP16] Chan (2022) per-equation NIG posterior, log ML, iid draws, EB objective
 │   └── mcmc/
 │       ├── __init__.py            new   [WP1]  lazy re-exports fit_mcmc, MCMCFit (imports no JAX)
@@ -193,9 +196,10 @@ src/rai_bvar/
 │       ├── storage.py             new   [WP14] storage plan, host store (preallocated or memmap), DataTree
 │       ├── warmstart.py           new   [WP14] FinalState, remap onto a new window
 │       ├── results.py             new   [WP14] MCMCFit, fit_mcmc (forecast/irf delegate to forecast.py)
-│       ├── monitor.py             new   [WP15] monitored sets, converged rule, warning catalogue
+│       ├── monitor.py             new   [WP15] monitored sets, converged rule, warning catalogue  [D-35] SV budget
 │       ├── forecast.py            new   [WP17] forecast core, forecast / irf / draw_parameters from a fit
 │       ├── resolve.py             new   [WP18] BVAR + VARData → (StaticConfig, EngineData, PriorArrays, hyper, notes)
+│       │                                [D-35] warning_inputs["sv_budget"]
 │       └── eb.py                  new   [WP18] EB via the Phase 1 twin and structural_nig
 ├── forecast/result.py                   [WP17] ESS-adjusted LPD MCSE, leading-block fast path, optional extra
 │                                                 variables, opt-in transitory RB
@@ -215,6 +219,7 @@ tools/make_sv_parity_data.py       new   [WP8]  NumPy generator of the parity da
 benchmarks/pilot/                  new   [WP3]  clean-room pilot prototypes (timing only)
 benchmarks/phase2_perf.py          new   [WP24] BENCH-P2 driver
 benchmarks/clark_ravazzolo.py      new   [WP23] replication report (N08 §C)  [D-34] acceptance config, --lpd
+                                         [D-35] quick config: explicit 4 × 2000
 docs/phase2/09_pilot.md            new   [WP3]  pilot measurements and frozen defaults
 pyproject.toml                           [WP1]  pytest markers only
 .github/workflows/ci.yml                 [WP24] PR / nightly / weekly tiers
@@ -240,7 +245,7 @@ tests/mcmc/unit/          [WP1] test_keys, test_state, test_config, test_import_
 tests/priors/             [WP6] test_scales, test_structural_prior, test_reduced_prior, test_sv_arrays
 tests/unit/               [WP2] test_specs_phase2, test_phase1_hash_golden, test_api_resolution, test_grid_harmonise,
                                 test_spec_roundtrip_mcmc      [WP18] test_fit_mcmc_api   [D-34] test_lpd_integrated,
-                                test_scores_lpd_method, test_clark_ravazzolo_script
+                                test_scores_lpd_method, test_clark_ravazzolo_script   [D-35] test_default_budget
 tests/validation/         [WP7] test_uniformity, test_geweke_selftest, test_sbc_selftest, test_sequential, test_identities_toy
                           [WP9] test_reference_moments, test_simulate, test_log_joint, test_mixture_transcription
 tests/mcmc/blocks/        [WP10] test_recursive, test_linear_structural, test_linear_fastpaths, test_zero_mean
@@ -318,7 +323,9 @@ and run lengths `int32`; iteration counters and `fold_in` data `uint32`; keys ty
   use `T_eff/2`; padded rows are masked **before** any `log` (N07 §9.4 item 3; fixes E23); forecasting reads
   `h[:, T_eff]` with a dynamic index, never `h[-1]`.
 - Padding overhead at the reference size: 1.33× (Cholesky), 1.22× (Gram) (N07 §2.2). Two static equation
-  buckets would cut this to about 1.08×/1.05×; that is an optional lever kept only if measured faster (§10.4).
+  buckets would cut this to 1.15×/1.10× at the best split (`s = 10`; the WP3 pilot's exact ratios, 09_pilot.md
+  §10; the ≈1.08×/1.05× first quoted here was an underestimate); that is an optional lever kept only if
+  measured faster (§10.4), and pilot decision 11 did not adopt it.
 
 ### 2.4 Static configuration (`engines/mcmc/config.py`, JAX-free)
 
@@ -551,7 +558,11 @@ class EqOut:         e: f64[n, T_pad]; log_lam: f64[n, T_pad]       # equation-p
 class SweepCtx:      data: EngineData; prior: PriorArrays; cache: FitCache; eq_out: EqOut | Empty
 ```
 
-### 2.10 Contract additions made during the WP1 freeze (owner sign-off pending; §13 rule 2)
+### 2.10 Contract additions made during the WP1 freeze (§13 rule 2)
+
+*Sign-off (closed at the Phase 2 closeout, 2026-10-23).* This heading first read "owner sign-off pending". No
+separate sign-off was recorded; the contract below shipped as frozen here, with the Stage 1, 2 and 4, WP25 and
+Phase 2 closeout amendments that follow, and Phase 2 closed on it (SPEC §13 Phase 2 status).
 
 Draw containers (`state.py`). §3, §5.3 and §7.2 use these types without defining them:
 
@@ -616,7 +627,7 @@ is the plug-in at `λ_i = exp(b_μ)` (RW: `exp(m_0)`) and says so in a `vol_mean
 importance-sampling SV-t oracle (4 observations, max |z| ≈ 1.8): stochvol 3.2.1's Student-t sampler does not
 target the standardized-t SV posterior (`tests/parity/SV_PARAMETRIZATION.md` §3.2), so the `stochvol_v_t5` row
 stays a strict xfail (`raises=OracleDeviation`) until a fixture from stochvol ≥ 3.2.5 (ideally 3.2.9) is built.
-(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it. (3) WP23 review: backtest cache keys of `uses_fit_seed` models carry `"seeding": "fit_seed-v1"` (analytic keys stay the Phase 1 keys), so scores cached before the per-origin fit seeds are never served; `warm_start=True` requires strictly increasing origins (a warm start from a later origin would carry later data into an earlier fit, R9). (4) Known limitation, not changed here: the SPEC §7 RB log predictive density for h > 1 conditions on the simulated path to T + h − 1; for outcomes far in a predictive's tail its weights collapse onto one draw, the estimate is biased low by up to tens of nats and the delta-method MCSE saturates near 1 (Clark–Ravazzolo crisis origins at h ≥ 4). The replication report flags such cells; a path-integrated estimator is an open SPEC-level decision. (Superseded 2026-10-23: D-34 adds it as an opt-in, `lpd_method="integrated"`, with the SPEC §7 default unchanged.)
+(2) bayesianVARs parity stays deferred (no gfortran); the exact system-wide Gibbs oracle replaces it. (SPEC §13 was amended to match on 2026-10-23: the oracle is the Phase 2 reduced-form criterion, and bayesianVARs parity, after the probes P1–P5, is a Phase 3 exit criterion; §9.9, §9.10, WP21 and the exit-criteria map carry the same note.) (3) WP23 review: backtest cache keys of `uses_fit_seed` models carry `"seeding": "fit_seed-v1"` (analytic keys stay the Phase 1 keys), so scores cached before the per-origin fit seeds are never served; `warm_start=True` requires strictly increasing origins (a warm start from a later origin would carry later data into an earlier fit, R9). (4) Known limitation, not changed here: the SPEC §7 RB log predictive density for h > 1 conditions on the simulated path to T + h − 1; for outcomes far in a predictive's tail its weights collapse onto one draw, the estimate is biased low by up to tens of nats and the delta-method MCSE saturates near 1 (Clark–Ravazzolo crisis origins at h ≥ 4). The replication report flags such cells; a path-integrated estimator is an open SPEC-level decision. (Superseded 2026-10-23: D-34 adds it as an opt-in, `lpd_method="integrated"`, with the SPEC §7 default unchanged.)
 
 **WP25 amendments (2026-10-22; SOC/SUR dummy rows on the MCMC engine, N05 §7.7, N04 §3.1):**
 (1) Contract: `MeanStatic.n_dummy: int = 0` (the row count `m`, shape-defining; `> 0` forbids the
@@ -650,6 +661,39 @@ whitened rows instead of the Jacobi-scaled Cholesky of the formed `K_a` (§3.7.1
 eigenvalues 14.8 and 1.9e17) and a zero pivot; the QR draw matches the exact conditional there to
 1.6e-8 sd and agrees with the Cholesky draw to ≤ 3e-14 (sd units and relative) on ordinary states.
 The test prior's `h` tail is unchanged.
+(7) Numerics (queue item 7, `f60d736` and `4fc0162`; recorded here at the Phase 2 closeout): the RW AWOL draw
+factors `Q̃ = σ²Q` as a path-graph Laplacian plus a diagonal with the pivots carried as their excess over the
+next edge, in three scans (§3.7.4; D-5 Notes; NOTES §E 17). It removes the σ → 0 crash of the Clark–Ravazzolo
+ordering stage; every non-RW composition stays bitwise unchanged.
+
+**Phase 2 closeout amendments (2026-10-23).** From the design audit of `888f620`: its P0 and P1 documentation
+items, the CI compilation-cache fix and the two missing contract rows. Each change is recorded where it applies;
+this list is the index.
+
+1. SPEC v2.2: §13 Phase 2 status per exit criterion; the reduced-form parity criterion is the exact system-wide
+   Gibbs oracle, and bayesianVARs parity moves to the Phase 3 exit; Q12 executed (§4.2 settled protocols, §8
+   AWOL attribution and the reproducibility caveat); §2.2, §4.4, §4.5, §5.4, §5.6, §7, §9.1–§9.3, §9.5, §10.1,
+   §10.3, §10.4, §10.6, §11, §12 and §14 brought in line with the code, and the features the audit found
+   missing marked as not implemented. Stage 4 amendment (2), §9.9, §9.10, WP21 and the exit-criteria map now
+   agree with SPEC.
+2. Register: the D-5 and D-14 Notes columns.
+3. §2.3 and §10.4 two-bucket ratios, §10.3 exact-correction line (pilot decisions 2 and 11).
+4. §5.4: the SV cold start as implemented (pilot decision 4).
+5. §9.2 `hold_frozen`; §9.3 item 4 and the WP14 tests (bitwise or to rounding, as tested); §9.4 tiers as run;
+   §9.7 M2 and M7 catch tiers; §9.9 fixture versions and the bayesianVARs replacement.
+6. §9.10: cadence as run, the CI compilation cache (diagnosis, decision, residual misses), the PR-tier budget,
+   the weekly validation record and the concurrency group.
+7. §11.1: the SOC/SUR rejection rule is superseded by WP25.
+8. WP2 acceptance (the Phase 1 test edits of `ed502d4`), WP10 timing result, WP17 contract
+   coverage, WP21 as closed, WP24 acceptance as amended (x86 report, PR-tier budget).
+9. Code: `engines/analytic.py` (listed "unchanged" in §1.2) gains `attrs["ordering"]` in
+   `AnalyticFit.forecast` (SPEC R8, §7; WP17 amendment); the docstrings of `rai_bvar.set_cpu_devices` (sharded
+   draws equal the one-device draws only to rounding, §5.2) and `engines/mcmc/_blas.py` (the largest BENCH-P2
+   factor is the 100 × 100 structural precision, not 81 × 81) are corrected.
+10. Open question Q14 (§12.2): the default convergence policy for SV fits (pilot decision 6). Resolved by the owner on
+    2026-10-24: D-35 (SV compositions default to 4 × 10,000 kept draws and warn below it).
+11. Repository hygiene: `docs/.DS_Store` (committed in `3802295`) is removed from the repository, and `.DS_Store`
+    is in `.gitignore`.
 
 ## 3. Block protocols (`engines/mcmc/protocols.py`)
 
@@ -1303,6 +1347,17 @@ jitted functions.
 | SV (RW) | `h ≡ log(Σ_t m_t ẽ_t²/T_eff)`; `σ_i = √B_σ·exp(N(0, 0.25²))` |
 | outliers / t | `o ≡ 1`, `p` = prior mean; `τ ≡ 1`, `ν` = grid median |
 
+**Amendment (WP3 pilot decision 4, as implemented in `components/vol/sv.py` `SVCore.init`; recorded at the
+Phase 2 closeout, 2026-10-23).** The SV rows above are not the final state. With `h ≡ μ_i` and a rejected first
+exact `h` step, `C_T = 0`, after which σ = 0 is accepted and absorbing (3–6% of chains with OCSN-10, 34–59% with
+KSC-7; 09_pilot.md §3.1). The cold start therefore (1) sets the level `ℓ_i = log(mean_t (ẽ_t² + c_i))` over
+the real rows (`y*` of D-2; `b_μ`, or `m₀` for RW, when no row is observed); (2) sets `μ_i = ℓ_i + N(0, 0.5²)`
+and `φ_i` = prior mean `2a_φ/(a_φ + b_φ) − 1` (AR; RW: no `μ`, `φ`, level `ℓ_i`), and `σ_i = σ̄·exp(N(0, 0.25²))`
+with `σ̄ = √B_σ` for the `ScaledChi2` prior and `σ̄ = √(C₀/(c₀ + 1))`, the IG mode, for `InvGamma`;
+(3) draws the indicators at `h ≡` level; and (4) draws `h` once from the AWOL conditional given those
+indicators (the auxiliary-model draw, accepted without an MH step), so `C_T > 0` almost surely. Keys:
+`Sub.S` indicators, `Sub.H` AWOL normals, `Sub.NC_MS` the two jitter normals.
+
 Exact mode can mix slowly from crude starts when `c/λ` is large (N01 §7.2); with `c_rel = 1e-12` this regime does
 not arise, and the longest-rejection-run warning (§8.3) reports it if it does.
 
@@ -1595,7 +1650,8 @@ Given the draw, the path up to `T+h−1` and the drawn `λ_{T+h}` (including `o_
 SPEC §7 invariant 1 holds (conditionally on the drawn transitory scales, as SPEC §6.1 allows). Outputs go into the
 unchanged `ForecastResult.from_arrays` with `paths_level = data.inverse_paths(paths)`; attrs as the analytic
 engine (`model`, `spec`, `spec_hash`, `tcodes`, `seed`, `converged`, `warnings`, version) plus `engine="mcmc"`,
-`ordering`, `mixture`, `exact`, `n_chains`, and §5.6 metadata. Keys come from `(fseed, c, d)`, so recomputing
+`ordering` (since the Phase 2 closeout the analytic engine writes `ordering` too, §2.10), `mixture`, `exact`,
+`n_chains`, and §5.6 metadata. Keys come from `(fseed, c, d)`, so recomputing
 moments reproduces the same `o_{T+h}`, `τ_{T+h}` and `ε` (N03 §5.3 requirement 1).
 
 ### 7.3 LPD (D-20; fixes E12)
@@ -1722,9 +1778,13 @@ Tail ESS is reported, not gated. Acceptance rates never gate (E21). Single-chain
 R-hat cannot see between-chain disagreement), consistent with the Phase 1 MH rule. The flag goes into forecast
 attrs `converged`, so the backtest score `converged` and `compare()`'s "≥ 95% of origins" rule (SPEC §9.5) work
 unchanged. Cost (Stage 2 amendment, measured): about 1 s CPU for flag, table and warnings at n = 20 SV-O-t
-(392 quantities) and the default 4 × 2000 draws; about 7 s at 4 × 10,000 draws, split between the rank
+(392 quantities) and 4 × 2000 draws (the default before D-35); about 7 s at 4 × 10,000 draws, split between the rank
 normalisation (two argsorts and a sort per quantity, ~40%) and the five FFT-based ESS per quantity (~25–40%). Each quantity is evaluated once per fit (content-addressed memo); a
 memoised value equals a recomputation to rounding (the FFT's last bits depend on the batch it ran in).
+
+With the pre-D-35 default of 4 × 2,000 kept draws this flag was routinely `False` for SV fits (Q14, §12.2). D-35
+(2026-10-24) makes 4 × 10,000 the default of SV compositions and adds a warning below it (§8.3); the flag itself is
+unchanged and can still be `False` at 4 × 10,000 (BENCH-P2: 4 of 101 primary quantities).
 
 ### 8.3 Warnings (`fit.warnings`, copied into forecast attrs, aggregated by the backtest)
 
@@ -1733,6 +1793,7 @@ memoised value equals a recomputation to rounding (the FFT's last bits depend on
 | primary R-hat or ESS fails | five worst `(quantity, R-hat, ESS)`; "increase draws, burn or thin" |
 | secondary: > 5% of `a_ij` with R-hat > 1.01 | fraction and worst three (informational) |
 | `chains == 1` | split R-hat cannot detect between-chain disagreement |
+| SV composition with fewer than 10,000 kept draws per chain (D-35; resolution-step input `sv_budget`, so `BVAR.fit` only) | the budget against the SV default, the Q14 evidence (4 × 2,000: README example 0 of 11 origins; CR `SV(rw)` 68% at 4 × 5,000, 106/106 at 4 × 20,000; BENCH-P2 4 of 101 at 4 × 10,000); "raise the budget with `mcmc=MCMCSettings(draws=10_000)` or more, or leave draws unset" |
 | exact-`h` acceptance < 0.5, or longest rejection run > 50 sweeps, any equation | mixture-correction mixing (N01 §10.2): acceptance alone is not enough |
 | NC fold fraction > 1% | near-homoskedastic equation; stochvol/bayesianVARs differ there (D-7) |
 | ν posterior mass ≥ 0.5 at the grid bound 40 | "near-Gaussian; SV may suffice" (report only; mass at 3 is normal, N03 §6) |
@@ -1826,7 +1887,12 @@ COMPOSITIONS: tuple[str, ...]; BLOCK_CONFIGS: tuple[str, ...]
 ```
 
 Block-level configurations (one block live, the others held at prior draws by identity kernels injected through
-`_overrides`; they localise failures, N07 §13.2):
+`_overrides`; they localise failures, N07 §13.2). **As implemented** (`validation/joint.py`, a documented
+deviation recorded at the Phase 2 closeout, 2026-10-23): the production sweep runs and every leaf outside `live`
+is then restored to its pre-sweep value (`hold_frozen`). This is an exact kernel for the live blocks given the
+frozen ones whenever every frozen block runs after every live block within the sweep (vol after the equation
+step; the persistent core after the transitory steps; `a` and vol after CCCM). A frozen block that runs before a
+live one is held by an identity override of its named internal instead (`contemp_only`: `cccm_core`).
 
 | Config | Live | Data | Exact |
 | :--- | :--- | :--- | :--- |
@@ -1873,6 +1939,16 @@ nightly `n = 3`, `p = 2`, `T_eff = 50`, fixed stored presample.
    invariants (§4.8) including the write-set tree diff; zero recompiles across windows of one bucket; failure path
    (non-PD prior injected at sweep 7 → `MCMCNumericalError` with block, equation, iteration 7 and replay
    diagnostics); accumulators zero after burn-in; uint32 counter dtypes.
+   **As implemented** (Stage 2 amendment 1; recorded here at the Phase 2 closeout, 2026-10-23): with the WP14
+   toy kernels, bitwise across chunk size and burn piece size, thin with aligned sweeps, the exact final state,
+   fused vs unfused plans, `vmap` vs a sequential loop, and chain prefixes and `shard_map` with
+   `chains="map"`; `vmap` chain prefixes and `shard_map` with `chains="vmap"` to `rtol 1e-12`
+   (`tests/mcmc/runner/test_chunking.py`, `test_sweep.py`, `test_devices_bitwise.py`). With the production
+   kernels: chain prefixes bitwise with `chains="map"` (`structural_sv`; `structural_sv_outliers_t` in the slow
+   tier), and to `rtol 1e-9` on short runs with `chains="vmap"` (`structural_sv`, `reduced_sv`;
+   `structural_sv_outliers_t` in the slow tier) and under `shard_map` (4 devices, `structural_sv`), because XLA
+   vectorises the SV and CCCM reductions differently for another batch size (§5.2, §5.6). Chunk, burn-piece and
+   fused-vs-unfused invariance have no production-kernel test.
 
 ### 9.4 Tier B: block-conditional SBC and invariance (every PR)
 
@@ -1880,6 +1956,11 @@ Block-conditional SBC (N06 §5.2): draw `(θ̃, ỹ)` from the joint, draw `L = 
 given `θ̃_−b`, rank `θ̃_b` and the block log-likelihood; `N = 200`; γ statistic with exact p-values; Bonferroni,
 α = 1e-3; Gandy–Scott sequential (k = 3, Δ = 4, fresh keys per stage). MH and ASIS blocks: one-block invariance
 (N06 §5.3) with `L = 20` kernel applications.
+
+**As run** (recorded at the Phase 2 closeout, 2026-10-23): per PR, Tier B runs block by block in the kernel
+work packages' suites (WP10–WP13: `test_block_sbc_*`, `test_block_conditional_sbc_of_lambda` and the block
+Geweke tests in `tests/mcmc/blocks/`). The composition-level Tier B (`tests/sbc/test_block_tier.py`) is in the
+weekly slow tier, not per PR.
 
 ### 9.5 Tier G: Geweke joint-distribution tests
 
@@ -1977,12 +2058,12 @@ fails the per-replication rule (98.4%) with both other gates clean (§9.5 row 18
 | Mutant | Injected through | Expected catcher |
 | :--- | :--- | :--- |
 | M1 CCM-2019 triangular step instead of CTA | `cccm_core` | U (density ratio), B, G (N06 §7: z = 15–140) |
-| M2 stale indicators (Primiceri Alg. 1: `s` carried across sweeps, drawn after `h`) | `vol` slot (mutant kernel in `tests/mutation/mutants.py`) | G / divergence (N02 §3.3); tier to confirm |
+| M2 stale indicators (Primiceri Alg. 1: `s` carried across sweeps, drawn after `h`) | `vol` slot (mutant kernel in `tests/mutation/mutants.py`) | G / divergence (N02 §3.3); **confirmed G**: G-small max \|z\| 702 at the log-likelihood vs control 2.48, run with `exact=False` (`mutants.py` `EVIDENCE`) |
 | M3 simulator draws fresh latents | `JointSpec(fresh_latents=True)` | G (Geweke error 2) |
 | M4 τ conditional with dof `ν` instead of `ν + 1` | `tau_conditional` | U, G |
 | M5 `B_σ` × 2 in the sampler only | sampler prior arrays | G |
 | M6 NC `|σ|` without flipping `h̃` | `nc_fold` | G (N02 T16: z = 16–19) |
-| M7 uncorrected NC move in exact mode | `nc_accept` | G (N01 §10.3 toy: z = −12.9); tier to confirm |
+| M7 uncorrected NC move in exact mode | `nc_accept` | G (N01 §10.3 toy: z = −12.9); **confirmed U and G**: U 2.87 vs control 0; G only with the deliberately coarse one-component mixture table (`COARSE1`, through `mixture_table`; max \|z\| 77.6 vs 2.28), because with OCSN-10 the correction is too small to see (WP3 pilot §3.4; `mutants.py` `EVIDENCE`) |
 | M8 D3 centring dropped (`γ_i = δ_i`) | `structural_gamma` | G (`a·γ` cross moment), S (`‖Γ − AM′‖²`) |
 | M9 outlier pmf without `1/k` | `outlier_logits` | U, G (N03: z ≈ 392) |
 | M10 `b_p + T` in the `p` update | `p_conditional` | U, G |
@@ -2012,7 +2093,10 @@ The suite records which tier caught each mutant; a mutant caught by none blocks 
 ### 9.9 Tier P: parity (fixtures generated offline by `tools/make_r_fixtures.R`; fixes E11)
 
 **stochvol 3.2.9**, block level through the production runner with `ZeroMean`, `n = 1`, data generated in NumPy
-and committed as CSV without zeros: (i) `T = 300, μ = −1, φ = 0.95, σ = 0.2`; (ii) `φ = 0.5, σ = 0.5`;
+and committed as CSV without zeros. (As built: the committed fixtures come from stochvol 3.2.1 under R 4.1.2,
+recorded in every fixture's `stochvol_version` and `stochvol_version_note` attributes; the SV-t run is
+replaced by an exact importance-sampling oracle until a fixture from stochvol ≥ 3.2.5 exists, §2.10 Stage 4
+amendment 1.) (i) `T = 300, μ = −1, φ = 0.95, σ = 0.2`; (ii) `φ = 0.5, σ = 0.5`;
 (iii) `φ = 0.99, σ = 0.1`; (iv) standardised AR(4) residuals of a FRED-QD growth series; (v) (i) with
 standardized-t errors, ν = 5. Each side is derived from one parameter set through the §6.3 formulas:
 
@@ -2028,7 +2112,9 @@ Compare 5/25/50/75/95% quantiles of `μ, φ, σ` (and `τ_t` at the three larges
 (stochvol takes `|σ|` without the flip, D-7).
 
 **bayesianVARs 0.1.8**, reduced form, through `fit_mcmc` with explicit arrays (`priors.reduced.explicit_reduced`).
-One parameter set: `π_j ~ N(m_j, diag v_π)`, intercept variance `s_c²`, `a_ij ~ N(0, v_a)`, and
+(Not run in Phase 2: bayesianVARs could not be installed, so the exact system-wide Gibbs oracle
+`bvars_swa_*` replaced it with the same parameter set and comparison, §2.10 Stage 4 amendment 2; SPEC §13 moved
+bayesianVARs parity, with the probes below, to the Phase 3 exit on 2026-10-23.) One parameter set: `π_j ~ N(m_j, diag v_π)`, intercept variance `s_c²`, `a_ij ~ N(0, v_a)`, and
 `SV(mu_prior=Normal(0.0, 1e4), phi_prior=Beta(20, 1.5), sigma2_prior=ScaledChi2(1.0), h0="stationary", offset=0.0,
 exact=False)`. The R call is derived from it:
 
@@ -2064,10 +2150,106 @@ test modules add `filterwarnings = "error:Explicitly requested dtype"` (x64 trun
 
 | Tier | Contents | When | Budget |
 | :--- | :--- | :--- | :--- |
-| PR | U, B, contract (MCMC compositions at `n = 2`, short chains), G-small (compositions 1–5, 7–10, 17, 18, 201–205, row 18 at the RW `h_0` prior `N(−1, 4)` and the block configs), A1, A2, A5 (`n = 3`), A6, stochvol parity (fixture read + our run), runner/plan/recompile/failure tests | every PR | ≈ 10–15 min with the persistent compilation cache |
-| Nightly | G-full (all rows, `exact=False` recorded), row 14's G-small at the RW `h_0` prior `N(−1, 4)`, S, A3, A4, A5 (`n = 20`), A7, bayesianVARs parity, ordering invariance MC tests | nightly | ≤ 3 h |
-| Weekly | M, SPEC §10.5 DGP rows relevant to Phase 2 (homoskedastic, SV, SV + outliers), ordering detection power (N08 §B5 item 5) | weekly | — |
-| Pre-release | BENCH-P2 (§10), Clark–Ravazzolo replication (N08 §C5 criteria 1–6) | release | — |
+| PR | U, B, contract (MCMC compositions at `n = 2`, short chains), G-small (compositions 1–5, 7–10, 17, 18, 201–205, row 18 at the RW `h_0` prior `N(−1, 4)` and the block configs), A1, A2, A5 (`n = 3`), A6, stochvol parity (fixture read + our run), runner/plan/recompile/failure tests | every PR | cold ≤ 90 min per job; warm recorded per run (amendment below; first stated as ≈ 10–15 min with the persistent compilation cache) |
+| Nightly | G-full (all rows, `exact=False` recorded), row 14's G-small at the RW `h_0` prior `N(−1, 4)`, S, A3, A4, A5 (`n = 20`), A7, bayesianVARs parity (moved to the Phase 3 exit; in Phase 2 the long runs against the system-wide Gibbs oracle, §9.9), ordering invariance MC tests | weekly (amendment below) | ≤ 3 h (CI job limit 6 h) |
+| Weekly | M, SPEC §10.5 DGP rows relevant to Phase 2 (homoskedastic, SV, SV + outliers; **not implemented** at the Phase 2 closeout, and SPEC §13 places DGP verdict tests at the Phase 3 exit), ordering detection power (N08 §B5 item 5) | weekly | — |
+| Pre-release | BENCH-P2 (§10), Clark–Ravazzolo replication (N08 §C5 criteria 1–6) | release (BENCH-P2: the manual CI bench job) | — |
+
+**Amendment (Phase 2 closeout, 2026-10-23): cadence and tiers as run.** `.github/workflows/ci.yml` runs the PR
+tier as the fast suite (`-m "not slow and not network and not bench"`, Python 3.12, 3.13 and 3.14 on
+`ubuntu-latest`) on every pull request and every push to `main`. The nightly and weekly tiers run **together,
+weekly**: one job (still named `nightly`) on Sundays at 03:17 UTC with `-m "(slow or network) and not bench"`,
+plus the macOS fast suite; the cron became weekly in `e3b8fa0`. The bench tier (`-m bench`, BENCH-P2 and the
+WP10 timing gate) runs only when dispatched by hand (bench = true). Two PR-row items run elsewhere, as their
+test modules document: the block configurations' G-small in `tests/geweke` is slow (their per-PR coverage is the
+block Geweke tests of the kernel suites, `tests/mcmc/blocks/`), and the composition-level Tier B is weekly
+(§9.4). The `pyproject.toml` marker descriptions still say "nightly".
+
+**Amendment (Phase 2 closeout, 2026-10-23): CI compilation cache.** *Diagnosis.* Through `888f620` no
+fast-suite job restored the persistent XLA cache: 21 of 21 jobs logged "Cache not found" (runs 39864205394,
+39866597126, 39907612654, 39941239235, 40015549161, 40019667165, 40020554571). The restore prefix
+`xla-<os>-py<ver>-<md5(model name)>-<uv.lock>-` was stable; three causes compounded. (1) Partition: 3 Pythons ×
+6 runner CPU models (AMD EPYC 7763, 9V74, 9V45; Intel Xeon 8370C, 8573C; one unidentified) gave 18 buckets, and
+no bucket repeated within a PR (PR #1: 9 jobs, 9 buckets). (2) Scope: an Actions cache is readable only from its
+own ref, the PR's base and the default branch; PR entries (`refs/pull/N/merge`) are invisible to other PRs, and
+`refs/heads/main` held no `xla` entry until run 40020554571 saved three. (3) Churn: every job saved 206–276 MiB
+whether or not it compiled anything (21 entries, 5199 MiB, against the 10 GB repository quota, which evicts the
+least recently used entries and expires entries unread for 7 days). *Decision* (ci.yml, steps "XLA cache key",
+"Restore XLA cache", "XLA cache size check", "XLA cache report" and "Save XLA cache" of the `test` and `nightly`
+jobs). Key: the bucket prefix `xla-<os>-py<ver>-<isa>-<uv.lock>-` (weekly job: `xla-slow-…-py3.12-…`) plus
+`<run_id>-<run_attempt>`; restore-keys is the prefix. `<isa>` is the md5 of the `/proc/cpuinfo` "model name" and
+"flags" lines: XLA:CPU compiles for the host instruction set, so an entry is never loaded on another ISA, and
+the model name alone would miss a host that exposes different features under the same model. Python stays in
+the key because jax 0.12.0.1 compresses entries with stdlib zstd on 3.14 and zlib on 3.12/3.13 while its cache
+key names "zlib" in both cases, so mixed payloads would fail to decompress. Save policy: save only when the run
+wrote new entries (a failed or cancelled run still saves). Size cap: a restored cache over 1 GiB is wiped first,
+because entries are never evicted (a cold fast suite writes about 0.25 GiB). Measurement: each fast-suite job
+writes the runner CPU, vCPU count, matched key, entries restored and written, and the wall time to the run
+summary. A hit loads the executable the same program compiles to and changes no result; no test or threshold
+changed. *Residual misses.* A job hits only if its own PR or `main` holds an entry for its (Python, ISA) bucket.
+With the observed runner mix (21 jobs: 6/5/4/2/2/2 per CPU model) the projected per-job hit rate after `k`
+main-scope runs (a merge push or the weekly run, one sample per Python bucket each) is 20%, 36%, 57%, 79% and
+89% for `k` = 1, 2, 4, 8 and 12; the PR tier's wall time is its slowest job, so a whole run is warm only if all
+three jobs hit (about 0.89³, or 70%, at `k` = 12). Other misses: an entry unread for 7 days expires; a `uv.lock`
+change resets every bucket; kernels a PR changes always recompile; a CPU model new to the pool starts cold. The
+new fingerprint resets `main` to `k` = 0 (the three entries saved at `888f620` do not match the new prefix).
+*Status:* the changed workflow has not run on GitHub yet (no push from the closeout session); the first PR run
+and the first `main` run after the merge give the first measurements. *Not adopted* (owner decisions): sharing
+buckets between 3.12 and 3.13 (both write zlib payloads; relies on JAX-internal codec behaviour), and
+`XLA_FLAGS=--xla_cpu_max_isa=AVX2` (expected to make entries portable across x86 runners; it does not, and was
+reverted after a brief adoption on 2026-10-24: amendment below).
+
+**Amendment (Phase 2 closeout, 2026-10-23): PR-tier budget.** The 10–15 min figure assumed a warm persistent
+cache and was never measured in CI, where every PR-tier job through `888f620` ran cold. Measured cold, per job
+on GitHub's x86-64 `ubuntu-latest` runner (pytest wall time, 4387–4666 tests, the seven runs from 39864205394 to
+40020554571, read from the job logs): 40–85 min for 20 of 21 jobs, median 63 min, plus one 141 min outlier
+(run 40015549161, Python 3.13). The CPU model dominates: EPYC 9V45 40–49 min, Xeon 8573C 58–62, EPYC 9V74 60–76,
+Xeon 8370C 76–80, EPYC 7763 67–85. The tier's wall time is its slowest of three jobs: 60–85 min per run (141 min
+once). Warm, projected (not measured): about one third of a job's cold time, from the local ratio on
+`tests/mcmc/runner` (405 s to 137 s, `0941b57`), so roughly 15–30 min per job, which misses 10–15 min on most
+runner classes. The measurement is the run summary's XLA cache block, which requires `main` to hold an entry
+for the job's (Python, ISA) bucket first; the first warm runs replace the projection. The budget is not a gate:
+no test leaves the PR tier to meet it. If warm runs miss, the levers are sharding (pytest-xdist, or one Python
+running the MCMC-heavy modules) or pinning `--xla_cpu_max_isa` (adopted 2026-10-24, but it is no lever: JAX
+keys entries on the runner's CPU features; amendment below).
+
+**Amendment (2026-10-24): AVX2 cap adopted, then reverted.** The owner approved `XLA_FLAGS=--xla_cpu_max_isa=AVX2`
+for the `test` and `nightly` jobs on the expectation that it would make cache entries portable across the x86
+runner pool, at the cost of AVX-512 code-generation coverage. The review below showed that the cap gives no
+caching benefit, so it was reverted before merging: the jobs compile for the host ISA again (AVX-512 coverage
+kept), and the cache buckets stay per CPU model. The analysis is kept for the record.
+What the cap does (XLA `d8679698`, the revision jax 0.12.0.1 pins; `xla/backends/cpu/codegen/cpu_features.cc`,
+`xla/backends/cpu/target_machine_options.cc`): XLA:CPU removes the host's AVX-512, AMX, AVX10.2 and APX features
+from the LLVM target, and on a host that has any of them (every pool model except the EPYC 7763) it also sets the
+target CPU to `haswell`; extensions that XLA does not order under an ISA level (GFNI, VAES, AVX-VNNI, vendor
+extensions) stay enabled. *Review finding (2026-10-24): the cap does not make cache entries portable.* The
+decision expected one cache bucket for every x86 runner. In jax 0.12.0.1 the persistent-cache key of an
+executable includes the CPU topology fingerprint (`jax._src.cache_key._hash_accelerator_config`), and XLA's CPU
+topology serialises the target machine it compiles for: triple, target CPU name and the host's whole `+`/`-`
+feature list after the cap's filtering (`xla/pjrt/plugin/xla_cpu/cpu_topology.cc`; `xla/pjrt/cpu/cpu_client.cc`
+builds it from `XLA_FLAGS`). The pool's models still differ in that list under the cap (GFNI, for one: the EPYC
+7763 lacks it; the 7763 also keeps its own target CPU, `znver3`), so JAX serves an entry only to a runner with the
+same target, whatever the Actions bucket; by the same mechanism a load across CPU models was never possible,
+with or without the cap. A single shared `avx2cap` bucket would therefore have gained no hits and accumulated every
+model's entries (about 0.25 GiB each) in one Actions entry, tripping the 1 GiB wipe and saving up to 1 GiB per job
+against the 10 GB quota. With no caching benefit left, the cap would only have made every runner compile for the
+same ISA level at the cost of AVX-512 coverage, so it was reverted: `<isa>` is the per-CPU md5 of the "model
+name" and "flags" lines, and the bucket count and the hit-rate arithmetic above apply. The run summary's XLA
+cache block prints the ISA bucket and `XLA_FLAGS`, and the weekly `meta.json` records `xla_flags` (both empty
+unless a job sets the flag).
+
+**Amendment (Phase 2 closeout, 2026-10-23): weekly validation record and concurrency.** The weekly job sets
+`RAI_BVAR_VALIDATION_RECORD=$RUNNER_TEMP/validation-record`; the tests append `geweke.jsonl`, `sbc.jsonl` and
+`mutation.jsonl` there (`tests/geweke/test_geweke_compositions.py`, `tests/sbc/test_sbc_compositions.py`,
+`tests/mutation/test_mutants.py`). A `meta.json` records the commit, ref, event, run URL and attempt, start
+time, marker expression (`TIER_MARKERS`, defined once), runner platform, CPU and logical CPUs, Python, and the
+`jax`/`jaxlib`/`numpy`/`scipy` versions; pytest adds `junit.xml`. The directory is uploaded with `if: always()`
+as the artifact `validation-record-<sha>-<attempt>`, kept 90 days. The test step has `timeout-minutes: 330`
+inside the job's 360, so a run near the 6 h limit still uploads every finished row. The record is committed
+from that artifact together with its `meta.json`. Concurrency: the group is now
+`${workflow}-${event_name}-${ref}`. Before, a push to `main` and the weekly schedule shared a group with
+`cancel-in-progress`, so a merge during the Sunday run cancelled it. A new push to a PR still cancels that PR's
+older run, and two manual dispatches on one ref still share a group, as before.
 
 ---
 
@@ -2110,10 +2292,16 @@ cost model was based on N07's heavily loaded machine and is superseded (E2).
 | packed Gram + gather | 1.1 |
 | batched Cholesky, two triangular solves, right-hand-side and residual GEMMs, normals | 1.9 |
 | SV indicators + AWOL | 1.5 |
-| exact correction (two extra `(T_pad, 10)` `logsumexp`s, with reuse) | 0.4 (pilot) |
+| exact correction (two extra `(T_pad, 10)` `logsumexp`s, with reuse) | 0.4 (pilot: ≈ 1) |
 | real centred/NC/ASIS steps over the stand-in | 0.3 (pilot) |
 | accumulators, status, `T_pad = 320` padding (+7% on `T`-linear kernels) | 0.4 |
 | **total** | **≈ 5.6** |
+
+**Pilot amendment (WP3, recorded at the Phase 2 closeout, 2026-10-23).** The WP3 pilot measured the exact
+correction at 0.7–1.2 ms of the full sweep (1.1 ms in isolation) instead of the 0.4 ms budgeted above, and a
+total of 6.3–6.7 ms per sweep under load 6–10 on the M1 Pro (09_pilot.md decision 2). The table keeps the
+original budget for the record. The measured BENCH-P2 sweep on the reference laptop is 3.90 ms (minimum of
+3 × 1000 sweeps, Apple M5 Max, `tests/bench/baseline.json`), inside the budget.
 
 11,000 sweeps ≈ 62 s, plus compile 1.5–2.8 s (0.37 s cached) and 2–3 s of host work: **≈ 67 s on one device**
 (margin ≈ 1.8×); ≈ 3.1 ms per sweep and ≈ 38 s with 4 devices. Other compositions: Linear × Constant (eigen)
@@ -2132,8 +2320,8 @@ SV(outliers) adds `K·T` logits per equation, about one indicator step.
 7. No recompiles (D-23) plus the persistent compilation cache (1.5–2.8 s → 0.37 s).
 8. State donation; asynchronous host copy of chunk `c` while chunk `c+1` runs.
 9. Pilot-measured options (WP3): `philox4x32` (≈4× faster uniforms; would become a spec field, so not a Phase 2
-   default), SYRK Gram, scan `unroll`, two static equation buckets (padding 1.33×/1.22× → ≈1.08×/1.05×), ν-sampler
-   alternatives.
+   default), SYRK Gram, scan `unroll`, two static equation buckets (padding 1.33×/1.22× → 1.15×/1.10×, pilot §10;
+   not adopted, pilot decision 11), ν-sampler alternatives.
 10. Not pursued: associative-scan SV (slower on CPU), `tridiagonal_solve` perturbation (slower), CG samplers
     (inexact), float32 (R4).
 
@@ -2201,7 +2389,8 @@ MCMC-only rules; all errors are raised at construction (SPEC §4.5). There is **
 | 9 | `reduced` × `Constant("iw")` | `ValueError`: "Constant('iw') is the conjugate NIW prior; with form='reduced' use 'iw_equivalent' (Chan 2022) or 'ig'" |
 
 MCMC-only rules: `outliers="lenza-primiceri"` → `NotImplementedError` (Phase 3), with `SV(outliers=True)` also
-"double treatment"; `soc`/`sur` not `None` → `NotImplementedError` (Phase 3 or stretch WP25); `hierarchy="mh"` →
+"double treatment"; `soc`/`sur` not `None` → `NotImplementedError` (Phase 3 or stretch WP25; **superseded**: WP25
+delivered SOC/SUR on the MCMC engine on 2026-10-22, D-21, so `api.py` no longer rejects them); `hierarchy="mh"` →
 `NotImplementedError` (Phase 3); `form="structural"`, `cross ≠ 1`, `hierarchy="eb"`, `"psi"` in the free set →
 `ValueError`; `contemp ≠ 1` with `form="conjugate"` → `ValueError` (Minnesota validation, like `cross`);
 `config.validate_composition` (JAX-free, §3.8). `mcmc` given for an analytic composition is normalised to `None`
@@ -2213,7 +2402,7 @@ MCMC-only rules: `outliers="lenza-primiceri"` → `NotImplementedError` (Phase 3
 @dataclass(frozen=True)
 class MCMCSettings:                 # part of the spec: results depend on every field
     chains: int = 4
-    draws: int = 2000               # kept draws per chain
+    draws: int | None = None        # kept draws per chain; None → 10,000 with SV, else 2,000 (D-35)
     burn: int = 1000                # exact number of burn-in sweeps (never rounded)
     thin: int = 1
     warm_burn: int | None = None    # None → max(250, burn // 4); warm starts only
@@ -2243,8 +2432,9 @@ class FitPlan:                      # in-loop forecasting (§5.8)
     seed: int = 0
 ```
 
-`BVAR.mcmc: MCMCSettings | None = None`; it resolves to `MCMCSettings()` for MCMC compositions and is stored
-resolved, so the spec contains it.
+`BVAR.mcmc: MCMCSettings | None = None`; it resolves to `MCMCSettings()` for MCMC compositions, with an unset `draws`
+resolved per composition (`MCMCSettings.with_default_draws`, D-35: 10,000 kept draws per chain with `SV`, 2,000
+with `Constant`), and is stored resolved, so the spec contains it.
 
 ### 11.3 `fit` and `MCMCFit`
 
@@ -2371,11 +2561,11 @@ class MCMCFit:
 | R14 | Geweke power against M2/M7 unverified (N06 §12 item 6) | weak guard on step order and ASIS | structural enforcement (`s` local); quadrature toys; catch tiers recorded |
 | R15 | Eigen path on near-singular `G̃` (many `g ≈ 0`) | rounding differences vs Cholesky | exact algebra; deterministic mean/covariance test at 1e-12; `const_path="cholesky"` escape hatch |
 | R16 | Phase 3 CommonSV needs a JAX NIW draw (Phase 1 engine is NumPy); Phase 4 `bartz` may not vmap and has float32 leaves | rewrite pressure | `GlobalStep`, coupling channel, `Batching.MAP`, `float32_leaves`, in-loop forecast hook exist now |
-| R17 | Host storage at 4 × 10,000 draws | memory pressure | `store_max`, latent moments, memmap, storage plan raises early |
+| R17 | Host storage at 4 × 10,000 draws (the SV default since D-35) | memory pressure | `store_max`, latent moments, memmap, storage plan raises early |
 
 ### 12.2 Open questions for the orchestrator
 
-**Decisions (2026-10-22):** every recommendation below is accepted as stated. Q2: the target is defined as in §10.1. Q12: the SPEC owner updates SPEC §4.2/§8 in the Phase 2 PR.
+**Decisions (2026-10-22):** every recommendation below is accepted as stated. Q2: the target is defined as in §10.1. Q12: the SPEC owner updates SPEC §4.2/§8 in the Phase 2 PR. (Q12 was executed at the Phase 2 closeout, 2026-10-23, in SPEC v2.2. Q14, added then, was resolved by the owner on 2026-10-24 as recommended: D-35.)
 
 | ID | Question | Recommendation |
 | :--- | :--- | :--- |
@@ -2392,6 +2582,51 @@ class MCMCFit:
 | Q11 | `Constant` with transitory components user-facing | engine supports it (test vehicle); keep it engine-level in Phase 2 |
 | Q12 | Replace the SPEC §4.2 interface sketch by §3 of this design; correct SPEC §8's "all without a loop" attribution (N07 §8.3) | yes, by the SPEC owner |
 | Q13 | Pull `AsymmetricConjugate` (Chan 2022) into Phase 2 as an analytic composition, since `structural_nig.py` exists | user-facing prior and engine rule in Phase 3; the closed form ships in Phase 2 |
+| Q14 | Default convergence policy for SV fits (WP3 pilot decision 6, escalated; added at the Phase 2 closeout, 2026-10-23) | **Resolved (owner, 2026-10-24): D-35.** Option 2 below as a composition-dependent default (SV compositions: 4 chains × 10,000 kept draws; `Constant`: 4 × 2,000, unchanged) plus a fit warning for SV fits below it; options 3–5 not adopted, the gate unchanged. Owners of the change: WP2 (settings), WP15 (monitors), WP18 |
+
+**Q14 in detail** (the evidence as escalated; "the defaults" are the pre-D-35 ones). With the defaults (`MCMCSettings`: 4 chains × 2,000 kept draws, `rhat_max = 1.01`,
+`ess_min = 400`) and the SV parameters `φ_i`, `σ_i` in the primary monitor set (D-33, §8.1), `converged = False`
+is routine for SV fits, and `compare()` then returns `inconclusive` for any SV comparison (its gate needs
+converged fits at ≥ 95% of origins, SPEC §9.5). Evidence:
+
+- WP3 pilot (09_pilot.md decision 6, §3.3; M1 Pro, loaded): `φ` and `σ` have ESS ≈ 22–28 per 1,000 sweeps per
+  chain, so 4 × 2,000 gives bulk ESS ≈ 200 < 400, and split R-hat reaches 1.03–1.06.
+- BENCH-P2 at 4 × 10,000 (`tests/bench/baseline.json`, `d490730`): `converged = False` in 6 of 6 runs, with 4 of
+  101 primary quantities missing R-hat < 1.01 (worst `σ` 1.016; the minimum `σ` ESS is 504).
+- Clark–Ravazzolo (`benchmarks/reports/clark_ravazzolo_preregistration.md`): `SV(rw)` (identity ordering)
+  converges at 72 of 106 origins at 4 × 5,000 and at 106 of 106 at 4 × 20,000, the budget the acceptance run
+  uses.
+- The README quick start (this closeout; FRED-QD 2026-09 small set, `n = 3`, `p = 4`, `Rolling(120)`, 11 origins
+  2016Q1–2026Q1 every 4 quarters, structural `Constant("ig")` vs `SV(outliers=True)`; Apple M5 Max): at the
+  default 4 × 2,000 the SV arm converges at 0 of 11 origins (4–8 of 16 primary quantities fail per origin; the
+  worst is `σ`, the log-likelihood or `h_T`, R-hat 1.019–1.047, ESS 104–225), so both horizons are
+  `inconclusive` although ΔLPD is +85.2 (MCSE 1.1) at h = 1 and +20.5 (1.5) at h = 4; at 4 × 10,000 it
+  converges at 10 of 11 (h = 1 `inconclusive` at 91%, h = 4 `better`); at 4 × 20,000 at 11 of 11 (`better` at
+  both).
+
+Options (not exclusive):
+
+1. **Keep the defaults and the gate, and document them.** SV fits need more draws (4 × 20,000 at these sizes);
+   `verdict(min_converged=...)` and `MCMCSettings` already let a user relax or raise them. No code change, no hash
+   change; default SV verdicts stay `inconclusive`.
+2. **Raise the default draws for SV compositions** (a composition-dependent default, or a higher global one).
+   `MCMCSettings` is part of the spec, so the spec hash and every backtest cache key of an MCMC model with
+   default settings change, and default fits cost proportionally more; even 4 × 10,000 does not pass BENCH-P2's
+   gate.
+3. **Demote `φ_i` and `σ_i` to the secondary set** (amend D-33). The flag then gates on the log-likelihood,
+   `B_own1`, `μ_i` and `h_T`; the README example shows the log-likelihood and `h_T` also failing at the default
+   draws, so this alone may not suffice.
+4. **Gate the SV parameters on bulk ESS only, or with a looser R-hat threshold** than the SPEC §10.6 default of
+   1.01. A SPEC-level change of the convergence definition for those quantities.
+5. **Sample until the gate passes**, up to a cap (an adaptive number of kept draws). The draws then depend on a
+   stopping rule; it needs a design for reproducibility, storage and cache keys.
+
+**Decision (owner, 2026-10-24): option 2, composition-dependent, with a warning (D-35).** `MCMCSettings.draws=None`
+resolves to 10,000 kept draws per chain for SV compositions and to 2,000 for `Constant` volatility, so only SV
+models whose settings leave `draws` unset (the default, or e.g. `MCMCSettings(seed=1)`) change spec hash and
+backtest cache keys (an explicit `MCMCSettings(draws=2000)` reproduces the old ones); an SV fit below 10,000 kept draws per chain warns with this evidence and the remedy. The
+README example's SV arm, which converged at 10 of 11 origins at 4 × 10,000, keeps its explicit 4 × 20,000 for the
+verdict.
 
 ---
 
@@ -2498,7 +2733,16 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
   analytic; hypothesis round trip `from_spec(m.spec()) == m` with stable hashes; settings validation; `import
   rai_bvar` still imports no JAX.
 - **Acceptance**: all Phase 1 tests green unchanged; new tests green; `fit` of an MCMC composition raises a clear
-  "engine not yet available" error until WP18 lands.
+  "engine not yet available" error until WP18 lands. **Amendment (recorded at the Phase 2 closeout, 2026-10-23):**
+  two Phase 1 tests in `tests/unit/test_api.py` were changed in `ed502d4`, as intended by D-19 and E1 (recorded
+  then only in the commit message). `test_non_conjugate_forms_need_the_mcmc_engine` (which expected
+  `NotImplementedError`) became `test_non_conjugate_forms_resolve_to_the_mcmc_engine`: structural and reduced
+  forms resolve to the MCMC engine, reduced × `Constant("iw")` raises `ValueError`, and `hierarchy="mh"` still
+  raises `NotImplementedError`. `test_conjugate_form_requires_the_inverse_wishart_covariance` now builds the
+  conjugate form explicitly, because `BVAR(vol=Constant("ig"))` resolves to the structural form under `auto`.
+  No other Phase 2 commit changes a Phase 1 test file (`git log bce0db3..888f620` over the 35 files under
+  `tests/` at `bce0db3`, the last Phase 1 commit, lists only `ed502d4`). `bce0db3` itself, which makes the
+  test-side Beta-by-mode-and-sd oracle helper solve by bracketing instead of `fsolve`, is part of Phase 1.
 
 #### WP3 — Pilot measurements (clean-room prototypes)
 
@@ -2673,6 +2917,17 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
   block Geweke `equation_only`, `contemp_only`.
 - **Acceptance**: U and B tiers green for these blocks; weighted-path time at the reference shape within 25% of the
   WP3 pilot number.
+- **Timing result (Phase 2 closeout, 2026-10-23)**: met under both readings. The gate is
+  `tests/mcmc/blocks/test_linear_fastpaths.py::test_weighted_path_timing_reference_shape` (markers `bench` and
+  `slow`, so it runs only in the manual bench job or by hand). It times our weighted path (packed Gram, Jacobi
+  Cholesky, two solves and the residual; `n = 20`, `p = 4`, `T = 300 → T_pad = 320`, `q = 100`, 4 chains = 80
+  lanes, float64) against the pilot's own one-bucket prototype (`pilot_common.mean_draw`) in the same process,
+  interleaved, as the minimum over 10 rounds of 50 draws, and asserts `ours ≤ 1.25 × pilot`; it does not gate on
+  the pilot's absolute 3.30 ms (09_pilot.md §10, measured on a loaded M1 Pro). Three runs on 888f620 (Apple M5
+  Max, 18 cores, 64 GB, Darwin 25.6.0, `jax`/`jaxlib` 0.12.0.1, NumPy 2.5.4, one CPU device; 1-minute load average
+  2.56–3.48 with no other Python or pytest work running), ms per mean draw at 80 lanes, ours vs the prototype:
+  2.940 vs 2.939 (ratio 1.000), 3.079 vs 3.020 (1.019), 2.971 vs 2.944 (1.009). All three are also below the
+  absolute 3.30 ms. No idle or x86 run.
 
 #### WP11 — Reduced form (CCCM 2022)
 
@@ -2758,7 +3013,9 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
                init: ChainState | None = None) -> MCMCFit
   ```
 - **Tests**: §9.3 item 4 (bitwise invariance across chunk, burn piece size, thin, chain prefix, `vmap` vs loop,
-  fused vs unfused; `shard_map` in a subprocess); plan invariants for every composition (§4.8) with the write-set
+  fused vs unfused; `shard_map` in a subprocess; as amended there: chain prefixes under `chains="vmap"` and
+  `shard_map` are equal to rounding, not bitwise, and the bitwise cases are tested with the toy kernels, plus
+  the production chain prefix with `chains="map"`); plan invariants for every composition (§4.8) with the write-set
   tree diff; zero recompiles across windows of one bucket; failure injected at sweep 7 raises with block, equation,
   iteration and replay diagnostics; accumulators zero after burn-in; `snap` equals the state after exactly
   `burn + draws·thin` sweeps; storage plan raises over budget; memmap store equals the in-memory store; warm-start
@@ -2841,6 +3098,16 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
   `recursive_irf` equals direct `Φ_h A⁻¹ Λ^{½}`; date errors of `draw_parameters`; in-loop forecast (FitPlan)
   equals post-hoc (1e-12); stretch: RB-transitory LPD vs Monte Carlo (N03 §5.3).
 - **Acceptance**: Phase 1 contract and LPD tests unchanged and green; MCMC contract tests green.
+- **Amendment (Phase 2 closeout, 2026-10-23): contract coverage.** The MCMC contract compositions
+  (`tests/mcmc/forecast/mcmc_fits.py` `COMPOSITIONS`) lacked the two reduced-form Student-t compositions; they gain
+  `"reduced-SV(t)"` (`("reduced", SV(tails="t"))`) and `"reduced-SV(outliers,t)"` (`("reduced", SV(outliers=True,
+  tails="t"))`), from 13 to 15 entries (8 structural, 7 reduced). `tests/contract/test_forecast_contract_mcmc.py`
+  now collects 150 tests: 20 per PR (the fast allow-list is unchanged: `structural-SV(outliers)`,
+  `reduced-Constant(ig)`) and 130 in the slow tier, the two new rows slow like their reduced-SV neighbours. All
+  150 pass on `888f620` plus this change. The analytic forecast now records `attrs["ordering"]` (SPEC R8, §7
+  attrs), the same JSON list the MCMC engine writes, through a one-line change to `engines/analytic.py`
+  (`tests/unit/test_forecast_ordering_attr.py`; the Phase 1 contract file stays untouched). Benchmark-model
+  forecasts (`models/benchmarks.py`) still carry no `ordering`.
 
 #### WP18 — MCMC fit assembly and EB plumbing
 
@@ -2894,6 +3161,12 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
 - **Tests**: §9.9 comparisons with the single parameter sets and derived R calls.
 - **Acceptance (exit criteria)**: stochvol main, defaults and SV-t runs within 4 quantile-MCSE (PR);
   bayesianVARs within 4 MCSE (nightly) after P1–P5 are settled.
+- **As closed (2026-10-23)**: the stochvol clause is met with the SV-t run replaced by the exact
+  importance-sampling oracle (§2.10 Stage 4 amendment 1). The bayesianVARs clause is met in Phase 2 by the exact
+  system-wide Gibbs oracle (`bvars_swa_*`, max |z| 2.75–3.56 against bounds 4.05–4.51; §2.10 Stage 4 amendment
+  2); SPEC §13 now names that oracle as the Phase 2 criterion and moves bayesianVARs parity, after P1–P5, to the
+  Phase 3 exit. `test_bayesianvars_parity` stays in place and skips until a `bvars_bayesianvars_*.nc` fixture
+  exists.
 
 #### WP22 — Ordering sensitivity
 
@@ -2957,6 +3230,26 @@ with WP10–WP13; WP9 runs in parallel with the kernels.
 - **Tests**: `test_perf_phase2` (marker `bench`, pre-release).
 - **Acceptance (exit criterion)**: BENCH-P2 < 120 s on one device on the idle reference laptop, reported on x86;
   baseline JSON committed; PR tier within budget.
+- **Acceptance as amended (Phase 2 closeout, 2026-10-23)**: BENCH-P2 < 120 s on one device on the idle reference
+  laptop (asserted where `tests/bench/baseline.json` has `reference: true`); baseline JSON committed; an x86 run
+  reported (the CI bench job, amendment below; reported, not gated); the PR tier measured against the §9.10
+  budget as amended there (cold ≤ 90 min per job, warm recorded per run).
+- **Amendment (Phase 2 closeout, 2026-10-23): reported on x86.** The x86 report is the `bench-p2` artifact of the
+  CI bench job (Actions > CI > Run workflow, bench = true), run on GitHub's x86-64 `ubuntu-latest` runner:
+  `benchmarks/phase2_perf.py --kernels` writes `bench-p2.json` with ms per sweep, compile time, peak RSS, ESS/s
+  and wall time, plus the machine fingerprint (`machine_info`: CPU model, logical CPUs, load average, versions).
+  That run is reported, not gated. A shared cloud runner (expected 2 vCPU for a private repository, 4 for a
+  public one; the CPU model is drawn from a mixed EPYC/Xeon pool) is not the §10.1 x86 machine, an idle 4–8 core
+  AVX2 laptop, so the 120 s target is neither required nor asserted there: `test_perf_phase2` compares only
+  against a baseline with the same fingerprint and asserts 120 s only on the machine of a baseline with
+  `reference: true`.
+  The earlier x86 datum (the provisional baseline of `d37e059`: 311 s on a loaded 4-core Xeon) is superseded by
+  the first CI bench report at the release commit. A run on an idle 4–8 core x86 laptop stays open under Q2.
+- **Status (2026-10-23)**: BENCH-P2 52.3 s cold, 49.6 s warm on the reference laptop (Apple M5 Max, `reference:
+  true`; not idle, 1-minute load average 2.4–6.3; every timed run `converged = False`, Q14, resolved by D-35 without
+  changing the gate); baseline committed;
+  the bench job has never been dispatched, so the x86 report does not exist yet; the PR tier ran cold through
+  `888f620` (40–85 min per job), and the cache fix of §9.10 is not yet verified in CI.
 
 #### WP25 — Stretch: SOC/SUR dummies on the MCMC engine (after the exit criteria)
 
@@ -2972,8 +3265,8 @@ builders `priors/dummies.py`; reference `validation/dummies.py`; tests `tests/mc
 | Criterion | Delivered by |
 | :--- | :--- |
 | Geweke and SBC green for every composition | WP19 (with block-level tiers in WP10–WP13 and references in WP9) |
-| stochvol parity | WP21 (fixtures WP8) |
-| bayesianVARs parity for the reduced-form sampler | WP21 (fixtures WP8) |
+| stochvol parity | WP21 (fixtures WP8); SV-t by the exact importance-sampling oracle (§2.10 Stage 4 amendment 1) |
+| reduced-form sampler parity with an exact oracle (SPEC §13 as amended 2026-10-23; first written "bayesianVARs parity for the reduced-form sampler") | WP21 (fixtures WP8): the exact system-wide Gibbs oracle `bvars_swa_*` (§2.10 Stage 4 amendment 2); bayesianVARs parity moved to the Phase 3 exit |
 | performance target (`n = 20, p = 4, T = 300`, Linear × SV, 4 × 10,000 draws < 2 min) | WP24 (pilot WP3) |
 | ordering-sensitivity check | WP22 |
 | runtime convergence diagnostics | WP15, wired by WP14 |

@@ -1,6 +1,6 @@
 # `rai-bvar`: Technical Architecture & Engineering Specification
 
-**Version:** 2.1 (revision of v1) · **Status:** Draft; decisions D1–D5 settled (§14) · **Date:** 2026-10-21
+**Version:** 2.3 (revision of v1) · **Status:** Draft; decisions D1–D5 settled (§14); Phases 0–2 delivered (§13) · **Date:** 2026-10-24
 
 ---
 
@@ -19,6 +19,10 @@
 | Missing in v1 | — | Validation strategy (Geweke tests, SBC, R parity, verdict-engine size/power on simulated DGPs), COVID/outlier handling, transform-aware Minnesota prior, look-ahead-free backtests, conditional forecasts, phased roadmap |
 | Positioning | "Python lacks a unified SOTA BVAR ecosystem" | Fragmented, not absent: several Python BVAR projects appeared in 2026. Differentiation is the ablation/verdict engine, the factorial composition and the validation suite (§1.4) |
 | Errors fixed | `bayesm` listed as a Primiceri implementation; sign restrictions attributed to `bsvars`; "BART-VAR" listed as a package; "standard IRFs are invalid in TVP models" | Corrected (§2.2, §6.4) |
+
+**v2.1 → v2.2 (Phase 2 closeout, 2026-10-23).** The text is brought in line with what Phases 0–2 shipped and with the decisions of `docs/phase2/DESIGN.md`, which is authoritative for the MCMC engine: the §4.2 interface sketch is replaced by the settled protocols (DESIGN Q12); §4.4/§4.5 give the `auto` defaults and the engine-resolution rules (D-19); §5.6 limits Lenza-Primiceri scaling to the analytic engine in Phase 2 (D-21); §8 corrects the "all without a loop" attribution and states the reproducibility caveat for chain batching and devices; §9.3 and §9.5 describe the significance test, the Monte Carlo error and the table columns as implemented; §10.1 gives the CI cadence as run; §10.6, §11 and §12 replace the ArviZ dependency by the in-repo diagnostics (D-24); §13 records the Phase 2 status and moves `bayesianVARs` parity from the Phase 2 exit to the Phase 3 exit. Features specified here that the closeout review (the design audit of `888f620`) found not implemented are marked as such where they are specified.
+
+**v2.2 → v2.3 (2026-10-24).** §10.6 states the composition-dependent default MCMC budget (4 × 10,000 kept draws for compositions with stochastic volatility, 4 × 2,000 otherwise) and the warning for SV fits below it, the owner's resolution of DESIGN Q14 (D-35); §13 records it. The convergence gate is unchanged.
 
 ---
 
@@ -90,7 +94,7 @@ Every R reference package in §2.2 is GPL-licensed (GPL-3, GPL ≥ 2 or GPL ≥ 
 | :--- | :--- | :--- | :--- |
 | `BVAR` | Kuschnig & Vashold (2021) | GPL-3 | Hierarchical Minnesota prior (GLP 2015), SOC/SUR dummy observations, MH over hyperparameters → Phase 1 analytic engine. (Internally it uses cross-products, eigenvalues and Cholesky, not QR; compare outputs, not numerics) |
 | `stochvol` | Hosszejni & Kastner | GPL ≥ 2 | Univariate SV: AWOL (tridiagonal Cholesky) sampling of log-variances, ASIS, Omori et al. 10-component mixture, Student-t errors, leverage → SV block |
-| `bayesianVARs` | Gruber, Haan & Kastner | GPL ≥ 3 | Global-local priors (`HS`, `R2D2`, `NG`, `DL`, `SSVS`, `HMP`) with SV in a Cholesky structure (using the corrected CCCM triangular algorithm) or a factor structure → Phase 2 reduced-form sampler, Phase 3 shrinkage |
+| `bayesianVARs` | Gruber, Haan & Kastner | GPL ≥ 3 | Global-local priors (`HS`, `R2D2`, `NG`, `DL`, `SSVS`, `HMP`) with SV in a Cholesky structure (using the corrected CCCM triangular algorithm) or a factor structure → reduced-form sampler and shrinkage, both at the Phase 3 exit (in Phase 2 an exact system-wide Gibbs oracle replaced it, §10.4, §13) |
 | `factorstochvol` | Kastner | GPL ≥ 2 | Factor SV with interweaving → Phase 5 `FactorSV` |
 | `bvars` | Woźniak | GPL ≥ 3 | Large BVAR with Minnesota prior, common SV and t errors → `CommonSV` (Phase 3) |
 | `bvarsv` | Krüger | GPL ≥ 2 | Primiceri (2005) TVP-VAR-SV with the Del Negro & Primiceri (2015) corrigendum → Phase 5 TVP |
@@ -165,32 +169,18 @@ This is linear in `a_i`, so the joint prior on `(a_i, γ_i)` is Gaussian and the
 
 ### 4.2 Component interfaces
 
-Sketch only; the final signatures are settled in Phase 0.
+The interfaces were settled in Phase 2 (`src/rai_bvar/engines/mcmc/protocols.py`; `docs/phase2/DESIGN.md` §3, decision Q12). Every kernel is written for one equation as a pure function with its random noise injected and is batched over equations and chains by `vmap`; every exact Gibbs draw exposes its conditional's parameters and every MH step its log acceptance ratio, for tests (DESIGN §3.1). The v1 sketch maps onto the settled protocols as follows:
 
-```python
-class MeanBlock(Protocol):
-    """g_i(x_t; θ_i) for one equation, together with its prior."""
-    def init_state(self, key, eq: EquationData) -> MeanState: ...
-    def sample(self, key, state: MeanState, eq: EquationData,
-               target: Array,    # y_i, adjusted by the covariance structure, shape (T,)
-                                 #   (recursive: y_{<i,t} enter as extra regressors; factor: y_i − L_i f_t)
-               weights: Array,   # 1 / λ_{i,t}, shape (T,)
-               glob: GlobalState) -> MeanState: ...
-    def predict(self, state: MeanState, x: Array) -> Array: ...   # g_i(x) at new x
-    def log_prior(self, state: MeanState, glob: GlobalState) -> Array: ...
-
-class VolBlock(Protocol):
-    """λ_{i,1:T} for one equation."""
-    def init_state(self, key, T: int) -> VolState: ...
-    def sample(self, key, state: VolState, resid: Array) -> VolState: ...   # resid_t = √λ_t ε_t
-    def variances(self, state: VolState) -> Array: ...                     # λ_{i,1:T}
-    def simulate_ahead(self, key, state: VolState, H: int) -> Array: ...   # λ_{i,T+1:T+H}
-
-class GlobalBlock(Protocol):
-    """Parameters shared across equations: hyperparameters, global shrinkage
-    scales, regime indicators, reduced-form coupling."""
-    def sample(self, key, glob: GlobalState, eqs: EquationStates) -> GlobalState: ...
-```
+| v1 sketch | Settled protocol (DESIGN §3) |
+| :--- | :--- |
+| `MeanBlock.sample(key, state, eq, target, weights, glob)` | `MeanBlock.sample_eq(key, ms, a_i, ctx, …)`: `target` and `weights` (`1/λ_{i,t}`, zero on padded rows) arrive in an `EqContext`; a mean that fuses the contemporaneous coefficients (structural `Linear`) draws `(δ_i, a_i)` in one Gaussian step |
+| `MeanBlock.predict`, `log_prior` | `predict_eq` / `predict_reduced`, `log_prior_eq`, plus `fitted_eq`, `extract_eq` and `conditional_eq` (the exact conditional) |
+| `VolBlock.sample(key, state, resid)` | `VolBlock.sample_eq`: atomic, with a fixed internal order (transitory scales, then the mixture indicators immediately before the log-volatilities, §4.3); composed of a `PersistentCore` (constant or SV) and a `TransitoryScale` (none, outliers, t, outliers and t) |
+| `VolBlock.variances` | `log_var_eq(which="effective" \| "persistent")`, on the log scale |
+| `VolBlock.simulate_ahead` | `draw_ahead_eq`: persistent and effective log variances for `T+1..T+H` |
+| `GlobalBlock.sample(key, glob, eqs)` | `GlobalStep.sample`, run in a pre or post phase around the equation phase, with the program's batching map over equations |
+| (implicit) | `CovarianceStructure`: owns `a_i`, its prior and the residual algebra (recursive in Phase 2; factor SV in Phase 5) |
+| (implicit) | `CoefPrior`: the coefficient prior's moments and, from Phase 3, its local and global scales |
 
 The `weights` argument is how volatility reaches the mean block: every mean block must support heteroskedastic (weighted) likelihoods. This is a hard requirement for the BART backend (§13, Phase 4).
 
@@ -215,7 +205,7 @@ for each iteration:
 
 | Block | `g_i(x_t)` | Prior(s) | Phase |
 | :--- | :--- | :--- | :--- |
-| `Linear` | `x_t'γ_i` | Minnesota (structural, reduced or conjugate form); global-local | 1–3 |
+| `Linear` | `x_t'γ_i` | Minnesota (conjugate, structural or reduced form; `form="auto"` by default, §4.5); global-local | 1–3 |
 | `BART` | `Σ_{m=1}^{M} tree_m(x_t)` | Chipman, George & McCulloch (2010) tree prior, leaf scale calibrated to data | 4 |
 | `TVP` | `x_t'γ_{i,t}`, random-walk states, non-centred | Shrinkage on state variances (Huber, Koop & Onorante 2021) | 5 |
 | `Threshold` | `x_t'γ_i^{(s_t)}`, `s_t = 1{z_{t-d} > τ}` | Minnesota per regime; `τ, d` sampled in a global block | 5 |
@@ -225,10 +215,10 @@ for each iteration:
 
 | Block | `λ_{i,t}` | Phase |
 | :--- | :--- | :--- |
-| `Constant` | `λ_i` constant, inverse-gamma prior. `Constant(prior="iw")` marks the conjugate NIW case (§4.6) | 1–2 |
-| `SV` | `log λ_{i,t} = μ_i + φ_i (log λ_{i,t-1} − μ_i) + σ_i η_{i,t}`; random walk as the special case `φ_i = 1` | 2 |
+| `Constant` | `λ_i` constant. `Constant(prior=...)`: `"auto"` (default; resolved by the engine rules, §4.5), `"iw"` (with the conjugate form the NIW case of §4.6; with the structural form every coefficient's prior is λ-scaled, the MCMC twin of the NIW model, DESIGN §6.1 Mode II), `"ig"` (independent inverse-gamma `λ_i`, DESIGN Mode I), `"iw_equivalent"` (inverse-gamma `λ_i` with only `a_i` λ-scaled; at `contemp = 1` the implied `Σ` is inverse-Wishart, Chan 2022 Prop. 1) | 1–2 |
+| `SV` | `log λ_{i,t} = μ_i + φ_i (log λ_{i,t-1} − μ_i) + σ_i η_{i,t}`; the random walk `SV(rw=True)` (`φ_i = 1`, its own code path) | 2 |
 | `SV(outliers=True)` | SV plus a mixture outlier component (Carriero, Clark, Marcellino & Mertens) | 2 |
-| `SV(tails="t")` | SV with Student-t errors as a scale mixture, `ν` estimated | 2 |
+| `SV(tails="t")` | SV with Student-t errors as a scale mixture, `ν` estimated on the grid `{3, …, 40}` (DESIGN D-8); combines with `outliers=True` | 2 |
 | `CommonSV` | `Σ_t = f_t Σ`, a single common volatility factor (Carriero, Clark & Marcellino 2016); keeps the conjugate structure, so it is a fast SV screen for large `n` | 3 |
 | `FactorSV` | Factor stochastic volatility (Kastner 2019) | 5 |
 | Order-invariant SV | Chan, Koop & Yu (2024) | 5 |
@@ -237,21 +227,26 @@ for each iteration:
 
 | Prior | Parameters | Phase |
 | :--- | :--- | :--- |
-| `Minnesota` | `lambda_` (overall tightness), `alpha` (lag decay; fixed at 2, i.e. `1/s²`, as in GLP, or optionally a hyperparameter), `cross` (cross-variable tightness; must be 1 in conjugate form), `psi` (IW scale diagonal, in variance units; default: residual variance of a univariate AR(p) with constant, by least squares), `soc` (μ), `sur` (δ), `mean` (prior mean of own first lag; default from transform codes, §5.3), `form` (`"conjugate"`, `"structural"`, `"reduced"`), `hierarchy` (`"fixed"`, `"eb"`, `"mh"`) | 1–2 |
+| `Minnesota` | `lambda_` (overall tightness), `alpha` (lag decay; fixed at 2, i.e. `1/s²`, as in GLP, or optionally a hyperparameter), `cross` (cross-variable tightness; scales the prior standard deviation of cross lags; must be 1 in conjugate form), `contemp` (scales the prior variance of the contemporaneous `a_ij`; must be 1 in conjugate form), `psi` (IW scale diagonal, in variance units; default: residual variance of a univariate AR(p) with constant, by least squares), `soc` (μ), `sur` (δ), `mean` (prior mean of own first lag; default from transform codes, §5.3), `form` (`"auto"` (default, §4.5), `"conjugate"`, `"structural"`, `"reduced"`), `hierarchy` (`"fixed"`, `"eb"` (default), `"mh"`; on the MCMC engine the hyperparameters are fixed during sampling: `"eb"` plugs in an empirical-Bayes mode, from the conjugate twin at `cross = 1` or, for the structural form with `cross ≠ 1`, from Chan's (2022) closed-form marginal likelihood, and `"mh"` raises until Phase 3; DESIGN D-12, §6.5) | 1–2 |
 | `Horseshoe`, `NormalGamma`, `DirichletLaplace`, `R2D2`, `SSVS` | Global-local shrinkage with coefficient groups (own lags, cross lags, deterministics, contemporaneous) | 3 |
 | `AsymmetricConjugate` | Chan (2022): cross-variable shrinkage with conjugate-like speed | 3 |
 
 ### 4.5 Engine resolution
 
-The engine is chosen by the composition, not by the user. `fit.engine` reports the choice.
+The engine is chosen by the composition, not by the user. `fit.engine` reports the choice. `BVAR` first resolves the `auto` defaults (DESIGN D-19, §11.1): `Minnesota(form="auto")` becomes `"conjugate"` when the volatility is `Constant` with prior `"auto"` or `"iw"`, and `"structural"` otherwise (decision D3); `Constant(prior="auto")` then becomes `"iw"` with the conjugate form and `"ig"` otherwise. The resolved components are stored, so `BVAR()` keeps its Phase 1 meaning and spec hash. Then:
 
-| Composition | Engine |
+| Resolved composition | Engine |
 | :--- | :--- |
-| `Linear(prior=Minnesota(form="conjugate"))` × `Constant(prior="iw")` | Analytic (§4.6) |
-| `Linear(prior=AsymmetricConjugate(...))` × `Constant` | Analytic (Phase 3). Chan (2022) works in exactly our recursive structural form with independent normal-inverse-gamma priors per equation, so the posterior factorises and iid draws are exact. It is the analytic twin of the MCMC model `Linear(form="structural") × Constant` |
-| Anything else | MCMC (§4.3) |
+| `conjugate` × `Constant("iw")` | Analytic (§4.6) |
+| `conjugate` × anything else | Error at construction |
+| `structural` × `Constant("ig")` or `SV(...)` | MCMC (§4.3), independent moment-matched prior (DESIGN Mode I) |
+| `structural` × `Constant("iw")` | MCMC, λ-scaled prior (DESIGN Mode II): the NIW posterior at `cross = contemp = 1`; the prior axis carries `scaling=conjugate` (R2) |
+| `structural` × `Constant("iw_equivalent")` | MCMC, Mode I coefficient prior with Chan's (2022) `(a, λ)` prior |
+| `reduced` × `Constant("ig")`, `Constant("iw_equivalent")` or `SV(...)` | MCMC, corrected triangular sampler (CCCM 2022) |
+| `reduced` × `Constant("iw")` | Error at construction |
+| `Linear(prior=AsymmetricConjugate(...))` × `Constant` | Analytic (Phase 3). Chan (2022) works in exactly our recursive structural form with independent normal-inverse-gamma priors per equation, so the posterior factorises and iid draws are exact. It is the analytic twin of the MCMC model `Linear(form="structural") × Constant`; its closed form shipped in Phase 2 (`engines/structural_nig.py`), the user-facing prior arrives in Phase 3 |
 
-Invalid combinations fail at construction time with an actionable message, for example `Minnesota(form="conjugate", cross=0.5)` → "cross-variable shrinkage requires form='structural' or 'reduced'".
+Invalid combinations fail at construction time with an actionable message, for example `Minnesota(form="conjugate", cross=0.5)` → "cross-variable shrinkage (cross != 1) is impossible in conjugate form; use form='structural' or 'reduced'". On the MCMC engine, Lenza-Primiceri scaling and `hierarchy="mh"` raise `NotImplementedError` in Phase 2 (both arrive in Phase 3; DESIGN D-21).
 
 ### 4.6 Analytic engine (fast path)
 
@@ -301,7 +296,7 @@ The prior mean of the own first lag is tied to the transform: 1 for persistent l
 
 ### 5.4 Deterministic terms
 
-`deterministic="c"` (default), `"ct"` or `"n"`. Exogenous regressors require future values (or a scenario) at forecast time; forecasting raises if they are missing.
+`deterministic="c"` (default), `"ct"` or `"n"`. Exogenous regressors require future values (or a scenario) at forecast time; forecasting raises if they are missing. *Not implemented* (Phase 0 scope, not yet scheduled): `data/design.py` builds only the `"n"`, `"c"` and `"ct"` terms.
 
 ### 5.5 Vintages
 
@@ -311,11 +306,11 @@ The prior mean of the own first lag is tied to the transform: 1 for persistent l
 
 `outliers=` on the model:
 
-- `"lenza-primiceri"`: residual-variance scaling (analytic engine and constant-volatility MCMC models).
+- `"lenza-primiceri"`: residual-variance scaling. Analytic engine only in Phase 2: on the MCMC engine it raises `NotImplementedError` at construction, and the estimated scaling for constant-volatility MCMC models arrives in Phase 3 (DESIGN D-21, §3.9).
 - `SV(outliers=True)`: outlier component inside the volatility block.
-- `"exclude"`: masks periods out of the likelihood. A simple fallback, documented as ad hoc.
+- `"exclude"`: masks periods out of the likelihood. A simple fallback, documented as ad hoc. *Not implemented* (no phase assigned, not yet scheduled): `outliers=` accepts only `None` and `"lenza-primiceri"`.
 
-The default is none, but `fit()` warns if the estimation sample includes March–December 2020 and no option is selected.
+The default is none, but `fit()` warns if the estimation sample includes March–December 2020 and no option is selected (on the MCMC engine `SV(outliers=True)` counts as an option).
 
 ### 5.7 Missing values
 
@@ -395,10 +390,10 @@ $$
 
 - `log_pred_density(y_obs, horizon, variables=None)`: the Rao-Blackwellised estimator
   `log p̂(y_{T+h} | Y) = logsumexp_s log N(y; m_{s,h}, L_{s,h}L_{s,h}') − log S`.
-  Variable subsets marginalise the Gaussian (select rows of `m`, form the sub-covariance). This is the `h`-step marginal predictive density of `y_{T+h}`, the standard target in the forecasting literature.
+  Variable subsets marginalise the Gaussian (select rows of `m`, form the sub-covariance). This is the `h`-step marginal predictive density of `y_{T+h}`, the standard target in the forecasting literature. It is the default (`lpd_method="conditioned"`). For `h > 1` and outcomes far in the predictive's tail its weights can collapse onto the one draw whose simulated path wandered towards the outcome, so the estimate is biased low while its delta-method MCSE stays small. The opt-in `lpd_method="integrated"` (DESIGN D-34, §7.3) conditions each draw only on its parameters and its drawn volatility path and integrates `y_{T+1..T+h−1}` out analytically. It needs MCMC forecasts of linear means (they carry the extra variable `lag_coefs`), and the contract fields do not change.
 - `quantiles(q)`, `mean()`, `median()`, `to_dataframe()`.
 
-**Memory.** `cond_chol` has size `S × H × n²`; for `S = 4000`, `H = 12`, `n = 20` that is about 150 MB in float64. `store_moments="lazy"` recomputes moments from posterior draws on demand, chunked over draws.
+**Memory.** `cond_chol` has size `S × H × n²`; for `S = 4000`, `H = 12`, `n = 20` that is about 150 MB in float64. `store_moments="lazy"` recomputes moments from posterior draws on demand, chunked over draws. *Not implemented* (Phase 0 scope, not yet scheduled): every forecast materialises `cond_chol` (the analytic engine stores a zero-stride view when the factor does not depend on `h`).
 
 ---
 
@@ -406,13 +401,13 @@ $$
 
 - **No explicit inverses.** Use `cho_factor` / `cho_solve`, `solve_triangular` and QR.
 - **Gaussian draws from precision form.** For `β ~ N(K⁻¹b, K⁻¹)`: `L = chol(K)`, `μ = cho_solve(L, b)`, `β = μ + solve_triangular(L', z)` with `z ~ N(0, I)`.
-- **SV states.** Log-volatility paths have a banded (tridiagonal) precision, so they are sampled in `O(T)` with a precision sampler (Chan & Jeliazkov 2009; "all without a loop", McCausland, Miller & Pelletier 2011). No Kalman-filter loops for SV.
+- **SV states.** Log-volatility paths have a banded (tridiagonal) precision, so they are sampled in `O(T)` with a precision sampler (Rue 2001; Chan & Jeliazkov 2009; McCausland, Miller & Pelletier 2011), the method Kastner & Frühwirth-Schnatter (2014) call "all without a loop" (AWOL). No Kalman-filter loops for SV.
 - **Mixture approximation.** `log ε²` is approximated by the 10-component mixture of Omori, Chib, Shephard & Nakajima (2007), an extension of Kim, Shephard & Chib (1998). The offset added before taking logs is documented and tested.
 - **ASIS** (Kastner & Frühwirth-Schnatter 2014) interweaves the centred and non-centred parametrisations of the SV parameters.
 - **float64.** The MCMC engine calls `jax.config.update("jax_enable_x64", True)` on import, and tests assert dtypes. JAX defaults to float32. **One documented exception:** `bartz` computes and samples leaf full conditionals in float32 even with x64 enabled. This is confined to the BART block, and its Geweke and SBC tests must pass with it.
 - **Log space.** Densities are evaluated in log space; mixtures use `logsumexp`.
 - **Positive-definiteness by construction.** Covariances come from triangular factors with positive diagonals. Adding silent jitter is forbidden; a failed Cholesky raises with diagnostics (condition number, offending block).
-- **Randomness.** JAX keys are split deterministically per (chain, iteration, block, equation); the analytic engine uses a NumPy `Generator`. The same seed gives bitwise-identical results on the same platform and versions.
+- **Randomness.** JAX keys are split deterministically per (chain, iteration, block, equation); the analytic engine uses a NumPy `Generator`. The same seed gives bitwise-identical results on the same platform and versions, with the same chain count and device count. The keys are prefix-stable, so chain `c` consumes the same random numbers whatever the number of chains, but a run with another chain count or on several devices (`shard_map`) equals the reference run only to rounding: XLA vectorises the SV and CCCM reductions differently for another batch size, and over a long run a last-bit difference can flip an accept/reject decision, after which the chains agree only in distribution (DESIGN §5.2, §5.6). Sharding is therefore opt-in.
 
 ---
 
@@ -422,10 +417,10 @@ $$
 
 - **Origins:** `rb.Origins(start, end, step)`. **Windows:** `rb.Expanding()` or `rb.Rolling(size)`.
 - **At each origin:** build the data available at that origin (vintage-ready, §5.5), recompute data-dependent prior settings (R9), fit, forecast `H` steps, score against realised values.
-- **Warm starts:** MCMC chains start from the last state of the previous origin. Burn-in is still applied (shorter by default); warm starts are an initialisation, not a shortcut around burn-in.
+- **Warm starts:** MCMC chains start from the last state of the previous origin. Burn-in is still applied (shorter by default); warm starts are an initialisation, not a shortcut around burn-in. Opt-in in Phase 2 (`backtest(..., warm_start=True)`, sequential origins; DESIGN D-32, open question Q6).
 - **Parallelism:** across origins with a process pool (each process owns its JAX runtime); within a fit with `vmap` over chains and equations.
 - **Caching:** results are keyed by `(model spec hash, data hash, origin, seed)` on disk. Backtests are resumable, and adding a model to a grid only fits the new model.
-- **Budget:** `rb.estimate_cost(grid, data, origins)` extrapolates from a short pilot run before anything expensive starts.
+- **Budget:** `rb.estimate_cost(grid, data, origins)` extrapolates from a short pilot run before anything expensive starts. As implemented, `estimate_cost(model, data, origins=...)` takes one model, times its fit and scoring at the last origin and extrapolates to all origins; a grid is costed model by model.
 
 ### 9.2 Scores (per origin, horizon and model)
 
@@ -434,7 +429,7 @@ $$
 | Log predictive density (LPD) | joint and per variable | Rao-Blackwellised (§7). **Primary score** |
 | CRPS | per variable | Sample-based fair estimator, `O(S log S)` via sorting |
 | Tail-weighted CRPS | per variable | Quantile-weighted CRPS (Gneiting & Ranjan 2011; left-tail, right-tail and centre weightings) implemented in-house, plus threshold-weighted CRPS from `scoringrules`. Targets the "crisis regime" question |
-| Energy score | joint | The `O(S²)` pairwise term is estimated from random pairs |
+| Energy score | joint | The `O(S²)` pairwise term is estimated on a random subsample of at most 1000 draws (fair estimator; the variogram score uses the same subsample) |
 | Variogram score (p = 0.5) | joint | Scheuerer & Hamill (2015). Sensitive to correlation misspecification, which the energy score barely detects |
 | RMSE / MAE | per variable | Posterior mean / median |
 | PIT, interval coverage | per variable and horizon | Calibration diagnostics |
@@ -444,10 +439,10 @@ $$
 ### 9.3 Statistical tests
 
 - Loss differential `d_t = L_{A,t} − L_{B,t}`, per horizon.
-- **Diebold-Mariano** statistic with HAC variance (Newey-West, bandwidth at least `h − 1`) and the Harvey-Leybourne-Newbold small-sample correction, using Student-t critical values.
+- **Diebold-Mariano** statistic with HAC variance and the Harvey-Leybourne-Newbold small-sample correction, using Student-t critical values. As implemented (`evaluation/significance.py`): the long-run variance uses the rectangular (truncated) kernel with `h − 1` autocovariances, the estimator the HLN correction is derived for, and falls back to Newey-West (Bartlett) weights over the same `h − 1` lags when that estimate is not positive; the statistic is scaled by `√((P + 1 − 2h + h(h − 1)/P)/P)` and compared with Student-t(`P − 1`). Pairs with a missing loss are dropped.
 - **Validity policy.** For nested models with expanding windows, DM-type statistics are not asymptotically standard normal (Clark & McCracken 2001). The tests are formally valid in the Giacomini-White (2006) framework, which requires rolling (or fixed) estimation windows; Amisano-Giacomini (2007), for density forecasts, sits in the same framework. `compare()` therefore flags p-values `valid=True` only for rolling windows; expanding-window p-values are labelled descriptive.
 - **Model Confidence Set** (Hansen, Lunde & Nason 2011) over the whole grid at α ∈ {0.10, 0.25}, with a block bootstrap. This handles the multiple-comparison problem that a factorial grid creates.
-- **Subsample analysis:** scores split by user-defined periods. Default for US data: pre-2008, 2008–09, 2010–19, 2020–21, 2022 onwards.
+- **Subsample analysis:** scores split by user-defined periods. Default for US data: pre-2008, 2008–09, 2010–19, 2020–21, 2022 onwards. *Not implemented* (Phase 0 scope, not yet scheduled): `compare()` has no period split; select origins by hand.
 
 ### 9.4 In-sample screening (fast, never a substitute for the backtest)
 
@@ -460,7 +455,8 @@ $$
 
 ```python
 res = rb.compare(
-    rb.grid(mean=[rb.Linear(prior=rb.Minnesota()), rb.BART(n_trees=200)],
+    rb.grid(rb.BVAR,                                 # grid(factory, **axes)
+            mean=[rb.Linear(prior=rb.Minnesota()), rb.BART(n_trees=200)],   # rb.BART: Phase 4
             vol=[rb.Constant(), rb.SV(), rb.SV(outliers=True)]),
     data,
     origins=rb.Origins(start="2000Q1", step=1),
@@ -475,12 +471,14 @@ res.verdict(axis="vol")          # volatility effect, holding each mean spec fix
 
 **Ablation table columns:** model, axis values (mean / vol / prior / lags), total and mean ΔLPD vs reference (per horizon), Monte Carlo standard error of ΔLPD, mean CRPS and qwCRPS (relative), energy and variogram scores, RMSE / MAE (relative), DM/AG p-value with validity flag, membership of the 10% and 25% MCS, convergence flag, ordering sensitivity (if run).
 
+*As implemented* (`CompareResult.table()`, one row per model and horizon, against the baseline): `axis:*` (one column per axis), `origins`, `lpd`, `dlpd`, `dlpd_mean`, `dlpd_mcse`, `crps`, `crps_rel`, `qwcrps_left` and `qwcrps_right` (absolute, not relative), `energy`, `variogram`, `rmse_rel`, `mae_rel`, `dm_stat` and `dm_pvalue` (the two-sided DM test of the log score; the verdict uses one-sided p-values), `tests_valid`, `mcs_pvalue`, `in_mcs_10`, `in_mcs_25` and `converged` (fraction of origins). There is no ordering-sensitivity column; `rb.ordering_sensitivity` reports it separately.
+
 **Verdict rule.** A model `M` beats a reference `B` along axis `X` only if all of the following hold:
 
 1. `M` and `B` differ only along `X` (R2).
-2. ΔLPD(`M − B`) > 0 at the horizons of interest, and |ΔLPD| > 3 × its Monte Carlo standard error (batch means across chains and draws).
+2. ΔLPD(`M − B`) > 0 at the horizons of interest, and |ΔLPD| > 3 × its Monte Carlo standard error (batch means across chains and draws). *As implemented:* ΔLPD is summed over the common origins at each horizon, and its MCSE combines the per-origin delta-method MCSEs of the two models' Rao-Blackwellised LPDs (§7; for MCMC forecasts inflated by `√(S/ESS)` of the weights) in quadrature over origins and models, treating them as independent, not by batch means. The two models share the per-origin fit and forecast seeds, which this ignores.
 3. A valid (rolling-window) AG/GW test rejects at 10%, **or** `B` is excluded from the 25% MCS while `M` is included.
-4. Convergence checks passed at ≥ 95% of origins; failures are listed.
+4. Convergence checks passed at ≥ 95% of origins; failures are listed. *As implemented:* the smaller of the two models' converged fractions must reach 95%, otherwise the verdict is `inconclusive`.
 
 Output per comparison: `better` / `worse` / `inconclusive`, with the reasons. For the headline non-linearity claim, the reference is `Linear × SV` (or `Linear × SV(outliers=True)` for post-2020 samples).
 
@@ -494,12 +492,14 @@ Output per comparison: `better` / `worse` / `inconclusive`, with the reasons. Fo
 | :--- | :--- | :--- |
 | Unit | Linear algebra, transform round-trips, dummy observations, shapes and dtypes | every PR |
 | Analytic | Conjugate posterior and log-ML vs brute force (§10.2) | every PR |
-| Contract | `ForecastResult` invariants (§7) for every registered composition | every PR |
-| Geweke | Joint-distribution tests for every block and composition | every PR (small config), nightly (full) |
-| SBC | Rank uniformity for parameters and test quantities | nightly |
-| Parity | Against committed R fixtures (§10.4) | every PR |
-| DGP | Recovery and verdict-engine size/power (§10.5) | weekly and pre-release |
-| Benchmarks | Speed and memory against targets (§13) | pre-release |
+| Contract | `ForecastResult` invariants (§7) for every registered composition | every PR (every analytic and benchmark composition, two MCMC compositions); weekly (every MCMC composition) |
+| Geweke | Joint-distribution tests for every block and composition | every PR (small config), weekly (full) |
+| SBC | Rank uniformity for parameters and test quantities | weekly |
+| Parity | Against committed R fixtures (§10.4) | every PR (R `BVAR`, BoE `bvar`; short runs against the `stochvol` and system-wide Gibbs fixtures); weekly (long runs) |
+| DGP | Recovery and verdict-engine size/power (§10.5) | *not implemented*; at the Phase 3 exit (§13) |
+| Benchmarks | Speed and memory against targets (§13) | pre-release (manual CI job) |
+
+*As run in CI* (`.github/workflows/ci.yml`): the fast suite (`-m "not slow and not network and not bench"`, Python 3.12–3.14 on Linux) on every pull request and every push to `main`; the slow and network tiers (`-m "(slow or network) and not bench"`) plus the macOS fast suite weekly, on Sundays at 03:17 UTC (the CI job keeps the name `nightly`; DESIGN §9.10); the bench tier only when dispatched by hand. The mutation suite (DESIGN §9.7) runs in the weekly tier.
 
 ### 10.2 Analytic correctness
 
@@ -509,7 +509,7 @@ Output per comparison: `better` / `worse` / `inconclusive`, with the reasons. Fo
 
 ### 10.3 Sampler correctness
 
-- **Geweke (2004) joint-distribution tests.** Compare the marginal-conditional simulator (draw `θ` from the prior, then `y | θ`) with the successive-conditional simulator (alternate one Gibbs sweep with `y | θ`). Test first and second moments of parameter functions with z-tests using MCSE and a Holm correction. Requires proper priors; all test configurations use them.
+- **Geweke (2004) joint-distribution tests.** Compare the marginal-conditional simulator (draw `θ` from the prior, then `y | θ`) with the successive-conditional simulator (alternate one Gibbs sweep with `y | θ`). Test first and second moments of parameter functions with z-tests using MCSE and a Holm correction (as implemented: the global decision is Bonferroni on the smallest p-value, which Holm's first step reproduces exactly, and Holm lists the failing functions; DESIGN §9.5). Requires proper priors; all test configurations use them.
 - **Simulation-based calibration** (Talts et al. 2018; Modrák et al. 2025). 200–1000 replications; rank statistics for each parameter and for data-dependent test quantities, including the log-likelihood, which Modrák et al. (2025) show increases sensitivity. Thinned to reduce autocorrelation. Pass: no rejection of uniformity at 1% after multiplicity correction (ECDF-envelope test).
 - These tests catch exactly the CCM-type failure: a sampler that converges to a distribution close to, but not equal to, the posterior.
 - **Analytic twin.** Once the asymmetric conjugate prior exists, MCMC `Linear(form="structural") × Constant` with the same normal-inverse-gamma priors must match its exact iid posterior within MCSE. This is an end-to-end oracle for the MCMC engine at realistic sizes (`n = 20+`), where Geweke tests and SBC are too expensive.
@@ -517,11 +517,11 @@ Output per comparison: `better` / `worse` / `inconclusive`, with the reasons. Fo
 
 ### 10.4 Parity with R (numerical oracles)
 
-- `tools/make_r_fixtures.R` runs the R packages on fixed datasets (a FRED-QD subset, a FRED-MD subset, simulated data) and writes posterior summaries and forecast quantiles to NetCDF files under `tests/parity/fixtures/`. It is not run in CI; R and package versions are stored in the fixture attributes.
+- `tools/make_r_fixtures.R` runs the R packages on fixed datasets (a FRED-QD subset, a FRED-MD subset, simulated data) and writes posterior summaries and forecast quantiles to NetCDF files under `tests/parity/fixtures/` (the Phase 1 R `BVAR` fixtures are JSON; the Phase 2 NetCDF files are packed by `tools/make_sv_parity_data.py`). It is not run in CI; R and package versions are stored in the fixture attributes.
 - Comparisons:
   - `BVAR`: log-ML at fixed hyperparameters (deterministic; equal up to a documented constant, relative tolerance 1e-8); posterior quantiles of `B`, `Σ` and hyperparameters within 4 MCSE.
   - `stochvol`: posteriors of `μ`, `φ`, `σ` and log-volatility path quantiles within 4 MCSE.
-  - `bayesianVARs`: `Linear(form="reduced")` × SV, since it implements the corrected CCCM triangular algorithm (Phase 2); global-local priors × SV (Phase 3).
+  - `bayesianVARs`: `Linear(form="reduced")` × SV, since it implements the corrected CCCM triangular algorithm, and global-local priors × SV, both at the Phase 3 exit. bayesianVARs 0.1.8 could not be installed for Phase 2 (no binary for the installed R and no Fortran compiler for a source build), so the reduced-form sampler was checked instead against an exact system-wide Gibbs oracle written in R (`vec Π` drawn jointly from its full conditional; `tests/parity/fixtures/bvars_swa_*.nc`; DESIGN §2.10 Stage 4 amendment 2), which shares no code with the JAX engine. Its SV step is one sweep of `stochvol`'s sampler, as in bayesianVARs. The convention probes P1–P5 (DESIGN §9.9) stay open until bayesianVARs runs.
   - `factorstochvol`: `FactorSV` (Phase 5).
   - `bvarsv`: TVP-VAR-SV, small `n` (Phase 5).
 - **Python-side oracle:** the Bank of England `bvar` (MIT, pip-installable) covers the conjugate GLP path. It runs directly in CI as a second check on Phase 1, without R.
@@ -543,8 +543,9 @@ Size (false `better` rate on null DGPs) and power are reported in the documentat
 
 ### 10.6 Runtime convergence diagnostics
 
-- Rank-normalised split R-hat, bulk and tail ESS (Vehtari et al. 2021) via ArviZ, monitored on hyperparameters, a subset of coefficients, log-volatilities at selected dates, and the log-likelihood. MCSE for forecast quantiles and for ΔLPD.
-- Defaults: 4 chains, R-hat < 1.01, bulk ESS > 400. Warnings attach to results and aggregate across backtest origins.
+- Rank-normalised split R-hat, bulk and tail ESS (Vehtari et al. 2021), monitored on hyperparameters, a subset of coefficients, log-volatilities at selected dates, and the log-likelihood. MCSE for forecast quantiles and for ΔLPD.
+- Defaults: 4 chains, R-hat < 1.01, bulk ESS > 400; 10,000 kept draws per chain for compositions with stochastic volatility and 2,000 otherwise (DESIGN D-35). Warnings attach to results and aggregate across backtest origins.
+- *As implemented* (DESIGN D-24, D-33, §8): the estimators are an in-repo NumPy implementation (`rai_bvar.diagnostics`: R-hat, bulk, tail and mean ESS, MCSE of means and quantiles), tested against reference values computed with ArviZ; ArviZ is not a dependency. `converged` is decided by a primary monitor set (the log-likelihood; per equation the own first-lag reduced-form coefficient and `log λ` (constant volatility) or `μ, φ, σ, h_T` (SV; random walk: `σ, h_T`)) and needs at least two chains; the other monitored quantities are reported without gating. MCSE for ΔLPD is in `compare()` (§9.5). MCSE for forecast quantiles is *not implemented* (Phase 2 scope, not yet scheduled): `ForecastResult.quantiles` returns plain quantiles, although `diagnostics.mcse_quantile_many` computes it from `(chain, draw)` arrays. At 4 × 2,000 draws, the default before D-35, SV fits often missed the gate, mostly on `σ` and `φ` and on the log-likelihood (DESIGN Q14, §12.2). Since D-35 (2026-10-24) `MCMCSettings.draws` defaults per composition, resolved when the model is built and recorded in its spec: 4 × 10,000 for SV compositions (`SV`, with or without outliers, Student-t tails or a random walk) and 4 × 2,000 for constant volatility; an SV fit with fewer than 10,000 kept draws per chain warns, naming the evidence and how to raise the draws. The gate itself is unchanged, and 4 × 10,000 does not guarantee it (BENCH-P2 misses it on 4 of 101 primary quantities).
 
 ### 10.7 Replication targets (phase acceptance)
 
@@ -563,18 +564,20 @@ Size (false `better` rate on null DGPs) and power are reported in the documentat
 | MCMC engine | `jax` (x64 enabled) | Hand-written Gibbs; `lax.scan` over iterations; `vmap` over chains and equations |
 | BART | `bartz` (MIT, JAX, pre-1.0) | Low-level `mcmcstep` / `mcmcloop` API with per-observation `error_scale`. Version pinned behind an adapter; gated by the Phase 4 spike (§13); fallback is an in-house JAX BART |
 | Containers | `xarray.DataTree` (core since xarray 2024.10) | Posterior and forecast storage; the native format of ArviZ 1.x |
-| Diagnostics | `arviz-base`, `arviz-stats` (ArviZ ≥ 1.0) | R-hat, ESS, MCSE, LFO-CV; behind a thin adapter, versions pinned |
+| Diagnostics | in-repo NumPy (`rai_bvar.diagnostics`; DESIGN D-24) | R-hat, bulk/tail/mean ESS, MCSE of means and quantiles, tested against ArviZ reference values; ArviZ is not a dependency. `arviz-stats` remains the plan for PSIS-LFO-CV (§9.4, Phase 4) |
 | Scores | `scoringrules` (Apache-2.0) | CRPS, threshold-weighted CRPS, energy and variogram scores (§9.2) |
 | Data | `pandas` | |
 | Plots | `matplotlib` | Optional extra |
 | Testing | `pytest`, `hypothesis` | |
 | Not in core | PyMC, NumPyro, `pymc-bart` | NUTS mixes worse than precision-sampler Gibbs + ASIS on SV/TVP states; `pymc-bart` (now on PyMC 6 and the Rust `bartrs` backend) runs only inside a PyMC model |
 
-Extras: `rai-bvar[bart]`, `rai-bvar[plot]`, `rai-bvar[dev]`. **Python ≥ 3.12**, which current JAX, ArviZ 1.x and `scoringrules` already require; afterwards follow SPEC 0.
+Extras: `rai-bvar[bart]` (Phase 4), `rai-bvar[plot]`; development tools are the `dev` dependency group (`uv sync --group dev`), not an extra. **Python ≥ 3.12**, which current JAX, ArviZ 1.x and `scoringrules` already require; afterwards follow SPEC 0.
 
 ---
 
 ## 12. Package layout
+
+The tree below is the plan written before Phase 0. For the files that exist through Phase 2, `docs/phase2/DESIGN.md` §1.2 is authoritative: the priors live in `src/rai_bvar/priors/`, the MCMC components in `components/{structure, mean, coef, vol}/`, the engine in `engines/mcmc/` (about twenty modules), and the validation harness in `src/rai_bvar/validation/`.
 
 ```text
 src/rai_bvar/
@@ -632,7 +635,7 @@ src/rai_bvar/
 │   ├── screening.py          # exact log-ML; PSIS-LFO                 [P4]
 │   ├── backtest.py           # origins, windows, warm starts, caching, parallelism            [P0]
 │   └── compare.py            # compare(), grid(), tables, plots, verdict()                     [P0]
-└── diagnostics.py            # R-hat, ESS, MCSE (ArviZ adapter)
+└── diagnostics.py            # R-hat, ESS, MCSE (in-repo NumPy; D-24)
 
 tests/
 ├── unit/   contract/   integration/                                  [P0]
@@ -682,19 +685,31 @@ EB with dummy hyperparameters runs a deterministic multistart (secondary modes i
 ### Phase 2: MCMC engine and the volatility axis
 
 - JAX Gibbs runner (`sweep`, `state`, `runner`, `linalg`).
-- `Linear` (structural form, and reduced form via the corrected CCCM 2022 sampler) × {`Constant`, `SV`, `SV(outliers=True)`, `SV(tails="t")`}.
+- `Linear` (structural form, and reduced form via the corrected CCCM 2022 sampler) × {`Constant`, `SV`, `SV(outliers=True)`, `SV(tails="t")`} (delivered with `SV(rw=True)`, `SV(outliers=True, tails="t")` and SOC/SUR dummies on the MCMC engine as well).
 - Ordering-sensitivity check; runtime convergence diagnostics.
 
-**Exit:** Geweke and SBC green for every composition; `stochvol` parity; `bayesianVARs` parity for the reduced-form sampler; performance target (to be calibrated in a pilot, initial goal: `n = 20`, `p = 4`, `T = 300`, `Linear × SV`, 4 chains × 10,000 draws in under 2 minutes on a laptop CPU); Clark-Ravazzolo-style replication.
+**Exit:** Geweke and SBC green for every composition; `stochvol` parity; parity of the reduced-form sampler with an exact oracle: `bayesianVARs`, or, while it cannot be installed, an exact system-wide Gibbs sampler that shares no code with the engine (§10.4; amended 2026-10-23, when `bayesianVARs` parity moved to the Phase 3 exit); performance target (to be calibrated in a pilot, initial goal: `n = 20`, `p = 4`, `T = 300`, `Linear × SV`, 4 chains × 10,000 draws in under 2 minutes on a laptop CPU); Clark-Ravazzolo-style replication.
+
+*Status (2026-10-23): met, under the exit criteria as amended on that date.* Per criterion, the evidence (local runs recorded in the cited files and commits, unless CI is named), the substitutions and what is still open (`docs/phase2/DESIGN.md` §13 has the exit-criteria map):
+
+- **Geweke and SBC for every composition: met.** Geweke (DESIGN §9.5): G-small passes for the PR rows (1–5, 7–10, 17, 18, 201–205), which run in CI on every pull request and are green on `888f620` (run 40020554571). G-full passes for every row: rows 1–17 and 201–205 on `4bb978a`, and row 18 (reduced form × `SV(rw=True)`, the Clark–Ravazzolo SV arm) on `7f410dc` (max |z| 1.90). SBC (DESIGN §9.6) passes for rows 1–17 and 201–204 and the block tier on `408a7f4` (66 tests), row 205 (min p 0.018) and row 18 (min p 0.019 over 59 quantities, thinning cap 400). Mutation suite: 37 of 37 mutant × tier checks caught (`408a7f4`). Open: no validation record (`*.jsonl`) is committed yet (the weekly CI job now uploads one as an artifact); the weekly tier has not yet run in CI on Phase 2 code; the SBC of rows 7–11, 13, 14, 201 and 203 predates later kernel changes (`3d3f51b`, `f60d736`, `00524a9`) and is to be re-run; row 18's SBC pass relies on the per-replication ESS rule, which has a known blind spot there (DESIGN §9.5 row 18 note).
+- **`stochvol` parity: met** (DESIGN §9.9; `tests/parity/SV_PARAMETRIZATION.md` §6). Gaussian SV, datasets (i)–(iv) × the main and default priors: max |z| 1.63–2.59 per PR (4 × 6,000 draws) and 1.64–3.57 in the long runs, against the bound 4.00; the two `exact=True` rows 2.14 and 2.56. Student-t SV: `stochvol` 3.2.1's t sampler does not target the standardized-t SV posterior, so the criterion is met by an exact importance-sampling oracle (max |z| 1.83, bound 4.00), and the `stochvol_v_t5` comparison stays a strict expected failure until a fixture from `stochvol` ≥ 3.2.5 exists (DESIGN §2.10 Stage 4 amendment 1). All fixtures were made with `stochvol` 3.2.1.
+- **Reduced-form sampler parity: met with the exact system-wide Gibbs oracle** (§10.4; DESIGN §2.10 Stage 4 amendment 2). Max |z| against the bound: `bvars_swa_n3p2_const` 2.76 per PR and 2.75 in the long run (4.05), `bvars_swa_n3p2_sv` 3.45 (4.15), `bvars_swa_n7p4_sv` 3.56 (4.51). A second, NumPy system-wide oracle checks the triangular sampler for reduced form × `Constant` at `n ∈ {2, 3, 4}` (DESIGN §9.8 A7). `bayesianVARs` parity, with its convention probes P1–P5, moves to the Phase 3 exit.
+- **Performance target: met.** BENCH-P2 (DESIGN §10.1) takes 52.3 s end to end with a cold compilation cache (49.6 s warm) on one device of the reference laptop (Apple M5 Max, `tests/bench/baseline.json`), against 120 s. Caveats: the machine was not idle (1-minute load average 2.4–6.3), and the baseline records 6 performance cores against the 8 or more of DESIGN §10.1; every timed run reports `converged = False` (4 of 101 primary quantities miss R-hat < 1.01, the worst at 1.016; DESIGN Q14, resolved by D-35, which makes this budget the SV default and keeps the gate); the only x86 run (a loaded 4-core cloud VM, 311 s, the provisional baseline of `d37e059`) is not a reference measurement, and neither an idle x86 laptop nor the 4-device stretch target (< 60 s) has been measured (DESIGN Q2).
+- **Clark–Ravazzolo-style replication: met, with one criterion documented as not met** (DESIGN §13 WP23). The pre-registered acceptance run (`benchmarks/reports/clark_ravazzolo_acceptance.md`, run at `c823d20`, report `65dd212`; 4 × 20,000 draws; the opt-in path-integrated LPD of §7) meets criteria 1, 2, 3, 5 and 6 (6: the SV verdict is `better` in 24 of 24 orderings with the convergence gate on). Criterion 4 is not met: the unemployment-rate gain grows from h = 1 to h = 8 (ΔLPS +0.160 to +0.273) where the rule needs it to shrink.
+- **Ordering-sensitivity check and runtime diagnostics: delivered.** `rb.ordering_sensitivity` (§6.6; prior, forecast and backtest modes); the diagnostics of §10.6 with the `converged` flag and the convergence gate of `compare()` (§9.5). At the pre-D-35 default of 4 × 2,000, `converged = False` was routine for SV fits (DESIGN Q14); D-35 (2026-10-24) raises the SV default to 4 × 10,000 kept draws and warns below it (§10.6).
+- **Analytic twin** (pulled in from Phase 3, §10.3): the Chan (2022) closed form (`engines/structural_nig.py`) and the MCMC-against-exact oracles A1–A5 (DESIGN §9.8); the user-facing `AsymmetricConjugate` prior stays in Phase 3 (DESIGN Q13).
+
+CI: the fast suite is green on the merged Phase 2 commits (`3802295`, `08e1eda`, `888f620`; Python 3.12–3.14). Its persistent compilation cache never hit through `888f620`, so every PR job ran cold (mostly 40–85 minutes per job); the fix and the amended PR-tier budget are in DESIGN §9.10 and are not yet verified in CI.
 
 ### Phase 3: Shrinkage and practical features
 
 - Horseshoe, Normal-Gamma, Dirichlet-Laplace, R2D2, SSVS.
-- Asymmetric conjugate prior (Chan 2022). Candidate to pull into Phase 2: it is the analytic twin of `Linear(form="structural") × Constant` and gives an exact oracle for the MCMC engine (§10.3).
+- Asymmetric conjugate prior (Chan 2022). Candidate to pull into Phase 2: it is the analytic twin of `Linear(form="structural") × Constant` and gives an exact oracle for the MCMC engine (§10.3). (Its closed form and the oracles were pulled into Phase 2; the user-facing prior and engine rule are Phase 3, DESIGN Q13.)
 - `CommonSV` (Carriero, Clark & Marcellino 2016): a conjugate-speed SV screen for large `n` (decision D2).
 - Conditional forecasts. (The Model Confidence Set landed in Phase 0.)
 
-**Exit:** `bayesianVARs` parity; `bvars` parity for `CommonSV`; DGP verdict-engine tests on linear DGPs.
+**Exit:** `bayesianVARs` parity for the global-local priors × SV and for the reduced-form sampler (moved from the Phase 2 exit on 2026-10-23), after its convention probes P1–P5 are settled (DESIGN §9.9); `bvars` parity for `CommonSV`; DGP verdict-engine tests on linear DGPs.
 
 ### Phase 4: Nonlinear mean
 
@@ -730,12 +745,14 @@ EB with dummy hyperparameters runs a deterministic multistart (secondary modes i
 | Overlap with emerging Python projects (Bank of England `bvar`, Chan's toolkit port, `bvhar`) | Differentiate on the ablation/verdict engine, factorial composition and validation (§1.4); reuse MIT code where it helps; consider interop or contributing instead of duplicating |
 | Backtest compute cost (grid × origins × chains) | Caching, warm starts, `estimate_cost()`, analytic models as a first screen |
 | Variable-ordering dependence | R8, ordering-sensitivity check, order-invariant models in Phase 5 |
-| ArviZ API churn | Thin adapter module; pinned versions |
+| ArviZ API churn | Diagnostics implemented in-repo (DESIGN D-24), ArviZ used only for test reference values; for the Phase 4 PSIS-LFO-CV, a thin adapter with pinned versions |
 | Users expect reduced-form Minnesota but get the structural-form default | Both forms offered; default stated in the docs and in `fit.summary()` |
 | GPL contamination | Clean-room rule (§2.1); PR checkbox |
 | JAX compile times across many compositions | Cache compiled sweeps by static configuration; no Python-level branching inside sweeps |
 
 **Decisions (2026-10-21)**
+
+The Phase 2 implementation decisions (D-1…D-35) and open questions (Q1…Q14; Q14 resolved by D-35) are in `docs/phase2/DESIGN.md` §0.1 and §12.2.
 
 | ID | Question | Decision | Rationale |
 | :--- | :--- | :--- | :--- |
@@ -780,6 +797,7 @@ EB with dummy hyperparameters runs a deterministic multistart (secondary modes i
 - Lenza, M., & Primiceri, G. E. (2022). How to estimate a vector autoregression after March 2020. *Journal of Applied Econometrics*, 37(4), 688–699.
 - McCausland, W. J., Miller, S., & Pelletier, D. (2011). Simulation smoothing for state-space models: A computational efficiency analysis. *Computational Statistics & Data Analysis*, 55(1), 199–212.
 - Omori, Y., Chib, S., Shephard, N., & Nakajima, J. (2007). Stochastic volatility with leverage: Fast and efficient likelihood inference. *Journal of Econometrics*, 140(2), 425–449.
+- Rue, H. (2001). Fast sampling of Gaussian Markov random fields. *Journal of the Royal Statistical Society: Series B*, 63(2), 325–338.
 - Sims, C. A., & Zha, T. (2006). Were there regime switches in U.S. monetary policy? *American Economic Review*, 96(1), 54–81.
 
 ### Forecast evaluation

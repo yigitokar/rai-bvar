@@ -71,8 +71,10 @@ class BVAR:
 
     ``mean`` and ``vol`` are stored resolved (no ``auto`` survives construction). ``mcmc`` holds
     the sampler settings of MCMC compositions (``None`` → ``MCMCSettings()``, a mapping is
-    accepted) and is part of their spec; on an analytic composition it is normalised to ``None``
-    so the Phase 1 spec is unchanged.
+    accepted) and is part of their spec; ``draws=None`` is resolved to the composition's default
+    (D-35: 4 × 10,000 kept draws with ``SV``, 4 × 2,000 with ``Constant``) and stored, so the
+    spec records the budget. On an analytic composition it is normalised to ``None`` so the
+    Phase 1 spec is unchanged.
     """
 
     mean: Linear = field(default_factory=Linear)
@@ -113,7 +115,8 @@ class BVAR:
                     "Lenza-Primiceri scaling needs fixed=(s0, s1, s2, rho) with hierarchy='fixed'"
                 )
             return
-        object.__setattr__(self, "mcmc", settings or MCMCSettings())
+        settings = (settings or MCMCSettings()).with_default_draws(sv=isinstance(self.vol, SV))
+        object.__setattr__(self, "mcmc", settings)
         self._check_mcmc_rules()
         from rai_bvar.engines.mcmc.config import MeanStatic, validate_composition
 
@@ -208,7 +211,7 @@ class BVAR:
             extra += ", COVID" + (f" {label}" if label else "")
         if self.engine == "analytic":
             return f"BVAR({self.mean.prior.label}, p={self.lags}{extra})"
-        if self.mcmc != MCMCSettings():
+        if self.mcmc != default_mcmc(self.vol):
             extra += f", mcmc={_short(self.mcmc)}"
         return f"BVAR({self.mean.prior.label}, {_vol_label(self.vol)}, p={self.lags}{extra})"
 
@@ -434,6 +437,12 @@ def static_parts(model: BVAR) -> StaticParts:
             coupled=False,
         )
     return StaticParts(struct, mean_kind, coef_scaling, CoefPriorStatic(), vstatic)
+
+
+def default_mcmc(vol: Constant | SV) -> MCMCSettings:
+    """The resolved default ``MCMCSettings`` of an MCMC composition with volatility ``vol``
+    (D-35): ``MCMCSettings()`` with ``draws`` = 10,000 for ``SV``, 2,000 for ``Constant``."""
+    return MCMCSettings().with_default_draws(sv=isinstance(vol, SV))
 
 
 def _mode_ii(model: BVAR) -> bool:

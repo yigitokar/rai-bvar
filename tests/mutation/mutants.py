@@ -26,8 +26,8 @@ configuration (M16). The tier checks:
 
 A mutant is caught by a tier when the tier's decision rule fails on the mutant **and** passes on
 its control. :data:`MUTANTS` records, per mutant, the catching tiers confirmed by running
-``test_mutants.py`` (with the evidence observed on 2026-10-22, M1 Pro, and reproduced on x86-64
-Linux); DESIGN §9.7 requires at least one per mutant.
+``test_mutants.py`` (37 mutant × tier checks; M1–M16 observed on 2026-10-22 on an M1 Pro, M17–M18 on
+an Apple M5 Max, both reproduced on x86-64 Linux); DESIGN §9.7 requires at least one per mutant.
 
 Notes found while confirming the tiers:
 
@@ -824,13 +824,14 @@ _ALL: tuple[Mutant, ...] = (
            "WP25 (N04 §3.1): U (density ratio), G", "reduced_constant_dummies",
            _ov(cccm_core=m18_cccm_core), u_check=u_cccm_dummies, catchers=("U", "G")),
 )  # fmt: skip
-#: Observed on 2026-10-22 (M1 Pro): U errors (mutant / control), G-small max |z| (mutant /
-#: control; t_crit 4.1–4.5), B and S Bonferroni q or min p (mutant / control). Re-run
-#: independently on x86-64 Linux (4 CPUs) the same day: all 33 mutant × tier checks caught, every
-#: control passed, the statistics equal to the digits shown (M2: G 705 / 2.47). M17–M18 (WP25)
-#: add four checks, recorded on an Apple M5 Max (arm64, macOS 26.6) and reproduced independently
-#: on x86-64 Linux the same day (``-k "M17 or M18"``: 4 passed): M17 U 0.0602 / 2.25e-15, G max |z|
-#: 23.15 / 2.44 (t_crit 4.26); M18 U 0.405 / 2.35e-14, G 99.7 / 2.61 (t_crit 4.40).
+#: M1–M16 observed on 2026-10-22 (M1 Pro): U errors (mutant / control), G-small max |z|
+#: (mutant / control; t_crit 4.1–4.5), B and S Bonferroni q or min p (mutant / control). Re-run
+#: independently on x86-64 Linux (4 CPUs) the same day: all 33 mutant × tier checks of M1–M16
+#: caught, every control passed, the statistics equal to the digits shown (M2: G 705 / 2.47).
+#: M17–M18 (WP25) add four checks (37 in all), recorded on an Apple M5 Max (arm64, macOS 26.6)
+#: and reproduced independently on x86-64 Linux the same day (``-k "M17 or M18"``: 4 passed):
+#: M17 U 0.0602 / 2.25e-15, G max |z| 23.15 / 2.44 (t_crit 4.26); M18 U 0.405 / 2.35e-14,
+#: G 99.7 / 2.61 (t_crit 4.40).
 EVIDENCE: dict[str, str] = {
     "M1": "U 1.70 / 1.6e-14; B (π_0 block SBC) loglik p 2.8e-11 / min p 0.10; G 20.8 / 3.03; "
     "one-block invariance of the whole CCCM scan: q 0.29 (not caught)",

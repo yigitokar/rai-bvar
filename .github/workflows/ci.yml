@@ -14,7 +14,10 @@ on:
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # the event is part of the group: a merge to main must not cancel the hours-long weekly run (or
+  # a manual bench run) on the same ref; a new push to a PR still cancels that PR's older run. The
+  # bench input is too, so a bench dispatch and a weekly dispatch on one ref run side by side.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.bench }}
   cancel-in-progress: true
 
 jobs:
@@ -42,29 +45,78 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --group dev
-      # Persistent XLA compilation cache (DESIGN §9.10 budgets the PR tier with it): a warm cache
-      # makes the MCMC tests about 3x faster and changes no result (a hit loads the executable the
-      # same program compiles to). The key carries the CPU model, so an executable built for one
-      # instruction set is never loaded on another; a new key per run keeps the cache current.
-      - name: CPU model
-        id: cpu
-        run: echo "model=$(grep -m1 'model name' /proc/cpuinfo | md5sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v4
+      # Persistent XLA compilation cache (DESIGN §9.10 budgets the PR tier with it). A hit loads the
+      # executable the same program compiles to, so it changes no result. Key = stable prefix
+      # xla-<os>-py<ver>-<isa>-<uv.lock>- plus a per-run suffix; restore-keys = the prefix, so a run
+      # restores the newest entry of its bucket from its own ref, else from its PR base or main.
+      # <isa> = md5 of the /proc/cpuinfo "model name" and "flags" lines, one bucket per runner CPU
+      # (the pool mixes AMD EPYC 7763/9V74/9V45 and Intel Xeon 8370C/8573C). JAX's own key (jax
+      # 0.12.0.1) hashes XLA_FLAGS and the CPU topology: the target CPU name and the host's whole
+      # feature list. An entry is only served to a runner with the same features, so a bucket shared
+      # by CPU models would gain no hits, only size; an ISA cap (--xla_cpu_max_isa) does not change
+      # that and was reverted (DESIGN §9.10, 2026-10-24). py stays in the key: JAX 0.12 compresses
+      # entries with zstd on 3.14 and zlib on 3.12/3.13 under the same JAX key.
+      - name: XLA cache key
+        id: xla
+        run: |
+          isa=$({ grep -m1 '^model name' /proc/cpuinfo; grep -m1 '^flags' /proc/cpuinfo; } | md5sum | cut -c1-12)
+          echo "runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU, ISA $isa, XLA_FLAGS ${XLA_FLAGS:-none}"
+          echo "isa=$isa" >> "$GITHUB_OUTPUT"
+          echo "prefix=xla-${RUNNER_OS}-py${{ matrix.python-version }}-${isa}-${{ hashFiles('uv.lock') }}-" >> "$GITHUB_OUTPUT"
+      - name: Restore XLA cache
+        id: xla-restore
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/jax-xla
-          key: xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: |
-            xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-
+          key: ${{ steps.xla.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ steps.xla.outputs.prefix }}
+      # entries are never evicted, so a chain of restores only grows: start over above 1 GiB
+      # (a cold fast suite writes about 0.25 GiB; the repository's cache quota is 10 GB)
+      - name: XLA cache size check
+        run: |
+          dir="$RUNNER_TEMP/jax-xla"
+          mkdir -p "$dir"
+          if [ "$(du -sm "$dir" | cut -f1)" -gt 1024 ]; then
+            echo "restored XLA cache exceeds 1 GiB: starting from an empty cache"
+            rm -rf "$dir" && mkdir -p "$dir"
+          fi
+          echo "XLA_ENTRIES_BEFORE=$(find "$dir" -type f | wc -l)" >> "$GITHUB_ENV"
       - name: Fast suite (unit, contract, integration)
         env:
           JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-xla
           JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
-        run: uv run pytest -m "not slow and not network and not bench" --durations=30
-      - uses: actions/cache/save@v4
+        run: |
+          start=$(date +%s)
+          status=0
+          uv run pytest -m "not slow and not network and not bench" --durations=30 || status=$?
+          echo "PYTEST_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          exit "$status"
+      # the measurement behind the PR-tier budget (DESIGN §9.10): hit or miss, entries reused, time
+      - name: XLA cache report
+        id: xla-report
         if: always()
+        env:
+          MATCHED: ${{ steps.xla-restore.outputs.cache-matched-key }}
+          ISA: ${{ steps.xla.outputs.isa }}
+        run: |
+          added=$(( $(find "$RUNNER_TEMP/jax-xla" -type f | wc -l) - ${XLA_ENTRIES_BEFORE:-0} ))
+          echo "added=$added" >> "$GITHUB_OUTPUT"
+          {
+            echo "### XLA cache, Python ${{ matrix.python-version }}"
+            echo "- runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU"
+            echo "- ISA bucket: ${ISA:-unknown}; XLA_FLAGS: ${XLA_FLAGS:-none}"
+            echo "- restored: ${MATCHED:-nothing (cold run)}"
+            echo "- entries restored: ${XLA_ENTRIES_BEFORE:-0}; written by this run: $added"
+            echo "- fast suite wall time: ${PYTEST_SECONDS:-not measured} s"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # saved only when this run compiled something new (a clean hit would duplicate its entry and
+      # spend quota that evicts main's entries); a cancelled or failed run still saves its work
+      - name: Save XLA cache
+        if: always() && steps.xla-report.outputs.added != '0'
+        uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/jax-xla
-          key: xla-${{ runner.os }}-py${{ matrix.python-version }}-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          key: ${{ steps.xla.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
 
   macos:  # weekly: macOS minutes bill at 10x; local development runs on macOS anyway
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench)
@@ -81,33 +133,107 @@ jobs:
   nightly:  # weekly despite the name (DESIGN §9.10 nightly + weekly tiers, run together)
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench)
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      # bench (BENCH-P2, timing gates) is pre-release only: never in the weekly tier
+      TIER_MARKERS: "(slow or network) and not bench"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
       - run: uv sync --group dev
-      # Same persistent XLA compilation cache as the fast suite (own key: different programs).
-      - name: CPU model
-        id: cpu
-        run: echo "model=$(grep -m1 'model name' /proc/cpuinfo | md5sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v4
+      # Same persistent XLA compilation cache and <isa> rule as the fast suite (own prefix: different
+      # programs).
+      - name: XLA cache key
+        id: xla
+        run: |
+          isa=$({ grep -m1 '^model name' /proc/cpuinfo; grep -m1 '^flags' /proc/cpuinfo; } | md5sum | cut -c1-12)
+          echo "runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU, ISA $isa, XLA_FLAGS ${XLA_FLAGS:-none}"
+          echo "prefix=xla-slow-${RUNNER_OS}-py3.12-${isa}-${{ hashFiles('uv.lock') }}-" >> "$GITHUB_OUTPUT"
+      - name: Restore XLA cache
+        id: xla-restore
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/jax-xla
-          key: xla-slow-${{ runner.os }}-py3.12-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: |
-            xla-slow-${{ runner.os }}-py3.12-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-
-      # bench (BENCH-P2, timing gates) is pre-release only: never in the weekly tier
+          key: ${{ steps.xla.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ steps.xla.outputs.prefix }}
+      - name: XLA cache size check
+        run: |
+          dir="$RUNNER_TEMP/jax-xla"
+          mkdir -p "$dir"
+          if [ "$(du -sm "$dir" | cut -f1)" -gt 1024 ]; then
+            echo "restored XLA cache exceeds 1 GiB: starting from an empty cache"
+            rm -rf "$dir" && mkdir -p "$dir"
+          fi
+          echo "XLA_ENTRIES_BEFORE=$(find "$dir" -type f | wc -l)" >> "$GITHUB_ENV"
+      # Validation record (geweke.jsonl, sbc.jsonl, mutation.jsonl, ...: the tests append one JSON
+      # line per run to $RAI_BVAR_VALIDATION_RECORD/<kind>.jsonl), uploaded as an artifact so the
+      # results can be committed; meta.json names the commit, run, runner, versions and XLA_FLAGS
+      # they belong to.
+      - name: Validation record metadata
+        env:
+          RAI_BVAR_VALIDATION_RECORD: ${{ runner.temp }}/validation-record
+        run: |
+          mkdir -p "$RAI_BVAR_VALIDATION_RECORD"
+          uv run python - <<'EOF'
+          import datetime
+          import json
+          import os
+          import platform
+          from importlib.metadata import version
+
+          env = os.environ
+          cpu = next(
+              (line.split(":", 1)[1].strip() for line in open("/proc/cpuinfo") if line.startswith("model name")),
+              platform.processor(),
+          )
+          meta = {
+              "commit": env["GITHUB_SHA"],
+              "ref": env["GITHUB_REF"],
+              "event": env["GITHUB_EVENT_NAME"],
+              "run": f"{env['GITHUB_SERVER_URL']}/{env['GITHUB_REPOSITORY']}/actions/runs/{env['GITHUB_RUN_ID']}",
+              "run_attempt": int(env["GITHUB_RUN_ATTEMPT"]),
+              "started_utc": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+              "markers": env["TIER_MARKERS"],
+              "runner": {"platform": platform.platform(), "cpu": cpu, "logical_cpus": os.cpu_count()},
+              "python": platform.python_version(),
+              "versions": {p: version(p) for p in ("jax", "jaxlib", "numpy", "scipy")},
+              "rai_bvar_env": {k: env[k] for k in sorted(env) if k.startswith("RAI_BVAR_")},
+              "xla_flags": env.get("XLA_FLAGS", ""),
+          }
+          with open(os.path.join(env["RAI_BVAR_VALIDATION_RECORD"], "meta.json"), "w") as fh:
+              json.dump(meta, fh, indent=1)
+              fh.write("\n")
+          print(json.dumps(meta, indent=1))
+          EOF
+      # the step timeout leaves the job time to upload the record and save the cache (the jsonl
+      # lines are appended per test, so a run cut short still records every finished row)
       - name: Slow and network tests
+        timeout-minutes: 330
         env:
           JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-xla
           JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
-        run: uv run pytest -m "(slow or network) and not bench" --durations=30
-      - uses: actions/cache/save@v4
+          RAI_BVAR_VALIDATION_RECORD: ${{ runner.temp }}/validation-record
+        run: uv run pytest -m "$TIER_MARKERS" --durations=30 --junitxml="$RAI_BVAR_VALIDATION_RECORD/junit.xml"
+      - name: Upload validation record
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-record-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validation-record
+          if-no-files-found: warn
+          retention-days: 90
+      - name: XLA cache report
+        id: xla-report
+        if: always()
+        run: echo "added=$(( $(find "$RUNNER_TEMP/jax-xla" -type f | wc -l) - ${XLA_ENTRIES_BEFORE:-0} ))" >> "$GITHUB_OUTPUT"
+      - name: Save XLA cache
+        if: always() && steps.xla-report.outputs.added != '0'
+        uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/jax-xla
-          key: xla-slow-${{ runner.os }}-py3.12-${{ steps.cpu.outputs.model }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          key: ${{ steps.xla.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
 
   bench:  # pre-release tier (DESIGN §9.10): manual only (Actions > CI > Run workflow > bench)
     if: github.event_name == 'workflow_dispatch' && inputs.bench

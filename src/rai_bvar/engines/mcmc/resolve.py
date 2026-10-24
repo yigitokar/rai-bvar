@@ -81,7 +81,7 @@ from rai_bvar.priors.sv_arrays import (
     sv_prior_arrays,
     transitory_arrays,
 )
-from rai_bvar.settings import FitPlan, MCMCSettings, Runtime
+from rai_bvar.settings import SV_DEFAULT_DRAWS, FitPlan, MCMCSettings, Runtime
 
 if TYPE_CHECKING:
     from rai_bvar.api import BVAR
@@ -118,8 +118,9 @@ class Resolved:
 
     ``warning_inputs`` (an addition to the DESIGN fields) carries the resolution step's inputs of
     the DESIGN §8.3 warning table to ``FitMeta.warning_inputs``: ``covers_2020``, ``tcode_clash``
-    (the Phase 1 checks, recomputed for the MCMC fit) and ``eb_warnings`` (EB optimisation and ψ
-    messages).
+    (the Phase 1 checks, recomputed for the MCMC fit), ``eb_warnings`` (EB optimisation and ψ
+    messages) and ``sv_budget`` (``(chains, draws)`` of an SV composition below the SV default
+    budget, else ``None``; D-35).
     """
 
     static: StaticConfig
@@ -296,8 +297,19 @@ def resolve(
             "covers_2020": _covers_2020(periods),
             "tcode_clash": _tcode_clash(model, data, scales),
             "eb_warnings": tuple(dict.fromkeys(messages)),
+            "sv_budget": _sv_budget(model),
         },
     )
+
+
+def _sv_budget(model: BVAR) -> tuple[int, int] | None:
+    """``(chains, draws)`` of a stochastic-volatility composition fitted with fewer kept draws per
+    chain than ``SV_DEFAULT_DRAWS`` (the D-35 warning), else ``None``: never for ``Constant``
+    volatility, nor for an explicit budget at or above the default."""
+    settings: MCMCSettings = model.mcmc
+    if isinstance(model.vol, SV) and settings.draws < SV_DEFAULT_DRAWS:
+        return settings.chains, settings.draws
+    return None
 
 
 def _hyper(

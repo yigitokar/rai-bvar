@@ -550,10 +550,16 @@ def test_sv_is_frozen_hashable_and_picklable():
 
 def test_mcmc_settings_defaults_follow_the_design():
     s = rb.MCMCSettings()
-    assert (s.chains, s.draws, s.burn, s.thin, s.warm_burn, s.seed) == (4, 2000, 1000, 1, None, 0)
+    assert (s.chains, s.draws, s.burn, s.thin, s.warm_burn, s.seed) == (4, None, 1000, 1, None, 0)
     assert (s.store, s.store_max, s.path_thin, s.t_bucket) == ("params", 2500, 10, 32)
     assert (s.gram, s.const_path, s.rhat_max, s.ess_min) == ("auto", "auto", 1.01, 400.0)
-    assert s.resolved_warm_burn == 250 and s.store_thin == 1
+    assert s.resolved_warm_burn == 250
+    # draws=None is the composition default (D-35), resolved by BVAR or with_default_draws
+    with pytest.raises(ValueError, match="draws=None is the composition's default"):
+        _ = s.store_thin
+    sv, constant = s.with_default_draws(sv=True), s.with_default_draws(sv=False)
+    assert sv == rb.MCMCSettings(draws=10_000) and sv.store_thin == 4
+    assert constant == rb.MCMCSettings(draws=2000) and constant.store_thin == 1
 
 
 def test_mcmc_settings_derived_values():

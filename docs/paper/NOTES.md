@@ -57,8 +57,12 @@ re-derived before it goes into the paper).
    23.5 vs control 2.59). Status: verified.
 8. **Every mutant must be caught by some tier** (DESIGN §9.7): the table of mutant × catching tier
    with statistics is a natural paper table. Status: verified, 33/33 mutant × tier checks caught
-   with passing controls (`tests/mutation`, ~10 min with a warm compilation cache). Re-run on
-   the release commit for the paper table (`RAI_BVAR_VALIDATION_RECORD=<dir>` writes the JSON).
+   with passing controls (`tests/mutation`, ~10 min with a warm compilation cache; machine not
+   recorded). Re-run on the release commit for the paper table (`RAI_BVAR_VALIDATION_RECORD=<dir>`
+   writes the JSON). **Count superseded (2026-10-23):** 33 was M1–M16 only. WP25 added M17–M18
+   (U and G each), so the suite has 37 mutant × tier checks (`pytest --collect-only -m mutation
+   tests/mutation` collects the 37 `test_mutant_caught` cases), all 37 caught on
+   `408a7f4`; the weekly CI job now records them in `mutation.jsonl`.
 
 8b. **The path-conditioned RB log score breaks down in the tails at h > 1.** SPEC §7's estimator
    averages p(y_{T+h} | θ_s, simulated path_s up to T+h−1). For outcomes far in the predictive's tail
@@ -112,6 +116,11 @@ re-derived before it goes into the paper).
    burn-in piece sizes, fused/unfused plans and `chains='map'`, but not across `vmap` batch sizes,
    platforms (OpenBLAS vs Accelerate) or `shard_map`; those are compared at rtol ≈ 1e-12.
    Evidence: tests under `tests/mcmc/` (invariance tests). Status: verified in CI (Linux).
+   **Tolerance corrected (2026-10-23):** rtol 1e-12 holds for the toy kernels; the production SV
+   and CCCM kernels are compared at rtol 1e-9 on short runs (chain-count prefixes under `vmap`,
+   `shard_map`; `tests/mcmc/runner/test_chunking.py`, `test_devices_bitwise.py`, DESIGN §5.2), and
+   the bitwise cases above are tested with the toy kernels, plus production chain prefixes with
+   `chains="map"`.
 10. **Float64 failure in the prior's extreme tail.** One Geweke chain out of 4000 reached `h₀ ≈ 30`
     where `|y| ≈ 1e8` made a Cholesky pivot zero; the engine reports it (no silent jitter).
     Evidence: `tests/geweke/test_geweke_compositions.py` docstring. Status: recorded.
@@ -188,6 +197,23 @@ re-derived before it goes into the paper).
     slowly and only the NC move escapes; the fix removes the crash, not the slow mixing.
     Evidence: `tests/mcmc/blocks/test_sv_core.py::test_rw_awol_at_a_tiny_sigma` (60-digit
     reference) and `::test_rw_step_at_a_tiny_sigma_is_ok`. Status: verified (Apple M5 Max).
+
+## F. Defaults and the convergence gate
+
+18. **A convergence-gated verdict needs a composition-aware MCMC budget.** With one default for
+    every composition (4 chains × 2,000 kept draws) the SV fits routinely missed the R-hat < 1.01 /
+    bulk ESS > 400 gate, so `compare()` answered `inconclusive` for every SV comparison although
+    ΔLPD was large (README example: +85.2, MCSE 1.1, at h = 1; the SV arm converged at 0 of 11
+    origins). The SV parameters drive it: φ and σ have ESS ≈ 22–28 per 1,000 sweeps per chain (WP3
+    pilot). The budget, not the gate, was changed (D-35): SV compositions default to 4 × 10,000,
+    and an SV fit below that warns. Even that raises the floor without guaranteeing the gate
+    (README example: 10 of 11 origins at 4 × 10,000, 11 of 11 at 4 × 20,000; Clark–Ravazzolo
+    `SV(rw)`: 72 of 106 at 4 × 5,000, 106 of 106 at 4 × 20,000; BENCH-P2, n = 20, T = 300: 4 of 101
+    primary quantities still miss at 4 × 10,000; the README's full-sample fit: 1 of 16, σ of GDP
+    at R-hat 1.012). A methods point: the gate does its job (it refuses verdicts the draws cannot
+    support), and the default budget has to follow the slowest-mixing block of the composition.
+    Evidence: DESIGN §12.2 Q14 and D-35; `tests/unit/test_default_budget.py` for the policy.
+    Status: recorded (Apple M5 Max, one run each; BENCH-P2 under load).
 
 ## Before submission
 
