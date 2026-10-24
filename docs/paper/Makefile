@@ -32,10 +32,9 @@ export PYTHONDONTWRITEBYTECODE := 1
 export MPLBACKEND := pdf
 export RAI_BVAR_REPO := $(REPO)
 
-# figures whose data exist now: static, computed from committed code, or drawn from the local
-# validation records in figures/data/validation_record/ (tracked on branch paper-draft since 33dd9f8,
-# not on main; no commit or machine field; not the release records of OUTLINE TODO 7; those two
-# figures say so in a footer)
+# figures whose data exist now: static, computed from committed code, or drawn from the release
+# validation record at 7f880e1 (benchmarks/reports/validation/7f880e1_apple-m5-max/record/, main
+# 3d5a407; FigD1 and FigD2 name it in a footer)
 NOW := fig_architecture fig_verdict_flow fig_mutation_heatmap fig_geweke_dots \
        fig_lpd_estimators fig_laplacian_pivots fig_plan
 # figures that need the acceptance run (placeholders until then)

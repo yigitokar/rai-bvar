@@ -7,7 +7,9 @@
 % examples imports rai_bvar.validation (grep at d58c9ef: the only production import is inside the
 % prior mode of structural/ordering.py, which the examples do not call). Both outputs are identical, line for
 % line, to those recorded at 62d15f6 in dossier 02 §13 (ex_b without its two wall-clock lines,
-% which were removed from the script). Re-run on the release commit (TODO 20).
+% which were removed from the script). Not re-run on the release commit: the release (4ac7969 = 7f880e1 + version
+% string) contains d58c9ef ([V] git merge-base --is-ancestor); src/ changes after d58c9ef: D-35 settings and
+% resolve (default SV budget), validation/joint.py (row 18) and others (git diff --stat d58c9ef 7f880e1 -- src: 10 files).
 % For length, the main text shows verbatim excerpts (listings `linerange` with
 % consecutivenumbers=false, so the printed line numbers are the scripts' own); the full scripts,
 % their full outputs and the detail moved out of this section are in Appendix G (app:walk-output) and Appendices A and C (merged in the integration pass)

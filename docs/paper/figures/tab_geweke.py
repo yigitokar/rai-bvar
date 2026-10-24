@@ -8,14 +8,17 @@ relative numerical efficiency, and the time.
 
 Data, in order of preference:
 
-1. the release record ``docs/paper/data/release/geweke.jsonl`` (tier ``G-small``; OUTLINE TODO 7),
-   written by ``RAI_BVAR_VALIDATION_RECORD=docs/paper/data/release pytest tests/geweke -m "geweke
-   and not slow"`` on the release commit ([REL]);
-2. until it exists, an interim table, marked as such in red under the table: the G-small run of
-   dossier 04 section 6.6 (commit 62d15f6, Apple M5 Max, reproduced twice; deterministic for fixed
-   code and seed on that machine) for the 15 rows it covers, and for row 18, which joined the PR
-   tier in 7f410dc, the G-small statistic recorded in DESIGN section 9.5 (row 18 note) and in the
-   commit message of 7f410dc ([R], Apple M5 Max under load; no per-stage record).
+1. a ``G-small`` tier in the release record ``record/geweke.jsonl`` of ``tc.RELEASE_DIR``
+   (``benchmarks/reports/validation/7f880e1_apple-m5-max/``) ([REL]). The release run at 7f880e1
+   ran the slow tiers only (``-m "(slow or network) and not bench"``), so that record has the block
+   configurations, G-full, the inexact rows and row 14's ``h0`` variant, but no G-small row of the
+   per-PR set; the script checks this and then uses
+2. the G-small run of dossier 04 section 6.6 (commit 62d15f6, Apple M5 Max, reproduced twice;
+   deterministic for fixed code and seed on that machine) for the 15 rows it covers, and for row 18,
+   which joined the PR tier in 7f410dc, the G-small statistic recorded in DESIGN section 9.5 (row 18
+   note) and in the commit message of 7f410dc ([R], Apple M5 Max under load; no per-stage record).
+   The note under the table says so, and that the 16 per-PR G-small tests passed on the release
+   commit in the CI run ``tc.CI_FAST_RUN`` (pass or fail only; the CI sets no record directory).
 
 In both cases G and the stage-1 critical value ``t_{C-1}(1 - alpha/(2G))`` are recomputed from the
 committed code (``joint_spec(name, "small").names``; ``G_SMALL`` of the test module) and must equal
@@ -136,6 +139,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     tc.add_common_args(ap)
     ap.add_argument("--record", type=Path, default=tc.RELEASE / "geweke.jsonl")
+    ap.add_argument("--ci-log", type=Path, default=tc.CI_FAST_LOG,
+                    help="excerpt of the log of CI run tc.CI_FAST_RUN (gh run view RUN --log): the "
+                    "script checks that the per-PR G-small tests ran and passed in each Python job")
     args = ap.parse_args()
     tc.apply_outdir(args)
     sets = committed_sets()
@@ -151,18 +157,39 @@ def main() -> None:
         status, sources = "[REL] release record", [src]
         notes = ""
     else:
+        tiers = {r.get("tier") for r in tc.read_jsonl(args.record)} if args.record.exists() else set()
+        assert "G-small" not in tiers, tiers
         lines, _ = interim(comp)
-        status = "INTERIM: dossier 04 section 6.6 (62d15f6) + row 18 [R] (DESIGN 9.5, 7f410dc); not the release record"
+        status = ("statistics: dossier 04 section 6.6 (62d15f6) + row 18 [R] (DESIGN 9.5, 7f410dc); the release "
+                  f"record at {tc.RELEASE_COMMIT} has no G-small row; pass on the release commit: CI run {tc.CI_FAST_RUN}")
         sources = [str(DOSSIER.relative_to(tc.PAPER.parent.parent)) + " section 6.6 (G-small on 62d15f6, Apple M5 Max)",
                    "main repo docs/phase2/DESIGN.md section 9.5 row 18 note; commit message of 7f410dc",
-                   f"main repo {TEST} at HEAD (PR_ROWS, DUMMY_ROWS, G_SMALL) and joint_spec(name, 'small').names"]  # fmt: skip
+                   f"main repo {TEST} at HEAD (PR_ROWS, DUMMY_ROWS, G_SMALL) and joint_spec(name, 'small').names",
+                   f"{args.record.relative_to(tc.REPO_ROOT) if args.record.is_relative_to(tc.REPO_ROOT) else args.record} "
+                   f"(tiers {sorted(t for t in tiers if t)}; no G-small)",
+                   f"CI run {tc.CI_FAST_RUN} (gh run view {tc.CI_FAST_RUN}): fast suite at {tc.RELEASE_COMMIT}, "
+                   "ubuntu-latest, Python 3.12, 3.13, 3.14"]  # fmt: skip
+        # the Geweke module's fast tests: the 16 G-small rows, test_pr_rows_are_the_design_rows and
+        # test_g_small_rw_h0_prior[reduced_sv_rw] (its row-14 variant is slow); every one passed
+        src = tc.git_show("HEAD", TEST)
+        fns = {f: marks for f, marks in tc.functions(src).items() if f.startswith("test_")}
+        # test_g_small_rw_h0_prior carries "slow" only on its structural_sv_rw parameter
+        assert sorted(f for f, m in fns.items() if "slow" not in m) == ["test_g_small",
+                                                                          "test_pr_rows_are_the_design_rows"], fns
+        assert 'pytest.param("structural_sv_rw", marks=pytest.mark.slow)' in src
+        for job, mods in tc.ci_fast_modules(args.ci_log).items():
+            prog = mods[TEST]
+            assert prog == "." * (len(comp) + 2), (job, prog)
+        print(f"CI run {tc.CI_FAST_RUN}: {len(comp) + 2} Geweke fast tests passed in each of 3 jobs")
         notes = tc.note(
-            "Interim, not the release record: rows other than 18 are the G-small run of dossier 04 "
-            r"\S6.6 on commit 62d15f6 (Apple M5 Max; reproduced twice, deterministic for fixed code "
-            r"and seed on that machine); $^\ast$row 18 (\code{reduced_sv_rw}, in the PR tier since "
-            r"7f410dc) is recorded only in DESIGN \S9.5 and the commit message of 7f410dc (Apple M5 "
-            r"Max under load; stage 1, no per-stage record). Regenerate from "
-            r"\code{docs/paper/data/release/geweke.jsonl} (OUTLINE TODO 7).", red=True)  # fmt: skip
+            r"Statistics: rows other than 18 are the G-small run of dossier 04 \S6.6 on commit 62d15f6 "
+            r"(Apple M5 Max; reproduced twice, deterministic for fixed code and seed on that machine); "
+            r"$^\ast$row 18 (\code{reduced_sv_rw}, in the PR tier since 7f410dc) is recorded only in "
+            r"DESIGN \S9.5 and the commit message of 7f410dc (Apple M5 Max under load; stage 1, no "
+            r"per-stage record). The release validation record (" + tc.RELEASE_COMMIT + r", "
+            r"\cref{app:validation}) covers the slow tiers and has no G-small row; on the release commit "
+            f"the {len(comp)} per-PR G-small tests passed in the fast suite of CI run {tc.CI_FAST_RUN} "
+            r"(ubuntu-latest, Python 3.12--3.14), which records pass or fail only.")  # fmt: skip
     seed = sets["seed"]
     foot = (f"{len(comp)} per-PR compositions of \\code{{{TEST}}} (\\code{{PR_ROWS}}). Exact mode, "
             f"$C = {sz['C']}$, $M_c = {sz['M_c']}$, $M_1 = {tc.thousands(sz['M1'])}$, "

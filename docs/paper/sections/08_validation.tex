@@ -1,8 +1,11 @@
 \section{Validating the samplers}\label{sec:validation}\label{sec:validation-principle}
 % Sources: OUTLINE.md §8; dossier 04 (§1-§14, §17); dossier 01 §5; NOTES B.3-B.8, D.12-D.15.
 % "Reproduced at 62d15f6" = re-run by dossier 04 and its fact-check on one Apple M5 Max (cold XLA
-% cache, other jobs running). All such numbers are re-recorded on the release commit with
-% RAI_BVAR_VALIDATION_RECORD=docs/paper/data/release [REL].
+% cache, other jobs running). [REL] = the release validation record at 7f880e1 (Apple M5 Max, clean
+% tree, 2026-10-24; slow tiers only), benchmarks/reports/validation/7f880e1_apple-m5-max/ (record/*.jsonl,
+% junit_*.xml, meta.json; main 3d5a407), and, for the per-PR tier on the release commit, CI run
+% 40061724239 (fast suite at 7f880e1, ubuntu-latest, Python 3.12-3.14; excerpt in
+% docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt).
 % Row 18 (reduced_sv_rw) and its results: main repo commit 7f410dc (branch phase-2-cr-acceptance),
 % which changes no sampler code (its only src/ change is validation/joint.py; git show 7f410dc --stat).
 % Page-budget pass (2026-10-23): detail moved to Appendix D (merged in the integration pass) (fragments D1-D6, for
@@ -101,16 +104,15 @@ test functions must have finite variance, which excludes raw data moments under 
 G-small runs per PR and the larger G-full weekly, at $n \le 3$ (\cref{app:geweke-small,app:sbc});
 rows with the approximate (\code{exact=False}) SV sampler are recorded but do not gate. % [V] tests/geweke/test_geweke_compositions.py (sizes; test_g_full_inexact_recorded)
 The 15 PR compositions registered before row~18 pass G-small (\cref{tab:TabD1}; commit and machine in \cref{app:geweke-small}), largest
-final-stage $|z|$ 3.03 against critical values of 4.10--4.50, row 201 at the fresh second stage; % [V] pytest tests/geweke -m "geweke and not slow", reproduced at 62d15f6 on Apple M5 Max (dossier 04 §6.6; fact-check re-run identical) [REL: geweke.jsonl]; row 201: same run, deterministic on one machine for fixed code and seed; mutants.py EVIDENCE["M17"] is the same computation (SEED_G), not an independent check
+final-stage $|z|$ 3.03 against critical values of 4.10--4.50, row 201 at the fresh second stage; % [V] pytest tests/geweke -m "geweke and not slow", reproduced at 62d15f6 on Apple M5 Max (dossier 04 §6.6; fact-check re-run identical); row 201: same run, deterministic on one machine for fixed code and seed; mutants.py EVIDENCE["M17"] is the same computation (SEED_G), not an independent check
 row~18, added later as the sixteenth PR row, is reported in \cref{sec:validation-coverage}. % [V] tests/geweke/test_geweke_compositions.py PR_ROWS at 7f410dc (rows 1-5, 7-10, 17, 18, 201-205 = 16)
-\todo{[REL] Report G-full and the \code{exact=False} rows only from a committed
-\code{geweke_full.jsonl}; do not write that G-full passes on every row before then.}
-G-full has no release record yet. A local record on the paper branch, which carries no commit or
-machine field and so cannot date itself, shows \code{reduced_sv} failing with non-finite test
-functions. That matches the float64 failure documented in the test module, fixed in the kernel
-before both full replication runs that the paper reports (\cref{sec:robustness-f1}); a committed test replays the failing
-chain, and the production step now succeeds (\cref{fig:FigD2}).
-% [R] tests/geweke/test_geweke_compositions.py module docstring ("Known nightly finding (2026-10-22): test_g_full[reduced_sv] failed on one SC chain of 4000 (sweep 194) ... EQ_CONTEMP, equation 2 ... Resolved ... lstsq_draw"); docs/paper/figures/data/validation_record/geweke.jsonl (tracked on paper-draft since 33dd9f8, not on main 888f620): tier G-full, reduced_sv, passed false, n_nonfinite 28068, 92 of 137 functions failing, seed 20261023, no commit field; [V] 3d3f51b ("fixes test_g_full[reduced_sv]") is an ancestor of 4bb978a and c823d20, not of 8a622c5 (git merge-base --is-ancestor); tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed (slow). A re-run of test_g_full[reduced_sv] at 75db8a7 by a reviewer passed but is uncommitted and not cited (macro referee major 1; TODO 7)
+On the release commit all 16 pass G-small on Linux, and all 23 compositions pass G-full, row~2
+at the third stage, with no non-finite test function in the twelve \code{exact=False} rows
+(\cref{tab:TabD3}). % [REL] G-small: CI run 40061724239 (fast suite at 7f880e1; Geweke module 18 of 18 passed in each of 3 jobs; pass or fail only); G-full, G-full-inexact: record/geweke.jsonl at 7f880e1 (23 + 12 records, all passed; structural_sv stage 3); docs/paper/figures/tab_geweke_full_sbc.py
+The weekly run of 22 October had failed G-full for \code{reduced_sv} on one chain, the float64
+failure fixed in the kernel before both full replication runs that the paper reports
+(\cref{sec:robustness-f1}); a committed test replays that chain, and on the Apple M5 Max the
+production step now succeeds. % [R] tests/geweke/test_geweke_compositions.py module docstring ("Known nightly finding (2026-10-22): test_g_full[reduced_sv] failed on one SC chain of 4000 (sweep 194) ... EQ_CONTEMP, equation 2 ... Resolved ... lstsq_draw"); [V] 3d3f51b ("fixes test_g_full[reduced_sv]") is an ancestor of 4bb978a and c823d20, not of 8a622c5 (git merge-base --is-ancestor); [REL] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed (slow) passed in junit_tests_mcmc_blocks.xml at 7f880e1; G-full reduced_sv passed there at stage 1 (max |z| 2.67). The pre-fix local record that an earlier draft cited (docs/paper/figures/data/validation_record/, no commit or machine field) is deleted (macro referee major 1)
 The Geweke simulator also reaches states far outside those that ordinary data produce, which is how
 a float64 weakness of a coefficient draw was found (\cref{sec:robustness-f1}).
 
@@ -138,12 +140,10 @@ every data-free quantity \citep[Section~3.4, Theorem~7]{modrak2025simulation}. %
 % [R] Modrak et al., Section 3.4 'Ignoring data', Theorem 7 and the remark after it (t(y) = 1): p. 10 of arXiv v3, p. 9 of v2; same Theorems 1-8 in the PMC accepted manuscript (Bayesian Analysis 20(2)); typeset PDF not seen: https://arxiv.org/pdf/2211.02383v3, https://pmc.ncbi.nlm.nih.gov/articles/PMC12490788/, https://doi.org/10.1214/23-BA1404
 The configuration is $N = 1000$, $L = 99$, $\alpha = 10^{-2}$ for 23 compositions (rows 1--18
 and 201--205) at $n \le 3$. % [V] tests/sbc/test_sbc_compositions.py::test_sbc over validation.joint.COMPOSITIONS (23 at 7f410dc; 22 at c823d20)
-Apart from the mutation suite's S check, the $t_{\max} = 50$ runs and row~18, the only recorded SBC
-result is row 205's (structural \code{iw_equivalent} with dummy rows): minimum $p$ 0.018. % [V] NOTES 13; [R] the t_max = 50 runs: tests/sbc/test_sbc_compositions.py docstring l.13-21; row 18: the same docstring and NOTES 6 at 7f410dc
-\todo{[REL] Report the SBC rows from a committed \code{sbc.jsonl} (\cref{tab:TabD3}).}
+On the release commit all 23 pass, row~15 at the second stage (\cref{tab:TabD3}). % [REL] record/sbc.jsonl at 7f880e1 (23 records, all passed; structural_sv_invgamma stage 2, min p 0.0997 there); row 205 min p 0.0178 (NOTES 13: 0.018); docs/paper/figures/tab_geweke_full_sbc.py
 \phantomsection\label{sec:validation-block}%
 In Tier~B, blocks that draw exactly from their conditional get block-conditional SBC, and Metropolis--Hastings, ASIS and Gibbs-scan blocks one-block invariance
-tests, both at Bonferroni $\alpha = 10^{-3}$ inside the sequential wrapper (\cref{app:sbc}). % [V] src/rai_bvar/validation/sbc.py (block_sbc); tests/sbc/test_block_tier.py docstring (43 IDs, weekly); kernel-level PR checks e.g. tests/mcmc/blocks/test_sv_core.py::test_centred_step_one_block_invariance
+tests, both at Bonferroni $\alpha = 10^{-3}$ inside the sequential wrapper (\cref{app:sbc}). % [V] src/rai_bvar/validation/sbc.py (block_sbc); tests/sbc/test_block_tier.py docstring (weekly); kernel-level PR checks e.g. tests/mcmc/blocks/test_sv_core.py::test_centred_step_one_block_invariance; [REL] the 46 composition-level tests passed at 7f880e1 (junit_tests_sbc.xml)
 
 \subsection{Tier A: analytic twins and exact oracles}\label{sec:validation-twins}
 
@@ -153,7 +153,7 @@ draws (\cref{app:twins}): A1 equates the structural NIG log marginal likelihood 
 rows; % [V] tests/analytic/test_structural_nig.py::test_a1_log_ml_equals_phase1
 A2 and A3 compare MCMC structural Mode~II $\times$ \code{Constant("iw")} with the analytic NIW
 posterior at $n = 3$ and at $n = 20$, $p = 4$, $T = 300$, a size too expensive for Geweke and SBC
-tests; % [V] tests/analytic/test_mcmc_twin.py::test_a2_mode2_iw_matches_the_phase1_niw_posterior, ::test_a3_realistic_size [REL: A3 release result]
+tests; % [V] tests/analytic/test_mcmc_twin.py::test_a2_mode2_iw_matches_the_phase1_niw_posterior, ::test_a3_realistic_size [REL] A3 passed in junit_tests_analytic.xml at 7f880e1
 A4 checks Chan's asymmetric conjugate prior against its closed form, A5 Mode~I $\times$
 Constant against quadrature, A6
 the exact-$h$, ASIS and step-order kernels on toy posteriors, and A7 the reduced-form Constant
@@ -197,9 +197,9 @@ priors and an inert $\nu$ grid. % [R] docs/phase2/DESIGN.md §9.5 "Row 18" note 
 Like rows 7--10 it runs G-small per PR and G-full and SBC weekly, with its \code{exact=False}
 variant recorded, and the arm is among the 13 MCMC compositions of the contract tests and among
 those fitted through the public \code{BVAR.fit} path. % [V] 7f410dc: tests/geweke/test_geweke_compositions.py PR_ROWS, INEXACT_ROWS; tests/sbc/test_sbc_compositions.py (COMPOSITIONS); tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS (13, incl. "reduced-SV(rw)"); tests/unit/test_fit_mcmc_api.py COMPOSITIONS (("reduced", rb.SV(rw=True)))
-In single runs recorded with that commit (\cref{app:row18}), the row's largest $|z|$ is 1.98
-in G-small (critical value 4.42) and 1.90 in G-full (3.94), and the arm passes all ten contract
-tests. % one Apple M5 Max under load % [R] commit message 7f410dc; DESIGN §9.5 row 18 note ("G-small max |z| 1.98, G-full 1.90 ... all at stage 1"); tests/contract/test_forecast_contract_mcmc.py has 10 test functions; [REL] re-record on the release commit
+The row's largest $|z|$ is 1.98 in G-small (critical value 4.42), in a run recorded with that
+commit, and 1.90 in G-full (3.94) on the release commit, where the arm also passes all ten
+contract tests (\cref{app:row18}). % [R] G-small: commit message 7f410dc, DESIGN §9.5 row 18 note (one run, Apple M5 Max under load; the release commit passes it in CI run 40061724239, no statistic); [REL] G-full: record/geweke.jsonl at 7f880e1 (reduced_sv_rw, 1.90 at stage 1, t_crit 3.94; the 7f410dc message gives the same 1.90); contract: junit_tests_contract.xml at 7f880e1 (reduced-SV(rw), 10 of 10; 130 = 13 compositions x 10 tests, all passed)
 In one-off runs outside the mutation suite its G-small rule catches three of the suite's mutants
 and two further errors, and a variant G-small test at $h_0 \sim \mathrm{N}(-1, 4)$, run on every PR,
 catches a prior variance used as a precision, which the default test prior hides
@@ -211,10 +211,7 @@ row's cap was raised to 400, at which it passes. With a 4000-sweep pilot instead
 pooled-ESS gate stay clean. The
 slow quantities are the reduced-form coefficients $\Pi$, mostly intercepts, on about 1--2\% of
 prior-drawn $T = 50$ datasets: a mixing tail, not a calibration error
-(\cref{app:sbc,sec:limitations}). % [V] tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max = 400), PILOT = 1000 at 7f410dc; [R] its module docstring ("Row 18"), NOTES item 6, DESIGN §9.5 row 18 note and §9.6 erratum (one run each, Apple M5 Max under load; Geweke and gamma clean); detail: App. D, app:row18
-\todo{[REL] Re-record row~18 (G-small, the $\mathrm{N}(-1, 4)$ variant, G-full, SBC at
-$t_{\max} = 400$, contract) on the release commit and quote those records; the injected errors have no
-committed test.}
+(\cref{app:sbc,sec:limitations}). % [V] tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max = 400), PILOT = 1000 at 7f410dc; [R] its module docstring ("Row 18"), NOTES item 6, DESIGN §9.5 row 18 note and §9.6 erratum (one run each, Apple M5 Max under load; Geweke and gamma clean); detail: App. D, app:row18; [REL] at t_max = 400 the row passes on the release commit (record/sbc.jsonl at 7f880e1: stage 1, min p 0.0192, ESS fail 0, max thin 400); the one-off injected errors on row 18 (above) have no committed test
 The baseline, reduced form $\times$ \code{Constant("iw_equivalent")}, is row 11, and the AR-SV(0.9)
 arm runs the code path of row 8 with a different prior on $\phi$. % [V] benchmarks/clark_ravazzolo.py models() l.330 (SV(phi_prior=Beta(71.25, 3.75)))
 The Student-$t$ variant, SV(rw, $t$), has no row of its own; it rests on row~18, on the Student-$t$
@@ -232,11 +229,11 @@ mutant, and an uncaught mutant blocks the release. % [V] tests/mutation/mutants.
 Tier~U catches 14 mutants, G all 18 (M7 with a coarse mixture table, M11 and M12 under the
 auxiliary-mixture sampler), B the four with a B check and S the one with an S check: 37 checks. % [V] tests/mutation/mutants.py _ALL (catchers) l.767-826; pytest -m mutation collects 37
 All 37 catch their mutant with a passing control, in about three minutes with a cold
-compilation cache (\cref{app:runtimes}), % at 62d15f6, Apple M5 Max, 177-182 s; [V] pytest tests/mutation -m mutation, reproduced by dossier 04 and its fact-check (181.85 s, 177.40 s) [REL: mutation.jsonl]
+compilation cache (\cref{app:runtimes}), % at 62d15f6, Apple M5 Max, 177-182 s; [V] pytest tests/mutation -m mutation, reproduced by dossier 04 and its fact-check (181.85 s, 177.40 s); [REL] record/mutation.jsonl at 7f880e1: 37 records, all caught, every control passing (summary.txt: 37 passed in 145.20 s)
 and recorded runs at earlier commits on x86-64 Linux also caught every mutant
-(\cref{app:mutants}; \cref{fig:FigD1} shows each statistic against its threshold). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 [REL: mutation_x86.jsonl]; cross-machine agreement (two or three significant figures) is in App. D
-\todo{TODO 8: fix the stale count (33/33) and the machine labels in the \code{mutants.py} evidence
-header and NOTES B.8 before the table is regenerated.}
+(\cref{app:mutants}; \cref{fig:FigD1} shows each statistic against its threshold). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 and in the release record at 7f880e1 (record/mutation.jsonl, M2-G); no x86-64 record at the release commit; cross-machine agreement (two or three significant figures) is in App. D
+\todo{TODO 8: fix the stale count (33/33) in NOTES B.8; 4f627bc corrected the count in the
+\code{mutants.py} evidence header.}
 Mutation testing is established \citep{demillo1978hints,jia2011analysis}; it has been applied to
 scientific software with tolerance-based oracles \citep{hook2009mutation} and, with generic
 operators, to probabilistic models \citep{jarma2026software}, and probabilistic programming systems
@@ -256,14 +253,14 @@ show that the suite still catches these errors, not how often the tiers would ca
     (seams, compositions, U tolerances: \cref{app:mutants}); all 37 checks catch their mutant with a
     passing control. U: identity or closed-form error at one joint draw; B, S: Bonferroni-adjusted $q$
     or minimum $p$; G: largest $|z|$ at G-small at the mutation compositions (critical values
-    4.10--4.40); M12's U check is a closed-form check with tolerance $10^{-4}$. Reproduced on one
-    machine (\cref{app:mutants}); the committed evidence differs only for M2 (702 / 2.48).}
-  % reproduced on an Apple M5 Max at 62d15f6; the committed EVIDENCE labels its M2 run M1 Pro (TODO 8)
+    4.10--4.40); M12's U check is a closed-form check with tolerance $10^{-4}$. From the release
+    validation record (\cref{app:mutants}); the committed evidence differs only for M2 (702 / 2.48).}
+  % [REL] record/mutation.jsonl at 7f880e1 (Apple M5 Max): every statistic below equals it to the digits shown (checked 2026-10-24),
+  % as did the run at 62d15f6 (dossier 04 §11.2); the committed EVIDENCE labels its M2 run M1 Pro (TODO 8)
   \label{tab:Tab7}
-  % Body to be regenerated by docs/paper/figures/tab_mutation.py from
-  % docs/paper/data/release/mutation.jsonl (Apple M5 Max) and mutation_x86.jsonl (x86-64 Linux),
-  % both from `pytest tests/mutation -m mutation` on the release commit [REL]. Current body:
-  % dossier 04 §11.2 (reproduced at 62d15f6) = tests/mutation/mutants.py EVIDENCE (l.834-858).
+  % Body typed from dossier 04 §11.2 (reproduced at 62d15f6) = tests/mutation/mutants.py EVIDENCE
+  % (l.834-858), checked against benchmarks/reports/validation/7f880e1_apple-m5-max/record/mutation.jsonl
+  % [REL]; no x86-64 record exists at the release commit (the x86 runs are earlier, [R]).
   % Page-budget pass: the "Seam / composition" column is dropped (seam and composition of every
   % mutant are in App. D, \cref{app:mutants}, M1-M18 list; U tolerances: same subsection), and the
   % "Caught by" column is dropped (the tier prefixes of the last column name the catching tiers).

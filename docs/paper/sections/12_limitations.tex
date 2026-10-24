@@ -64,7 +64,7 @@ and the contemporaneous coefficients, and does not monitor the other lag coeffic
 In the SBC of row~18, the replication's primary arm, about 1--2\% of prior-drawn $T = 50$ datasets
 mix very slowly in the reduced-form coefficients, most often an intercept
 (\cref{sec:validation-coverage}). Whether the replication's fits mix as slowly is unknown; their
-secondary diagnostics are in the run's cache, not in its report. % [R] 7f410dc commit message; DESIGN §9.5 row 18 note and §9.6 erratum (2026-10-23); main-repo NOTES 6; tests/sbc/test_sbc_compositions.py docstring (one run each, Apple M5 Max under load: a Pi element is the pilot-IAT argmax in all 35 replications above 91, an intercept in 19); [V] SBC_OVERRIDES t_max 400; [REL]
+secondary diagnostics are in the run's cache, not in its report. % [R] 7f410dc commit message; DESIGN §9.5 row 18 note and §9.6 erratum (2026-10-23); main-repo NOTES 6; tests/sbc/test_sbc_compositions.py docstring (one run each, Apple M5 Max under load: a Pi element is the pilot-IAT argmax in all 35 replications above 91, an intercept in 19); [V] SBC_OVERRIDES t_max 400; [REL] row 18 passes SBC at t_max 400 on the release commit (record/sbc.jsonl at 7f880e1: stage 1, max thin 400, ESS fail 0); the pilot-IAT diagnostics are not in the record
 
 \paragraph{Log scores.}
 The path-conditioned estimator remains the default at $h > 1$. The path-integrated estimator is
@@ -102,10 +102,12 @@ after the acceptance run (row~18; \cref{sec:validation-coverage}); its Student-$
 row and no contract fit. % row 18 registered in 7f410dc % [V] 7f410dc: src/rai_bvar/validation/joint.py _COMPOSITIONS (rows 1-18 and 201-205), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS (13 entries, "reduced-SV(rw)" added); no reduced x SV(rw, t) entry in either
 Test priors can hide bugs: row~18's default test prior hides a prior variance used as a
 precision, which a variant G-small test catches (\cref{sec:validation-coverage}; 13.8 against 2.33). % [R] 7f410dc commit message; DESIGN §9.5 row 18 note; [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior (RW_H0_PRIOR = N(-1, 4); row 18 per PR, row 14 nightly)
-The composition-level G-full, SBC and Tier~B runs and the weekly tier have no release run record
-yet, and row~18's results come from one run each on a loaded machine. The local records that feed
-\cref{fig:FigD1,fig:FigD2} carry no commit or machine field; in them the G-full row of
-\code{reduced_sv} fails, as before the kernel fix of \cref{sec:robustness-f1} (\cref{sec:validation-geweke}). % [REL] docs/paper/data/release/{geweke_full,sbc,block}.jsonl. The local records docs/paper/figures/data/validation_record/{geweke,sbc,mutation}.jsonl are tracked on branch paper-draft (since 33dd9f8), not on main (888f620); their G-full reduced_sv row has passed = false, n_nonfinite 28068, seed 20261023 (its G-full-inexact row passes), matching the failure documented in tests/geweke/test_geweke_compositions.py and fixed in 3d3f51b; row 18: 7f410dc commit message (Apple M5 Max under load) (macro referee major 1, stat referee major 5)
+The release validation record of the weekly tier is one run on one machine (an Apple M5 Max), the
+per-PR tier on the release commit has pass or fail outcomes only (continuous integration on
+Linux), so the G-small statistics of \cref{tab:TabD1}, row~18's among them, come from earlier
+commits; the x86-64 mutation runs predate the release, and the one x86-64 run of the weekly tier,
+also earlier, stopped half-way at its time limit with the replay test of F1 failing
+(\cref{app:validation}). % [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/ (README.md, meta.json: one run, 2026-10-24 04:17-07:18 UTC; markers "(slow or network) and not bench"; tests/unit excluded, issue #3); record/geweke.jsonl has no G-small tier; CI run 40061724239 (fast suite at 7f880e1, pass or fail only); TabD1 statistics: dossier 04 §6.6 (62d15f6) and 7f410dc (row 18); x86 mutation runs: mutants.py EVIDENCE header (b27c7bb, 00524a9); x86 weekly run: CI run 40052069815 at 779957f (docs/paper/figures/data/provenance/ci_run_40052069815_weekly_x86.txt) (macro referee major 1, stat referee major 5)
 The test-prior design rule $r \leq 5$ is a derivation for the scalar conjugate model, unverified for
 $\phi$, $\sigma$, $p$ and $\nu$, and low relative numerical efficiency of some Geweke functions
 lowers power. % [R] N06 §12 item 4; [V] dossier 04 §6.6 (min RNE 0.008-0.129)
@@ -124,13 +126,15 @@ random-walk path a tiny positive pivot could give a finite but wrong draw with n
 \todo{TODO 23: decide on a relative pivot floor; commit tests of the old-path failures.}
 The excess-pivot recursion removed the crash and the wrong draws of the random-walk volatility
 step near $\sigma = 0$, not the slow mixing there. % [R] NOTES 17 (the fix itself is [V]: tests/mcmc/blocks/test_sv_core.py::test_rw_awol_at_a_tiny_sigma)
-The performance evidence comes from one Apple M5 Max that was not idle; there is no idle x86
-measurement and no multi-device timing of the production engine. % [R] tests/bench/baseline.json (deb3929)
+The performance evidence comes from one Apple M5 Max that was not idle and one 2-vCPU x86-64
+continuous-integration runner; there is no idle x86 measurement and no multi-device timing of the
+production engine. % [R] tests/bench/baseline.json (deb3929); benchmarks/reports/bench_p2_x86_github_779957f.json (AMD EPYC 7763, logical_cpus 2, commit 779957f)
 Bitwise reproducibility holds only within one platform and version set: invariance to chunking is
 tested on runner toys, and the toy chain-prefix test is bitwise on macOS and agrees only to rounding
 on x86 Linux. % [V] tests/mcmc/runner/test_chunking.py::test_chain_prefix_invariance (asserts agreement to rounding); [R] its docstring for bitwise on macOS
 The macOS caveats of \cref{sec:robustness-platform} apply.
 
 \paragraph{Release state.}
-The package is at version 0.0.1, classified as pre-alpha. % [V] pyproject.toml
+The package is at version 0.2.0, classified as pre-alpha; it is not on PyPI and installs from the
+repository (\cref{app:repro}). % [V] git show 4ac7969:pyproject.toml (version "0.2.0", "Development Status :: 2 - Pre-Alpha"); no PyPI release: https://pypi.org/pypi/rai-bvar/json returned 404 (2026-10-24 07:44Z)
 \todo{TODO 19: update the README status banner and quick start; release on PyPI with a version tag.}

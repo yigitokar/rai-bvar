@@ -8,11 +8,20 @@ row quotes is checked to occur in the source text of the cited module (``EVIDENC
 every cited test function must exist in that module at the main repository's HEAD (``ast``). The
 cadence is derived from the tests' ``pytest.mark.slow`` decorators: PR for the tests without it,
 weekly for those with it (the CI job named "nightly" runs weekly; ``.github/workflows/ci.yml``).
-The result column reads pytest's JUnit XML of the release run, ``docs/paper/data/release/
-twins.xml`` (OUTLINE TODO 7: the twins have no record hook); until it exists it is a red [REL]
-mark.
+The result column has two sources, because the twins have no record hook and the release run at
+7f880e1 ran the slow tests only:
 
-Usage: tab_twins.py [--outdir DIR] [--junit PATH]
+* the weekly (``slow``) test functions: pytest's JUnit XML of the release run,
+  ``junit_tests_analytic.xml`` and ``junit_tests_mcmc_blocks.xml`` in ``tc.RELEASE_DIR``
+  (``benchmarks/reports/validation/7f880e1_apple-m5-max/``, Apple M5 Max, clean tree) [REL]; every
+  such function must appear there with all its parametrisations passed;
+* the PR test functions: the fast suite of CI run ``tc.CI_FAST_RUN`` at 7f880e1 (ubuntu-latest,
+  Python 3.12, 3.13, 3.14), from the committed excerpt of its log (``tc.CI_FAST_LOG``): each module's
+  progress line must show only passes (no skip, xfail, failure or error) in every job.
+
+A row whose evidence is missing or not a pass prints the failing test functions.
+
+Usage: tab_twins.py [--outdir DIR] [--junit PATH ...] [--ci-log PATH]
 """
 
 from __future__ import annotations
@@ -100,27 +109,33 @@ TWINS = [
 ]  # fmt: skip
 
 
-def junit_results(path: Path) -> dict[str, str]:
-    """``{test function: 'passed' | 'failed' | 'skipped'}`` over all its parametrisations."""
+def junit_results(paths: list[Path]) -> dict[str, str]:
+    """``{test function: 'passed' | 'failed' | 'skipped'}`` over all its parametrisations, from the
+    JUnit XML files (one per test directory)."""
     out: dict[str, set[str]] = {}
-    for tcase in ET.parse(path).getroot().iter("testcase"):
-        fn = tcase.get("name", "").split("[")[0]
-        st = "failed" if tcase.find("failure") is not None or tcase.find("error") is not None else (
-            "skipped" if tcase.find("skipped") is not None else "passed")
-        out.setdefault(fn, set()).add(st)
-    return {k: ("failed" if "failed" in v else "passed" if "passed" in v else "skipped") for k, v in out.items()}
+    for path in paths:
+        for key, st in tc.junit_cases(path).items():
+            fn = key.split("::")[1].split("[")[0]
+            out.setdefault(fn, set()).add(st)
+    return {k: ("failed" if "failed" in v else "passed" if v == {"passed"} else "skipped") for k, v in out.items()}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     tc.add_common_args(ap)
-    ap.add_argument("--junit", type=Path, default=tc.RELEASE / "twins.xml")
+    ap.add_argument("--junit", type=Path, action="append", default=None,
+                    help="JUnit XML of the release run (default: tests/analytic and tests/mcmc/blocks)")
+    ap.add_argument("--ci-log", type=Path, default=tc.CI_FAST_LOG)
     args = ap.parse_args()
     tc.apply_outdir(args)
+    meta = tc.release_meta()
+    junit = args.junit or [tc.RELEASE_DIR / "junit_tests_analytic.xml", tc.RELEASE_DIR / "junit_tests_mcmc_blocks.xml"]
     head = tc.git("rev-parse", "--short", "HEAD")
     src = {m: tc.git_show("HEAD", m) for m in (M_TWIN, M_QUAD, M_NIG, M_TOY, M_CCCM)}
     fns = {m: tc.functions(s) for m, s in src.items()}
-    results = junit_results(args.junit) if args.junit.exists() else None
+    results = junit_results(junit)
+    ci = tc.ci_fast_modules(args.ci_log)
+    ci_ok = {m: all(set(mods.get(m, "")) == {"."} for mods in ci.values()) for m in src}
 
     lines = [r"\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{0.27\linewidth}"
              r">{\raggedright\arraybackslash}p{0.19\linewidth}>{\raggedright\arraybackslash}p{0.19\linewidth}"
@@ -128,6 +143,7 @@ def main() -> None:
              r"\toprule",
              r"& Oracle & Statistic, tolerance & Negative control & Cadence & Tests & Result \\",
              r"\midrule"]  # fmt: skip
+    n_bad = 0
     for tid, oracle, stat, neg, tests, evidence in TWINS:
         for m, text in evidence:
             assert text in src[m], f"{tid}: {text!r} not in {m}"
@@ -136,12 +152,15 @@ def main() -> None:
             assert f in fns[m], f"{tid}: {m}::{f} does not exist at HEAD"
             (weekly if "slow" in fns[m][f] else pr).append(f)
         cad = ", ".join(x for x, ok in (("PR", pr), ("weekly", weekly)) if ok)
-        if results is None:
-            res = tc.mark("REL")
-        else:
-            got = [results.get(f, "missing") for _, f in tests]
-            res = "passed" if all(g == "passed" for g in got) else "; ".join(
-                f"{f}: {g}" for (_, f), g in zip(tests, got, strict=True) if g != "passed")
+        bad = []
+        for m, f in tests:
+            if "slow" in fns[m][f]:
+                if results.get(f) != "passed":
+                    bad.append(f"{tc.code(f)}: {results.get(f, 'not in the release record')}")
+            elif not ci_ok[m]:
+                bad.append(f"{tc.code(f)}: not a pass in CI run {tc.CI_FAST_RUN}")
+        res = "passed" if not bad else "; ".join(bad)
+        n_bad += len(bad)
         lines.append(f"{tid} & {oracle} & {stat} & {neg} & {cad} & {len(tests)} & {res} \\\\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     mods = sorted({m for t in TWINS for m, _ in t[4]})
@@ -152,15 +171,18 @@ def main() -> None:
             r"by $z = (\hat F_{\mathrm{MCMC}}(x_q) - q)/\sqrt{\mathrm{MCSE}^2 + q(1-q)/N_{\mathrm{ref}}}$ "
             "with the indicator's own ESS. A negative control passes when the comparison rejects "
             "the perturbed oracle.")  # fmt: skip
-    body = tc.preamble(marks=results is None) + tc.fit("\n".join(lines)) + "\n" + tc.note(foot)
-    if results is None:
-        body += "\n" + tc.note(r"Placeholder: the Result column waits for the JUnit XML of the "
-                               r"release run, \code{docs/paper/data/release/twins.xml} (OUTLINE TODO 7).",
-                               red=True)  # fmt: skip
+    foot += (" Result: the weekly test functions passed in the release validation record at commit "
+             f"{tc.RELEASE_COMMIT} (clean tree; {tc.tex(meta['machine']['cpu'])}, {tc.tex(meta['started_utc'][:10])}; "
+             r"\code{junit_tests_analytic.xml} and \code{junit_tests_mcmc_blocks.xml} in "
+             r"\code{benchmarks/reports/validation/7f880e1_apple-m5-max/}), the PR test functions in the "
+             f"fast suite of CI run {tc.CI_FAST_RUN} on the same commit (ubuntu-latest, Python 3.12--3.14).")  # fmt: skip
+    print(f"{len(TWINS)} twins; {n_bad} test functions without a pass")
+    body = tc.preamble(marks=False) + tc.fit("\n".join(lines)) + "\n" + tc.note(foot)
     tc.write(NAME, body, generator="tab_twins.py",
-             status="static rows [V] (tests and quoted numbers checked at HEAD); Result column "
-             + ("from " + str(args.junit) if results else "[REL] placeholder"),
-             sources=[f"main repo {m} at {head}" for m in mods] + ["docs/paper/dossiers/04_validation.md section 9"])
+             status=f"static rows [V] (tests and quoted numbers checked at HEAD); Result column [REL] release "
+             f"JUnit XML at {tc.RELEASE_COMMIT} (weekly tests) and CI run {tc.CI_FAST_RUN} (PR tests)",
+             sources=[f"main repo {m} at {head}" for m in mods] + ["docs/paper/dossiers/04_validation.md section 9"]
+             + [str(p.relative_to(tc.REPO_ROOT)) for p in junit] + [str(args.ci_log.relative_to(tc.REPO_ROOT))])
 
 
 if __name__ == "__main__":

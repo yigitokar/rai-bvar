@@ -202,7 +202,7 @@ descriptive under the expanding window. CR: Clark and Ravazzolo's VAR-SV against
 Tables 1--3, Gaussian-approximation log score.}
 \label{tab:cr-headline}\label{Tab13}\label{tab:Tab13}
 % The tabular is boxed and shrunk to \textwidth only if it is wider (the long \acc placeholders of the draft); filled with numbers it keeps its natural size.
-% data: acceptance JSON relative.full['SV(rw)'].variables[v][h].{dlps,dlps_conditioned,dlps_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better,crps_ratio,rmse_ratio}, .joint[h].{dlpd,dlpd_conditioned,dlpd_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better}; CR columns [R] benchmarks/clark_ravazzolo.py CR_FULL l.147 (= clark2012macroeconomic Tables 1-3); typed in this file, the \acc cells filled by fill_acceptance.py; the generator tab_cr_headline.py planned in OUTLINE §14 is not written (TODO 20)
+% data: acceptance JSON relative.full['SV(rw)'].variables[v][h].{dlps,dlps_conditioned,dlps_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better,crps_ratio,rmse_ratio}, .joint[h].{dlpd,dlpd_conditioned,dlpd_gauss,rb_gauss_disagree,rb_degenerate,dm_p_better}; CR columns [R] benchmarks/clark_ravazzolo.py CR_FULL l.147 (= clark2012macroeconomic Tables 1-3); typed in this file, the \acc cells filled by fill_acceptance.py; the generator planned in OUTLINE §14 was not written (typed table)
 \sbox{\crheadlinebox}{%
 \begin{tabular}{@{}llrrrcrrrrrrr@{}}
 \toprule
@@ -376,8 +376,8 @@ run's commit; since a later commit that changes no sampler code, it is row~18. %
 On that row the Geweke and contract tests pass and five injected bugs are caught; its SBC
 $\gamma$ test and pooled-ESS gate are clean, while the per-replication ESS rule missed at the shared
 thinning cap of 200, passes at the cap of 400 set for the row after that miss, and fails with a
-4000-sweep pilot (\cref{sec:validation-coverage}). % [R] 7f410dc commit message (one run each, Apple M5 Max under load): G-small 1.98 (t_crit 4.42), G-full 1.90 (3.94), contract 10/10; positive controls on the row at the PR G-small rule: M1 17.8, dropped h_0 prior in the RW AWOL proposal 22.6, dropped last RW edge 30.0, M15 53.4, M2 461 (control 1.98); [V] tests/geweke/test_geweke_compositions.py PR_ROWS (row 18), tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max 400), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS "reduced-SV(rw)", tests/unit/test_fit_mcmc_api.py COMPOSITIONS; [REL] re-record on the release commit
+4000-sweep pilot (\cref{sec:validation-coverage}). % [R] 7f410dc commit message (one run each, Apple M5 Max under load): G-small 1.98 (t_crit 4.42), G-full 1.90 (3.94), contract 10/10; positive controls on the row at the PR G-small rule: M1 17.8, dropped h_0 prior in the RW AWOL proposal 22.6, dropped last RW edge 30.0, M15 53.4, M2 461 (control 1.98); [V] tests/geweke/test_geweke_compositions.py PR_ROWS (row 18), tests/sbc/test_sbc_compositions.py SBC_OVERRIDES (t_max 400), tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS "reduced-SV(rw)", tests/unit/test_fit_mcmc_api.py COMPOSITIONS; [REL] on the release commit: G-full 1.90 stage 1, SBC passed at t_max 400 (min p 0.0192), contract 10/10 (record/*.jsonl, junit_tests_contract.xml at 7f880e1); G-small passed in CI run 40061724239 (no statistic)
 Its slow-mixing coefficients are a limitation (\cref{sec:limitations}); its Student-$t$ variant
 has no row and still rests on its validated parts. % [V] 7f410dc: joint.py _COMPOSITIONS and mcmc_fits.py COMPOSITIONS have no reduced x SV(rw, t) entry
-\todo{TODO 3, 7: re-record the row~18 numbers (7f410dc message, one run each, loaded M5 Max) on the
-release commit; register reduced $\times$ SV(rw, $t$) or keep its caveat.}
+\todo{TODO 3: register reduced $\times$ SV(rw, $t$) or keep its caveat.}
+% TODO 7 part done: on the release commit row 18 passes G-full (1.90), SBC at t_max 400 and the 10 contract tests (record/geweke.jsonl, record/sbc.jsonl, junit_tests_contract.xml at 7f880e1) and G-small in CI run 40061724239 (pass only); the one-off positive controls are not re-run

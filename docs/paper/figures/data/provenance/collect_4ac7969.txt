@@ -1,0 +1,14 @@
+# pytest --collect-only -q -p no:cacheprovider [-m MARKER | PATH], run 2026-10-24 in the paper worktree
+# (/Users/yigitokar/rai-bvar-paper, branch paper-draft at fd8a3f7, whose src/ and tests/ equal main 4ac7969 = 7f880e1
+# plus the version string; git diff 4ac7969 fd8a3f7 -- src tests is empty) with the main repository's Python environment;
+# one line per selection: the selection, then pytest's last output line.
+-m "geweke": 100/5256 tests collected (5156 deselected)
+-m "sbc": 23/5256 tests collected (5233 deselected)
+-m "parity_long": 15/5256 tests collected (5241 deselected)
+-m "mutation": 37/5256 tests collected (5219 deselected)
+-m "not slow and not network and not bench": 4771/5256 tests collected (485 deselected)
+-m "(slow or network) and not bench": 482/5256 tests collected (4774 deselected)
+-m "bench": 3/5256 tests collected (5253 deselected)
+(all): 5256 tests collected
+tests/sbc/test_block_tier.py: 46 tests collected
+tests/parity: 364 tests collected

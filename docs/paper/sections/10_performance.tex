@@ -1,7 +1,8 @@
 \section{Performance}\label{sec:performance}
 
 % Evidence status follows OUTLINE.md §0.5. Every number below is [R]: tests/bench/baseline.json
-% (main repository), measured at deb3929 on a non-idle Apple M5 Max, committed in d490730.
+% (main repository), measured at deb3929 on a non-idle Apple M5 Max, committed in d490730, and the
+% x86-64 CI report benchmarks/reports/bench_p2_x86_github_779957f.json (779957f).
 % Re-measure on an idle machine on the release commit (OUTLINE TODO 9).
 % Detail moved out of this section is in Appendix E (app:performance; merged in the integration pass).
 
@@ -22,4 +23,5 @@ The slowest quantities, the SV scales $\sigma_i$ and persistences $\phi_i$, reac
 Every run reports \code{converged = False}; the runs share a seed and give identical draws, so this is one outcome seen six times: according to the commit message, 4 of the 101 primary quantities miss the R-hat threshold of 1.01 (worst 1.016, a $\sigma_i$), while every group's minimum bulk ESS exceeds 400. % [R] commit d490730 ("same seed, identical draws"; the R-hat values are not stored in the JSON); baseline.json summary.converged, summary.ess.*.ess_min (sigma 504)
 Even at five times the default number of draws, this workload thus fails the convergence rule of \cref{sec:eval-verdict}; \cref{sec:limitations} discusses the budget. % [V] src/rai_bvar/settings.py l.76 (MCMCSettings.draws = 2000; BENCH-P2 keeps 10,000)
 
-The four-device stretch target of 60~s, the reduced-form CCCM sampler, SV with Student-$t$ errors or with outliers plus $t$, and an idle x86 machine have no production measurement, and timings of design stand-ins and pilot prototypes are not quoted (\cref{app:performance}); \cref{tab:TabE2} gives the full benchmark record and \cref{tab:TabE3} the kernel microbenchmarks. % [R] dossier 03 §13.6-§13.8 (x86: git show d37e059:tests/bench/baseline.json, provisional, under heavy load; stand-ins and prototypes ran different code on another machine)
+On a shared 2-vCPU x86-64 runner of the continuous-integration bench job the same fit took 228.9~s cold and 198.4~s warm; the design reports that run without gating it (\cref{app:performance}). % [R] benchmarks/reports/bench_p2_x86_github_779957f.json (commit 779957f; AMD EPYC 7763, logical_cpus 2); DESIGN WP24 amendment ("reported, not gated")
+The four-device stretch target of 60~s, the reduced-form CCCM sampler, SV with Student-$t$ errors or with outliers plus $t$, and an idle x86 machine have no production measurement, and timings of design stand-ins and pilot prototypes are not quoted (\cref{app:performance}); \cref{tab:TabE2} gives the full benchmark record and \cref{tab:TabE3} the kernel microbenchmarks. % [R] dossier 03 §13.6-§13.8 (x86: git show d37e059:tests/bench/baseline.json, provisional, under heavy load, superseded by the CI report above; stand-ins and prototypes ran different code on another machine)

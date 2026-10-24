@@ -1,8 +1,8 @@
 % Section 6 (OUTLINE.md §6; 3 pages). Code anchors are at main-repo commit d58c9ef
 % (branch phase-2-cr-acceptance), which contains D-34 (b9c66c0) and the CR acceptance config
 % (c823d20); the contract coverage of §6.2 is at 7f410dc (validation row 18 and the reduced-SV(rw)
-% contract fit), which the release includes (orchestrator decision). Re-anchor on the release
-% commit (TODO 20). Detail moved out of this section for length is in Appendices A, B.4, C, D.7 and G (merged in the integration pass),
+% contract fit), both ancestors of the release commit 7f880e1 ([V] git merge-base --is-ancestor; release
+% 0.2.0 = 4ac7969, 7f880e1 plus the version string); line numbers are those of the anchors, not re-checked at 7f880e1. Detail moved out of this section for length is in Appendices A, B.4, C, D.7 and G (merged in the integration pass),
 % each fragment headed by its intended appendix and label. OUTLINE §6.5-§6.7 (scores, tests,
 % backtests) are merged into one subsection, which carries all three labels.
 \section{Forecasts, the predictive contract and the verdict engine}\label{sec:evaluation}\label{sec:forecasts}
@@ -44,7 +44,7 @@ draw is one joint path across horizons and variables and that stacking is chain-
 for every registered benchmark and analytic-engine model and for 13 MCMC compositions, eight
 structural and five reduced-form, among them reduced form $\times$ SV(rw), the primary arm of the
 replication in \cref{sec:cr}.
-% [V] tests/contract/test_forecast_contract.py (REGISTERED_MODELS: RandomWalk, OLSVAR and the conjugate BVARs), tests/contract/test_forecast_contract_mcmc.py over tests/mcmc/forecast/mcmc_fits.py::COMPOSITIONS (l.128-142 at 7f410dc; "reduced-SV(rw)" added in 7f410dc); [R] 7f410dc commit message: contract 10/10 for that fit; [REL] re-run on the release commit
+% [V] tests/contract/test_forecast_contract.py (REGISTERED_MODELS: RandomWalk, OLSVAR and the conjugate BVARs), tests/contract/test_forecast_contract_mcmc.py over tests/mcmc/forecast/mcmc_fits.py::COMPOSITIONS (l.128-142 at 7f410dc; "reduced-SV(rw)" added in 7f410dc); [R] 7f410dc commit message: contract 10/10 for that fit; [REL] junit_tests_contract.xml at 7f880e1: 130 passed (13 MCMC compositions x 10 tests); the fast contract tests passed in CI run 40061724239
 Reduced form $\times$ SV($t$) and SV(outliers, $t$), and the replication's variant SV(rw, $t$), are
 not among them (\cref{sec:validation-coverage}).
 % [V] tests/mcmc/forecast/mcmc_fits.py::COMPOSITIONS at 7f410dc (no reduced SV(t), SV(outliers,t) or SV(rw,t)); 7f410dc commit message and DESIGN §9.5 row 18 (SV(rw, t) not added)
@@ -139,8 +139,7 @@ at the same cell, an agent review recorded in the repository notes found $\mathr
 The estimator is opt-in and covers MCMC forecasts of linear or zero means (scope in
 \cref{app:mcse-bound}).
 % [V] tests/unit/test_lpd_integrated.py::test_integrated_errors; tests/unit/test_scores_lpd_method.py::test_integrated_needs_lag_coefs_beyond_horizon_one
-\todo{Risk 4: cut the D-34 text and the integrated series of \cref{fig:lpd-estimators} if D-34
-misses the release commit.}
+% Risk 4 does not apply: D-34 (b9c66c0) is on the release commit ([V] git merge-base --is-ancestor b9c66c0 7f880e1; release 0.2.0 = 4ac7969).
 
 \subsection{Scores, tests and backtests}\label{sec:eval-scores}\label{sec:eval-tests}\label{sec:eval-backtest}
 

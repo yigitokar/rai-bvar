@@ -132,11 +132,11 @@ with `PYTHONDONTWRITEBYTECODE=1`, and write `figures/<name>.pdf`.
 | Fig3 verdict flow | `make_fig_verdict_flow.py` | static, transcribed from `CompareResult.verdict` |
 | Fig4 LPD estimators | `make_fig_lpd_estimators.py` | left panel computed; right panel a placeholder until `rb_tail_cell.json` exists (TODO 6) |
 | FigC1 Gibbs plan | `make_fig_plan.py` | computed (fits two tiny models; about a minute) |
-| FigD1 mutation heatmap | `make_fig_mutation_heatmap.py` | drawn from the local records in `figures/data/validation_record/` (tracked on `paper-draft` since 33dd9f8, not on `main`; no commit or machine field), with a draft-data footer (TODO 7) |
-| FigD2 Geweke dots | `make_fig_geweke_dots.py` | same local records; `--geweke`/`--mutation` select the release records |
+| FigD1 mutation heatmap | `make_fig_mutation_heatmap.py` | drawn from the release validation record at 7f880e1 (`benchmarks/reports/validation/7f880e1_apple-m5-max/record/mutation.jsonl`), named in a footer |
+| FigD2 Geweke dots | `make_fig_geweke_dots.py` | same record (`geweke.jsonl`, `mutation.jsonl`); `--geweke`/`--mutation` select other records, and the footer then says they are not the release record |
 | FigE1 RW pivots | `make_fig_laplacian_pivots.py` | computed from committed code; `--json PATH` writes the numbers; see AUTHOR_TODO (TODO 23) |
 | Fig6, FigF2 | `make_fig_cr_orderings.py`, `make_fig_cr_convergence.py` | placeholders until the acceptance JSON exists |
-| FigF1, FigF3 | `make_fig_cr_per_origin.py`, `make_fig_cr_cumulative.py` | drawn from the per-origin export `figures/data/cr_acceptance/` (untracked; commit it with the paper, TODO 5); their captions say so |
+| FigF1, FigF3 | `make_fig_cr_per_origin.py`, `make_fig_cr_cumulative.py` | drawn from the per-origin export `figures/data/cr_acceptance/` (tracked on `paper-draft`, TODO 5); their captions say so |
 
 Like `fill_acceptance.py`, the acceptance figures refuse a report that is not the registered run.
 They dry-run on another report only with `--allow-non-acceptance --outdir DIR`.
@@ -148,11 +148,15 @@ figures); each writes the body of one appendix float to `figures/tables/<stem>.t
 `sections/appendix.tex` reads with `\input`. A generated file holds only the `tabular` and its
 notes; the float, caption, label and evidence tags stay in the appendix. Cells that wait for data
 are marks: `\acc{key}` (acceptance run; filled by `make fill`, which scans `figures/tables/` as well
-as `sections/`) and a red `[REL]` (release validation records, OUTLINE TODO 7), which stops a
-`\draftmarksfalse` build like `\acc` and `\todo`. The other tables (Tab1, Tab7, Tab13 in the main
-text; Tab2, Tab5 and Tab12, moved to Appendices C, D and F; TabA1, TabC1, TabF2, TabF3, TabG1 and
-TabH1) are typed into the sources; the generators named in their comments are not written (TODO
-20).
+as `sections/`) and a red `[REL]` for a cell whose release validation record is missing, which stops
+a `\draftmarksfalse` build like `\acc` and `\todo`. The release records are read from
+`benchmarks/reports/validation/7f880e1_apple-m5-max/` of this repository (`tab_common.RELEASE_DIR`):
+the JSON records in `record/`, the JUnit XML per test directory and `meta.json`; the per-PR tier on
+the release commit from the committed CI log excerpt
+`figures/data/provenance/ci_run_40061724239_fast_suite.txt`. No `[REL]` cell is left. The other
+tables (Tab1, Tab7, Tab13 in the main text; Tab2, Tab5 and Tab12, moved to Appendices C, D and F;
+TabA1, TabC1, TabF2, TabF3, TabG1 and TabH1) are typed into the sources; the generators that OUTLINE
+section 14 planned for them were not written.
 
 ## arXiv package
 
@@ -166,22 +170,27 @@ tectonic. arXiv itself compiles with pdfLaTeX, i.e. the untested pdfTeX branch o
 `\draftmarksfalse` before submitting.
 
 Listings 1 and 2: `python3 code/run_examples.py` runs `code/ex_a.py` and `code/ex_b.py` in the main
-repository and rewrites `code/out/` (stdout, stderr, `env.json`). Re-run it on the release commit
-(TODO 20).
+repository and rewrites `code/out/` (stdout, stderr, `env.json`). The listings were run at d58c9ef,
+not on the release commit 4ac7969 (= 7f880e1 plus the version string), whose D-35 changes the default
+MCMC budget of SV compositions; re-run them before submission.
 
 ## Where the data files live
 
-State on branch `paper-draft` (base 75db8a7, which contains `main` at 888f620); see
+State on branch `paper-draft` (fd8a3f7 merges `main` at 4ac7969, release 0.2.0); see
 `REVIEW_RESPONSE.md` (software referee, minor 5).
 
-- **Tracked on `paper-draft` (since 33dd9f8), not on `main`:** `figures/data/validation_record/`
-  (Geweke, SBC and mutation records; no commit or machine field, so not release records; their
-  G-full `reduced_sv` row is the failure fixed in 3d3f51b, see `AUTHOR_TODO.md`, part 3) and
-  `figures/data/convergence_diagnostic/` (the fit-level diagnostic of the pre-registration: a
-  script and 520 + 424 fit records; commit it to `main`, OUTLINE TODO 4).
-- **Untracked:** `figures/data/cr_acceptance/` (the per-origin export behind FigF1 and FigF3, with
-  its `.meta.json` and README; commit it, OUTLINE TODO 5) and `acceptance_values.tex` (generated by
-  `fill_acceptance.py`; commit it with the final paper, since arXiv needs it and it records which
+- **On `main` (merged into `paper-draft`):** the release validation record
+  `benchmarks/reports/validation/7f880e1_apple-m5-max/` and the x86-64 BENCH-P2 report
+  `benchmarks/reports/bench_p2_x86_github_779957f.json` (PR #9). The earlier local records of
+  unknown commit and machine (`figures/data/validation_record/`) are deleted.
+- **Tracked on `paper-draft`, not on `main`:** `figures/data/convergence_diagnostic/` (the
+  fit-level diagnostic of the pre-registration: a script and 520 + 424 fit records; commit it to
+  `main`, OUTLINE TODO 4) and `figures/data/provenance/` (GitHub activity record; excerpts of the
+  logs of CI runs 40061724239, the fast suite at 7f880e1, and 40052069815, the x86-64 weekly tier at
+  779957f; the test-collection counts at the release code).
+- **Tracked on `paper-draft` since a3478d4:** `figures/data/cr_acceptance/` (the per-origin export
+  behind FigF1 and FigF3, with its `.meta.json` and README; OUTLINE TODO 5) and
+  `acceptance_values.tex` (generated by `fill_acceptance.py`; arXiv needs it, and it records which
   report filled the numbers).
 - **Tracked build output:** `main.pdf`. The LaTeX intermediates and `arxiv.tar.gz` are ignored
   (`.gitignore`).

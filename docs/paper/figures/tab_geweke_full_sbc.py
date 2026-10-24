@@ -8,19 +8,18 @@ the row has an inexact variant (``INEXACT_ROWS``), composition-level Tier B, and
 p and its quantity, stage, thinning cap ``t_max`` with ``SBC_OVERRIDES``, largest thinning used,
 replications failing the per-replication ESS rule, minimum pooled ESS).
 
-Data:
+Data: the release validation records at 7f880e1 (Apple M5 Max, clean tree; ``tc.RELEASE_DIR``,
+``benchmarks/reports/validation/7f880e1_apple-m5-max/``, committed to main in 3d5a407) [REL]:
 
-* the release records ``docs/paper/data/release/geweke.jsonl`` (tiers ``G-full``,
-  ``G-full-inexact``) and ``sbc.jsonl`` ([REL]; OUTLINE TODO 7) when they exist;
-* until then the only results stated are those the appendix states (``sections/appendix.tex``,
-  app:sbc: "no G-full or SBC result other than row 205"), plus row 18, which the orchestrator's
-  coverage decision adds: row 205 from ``docs/paper/NOTES.md`` item 13 of the main repository
-  (G-full 2.76, SBC min p 0.018; [R]) and row 18 from DESIGN section 9.5 (row 18 note), the module
-  docstring of ``tests/sbc/test_sbc_compositions.py`` and the commit message of 7f410dc ([R], Apple
-  M5 Max under load). Every other result cell is a red [REL] mark. The local records in
-  ``docs/paper/figures/data/validation_record/`` (tracked on paper-draft, not on main) are not used
-  (no commit or machine field; TODO 7).
-* composition-level Tier B (``tests/sbc/test_block_tier.py``) has no record hook (TODO 7): [REL].
+* ``record/geweke.jsonl``, tiers ``G-full`` and ``G-full-inexact``, and ``record/sbc.jsonl``, one
+  JSON object per test as written by the test modules with ``RAI_BVAR_VALIDATION_RECORD`` set;
+* composition-level Tier B (``tests/sbc/test_block_tier.py``, no record hook): the pass/fail status
+  of each of its tests in ``junit_tests_sbc.xml``, the JUnit XML of the same run, keyed by the
+  composition in the test's parameter.
+
+A composition without a record keeps a red [REL] mark. The local records of unknown commit and machine
+that the earlier drafts kept in ``docs/paper/figures/data/validation_record/`` (never used here) are
+deleted from the paper branch.
 
 Usage: tab_geweke_full_sbc.py [--outdir DIR] [--records DIR]
 """
@@ -69,42 +68,40 @@ def recompute(sizes: dict) -> list[dict]:
     return out
 
 
-def recorded_interim(c: dict) -> dict:
-    """Row 205 (NOTES item 13) and row 18 (DESIGN 9.5, SBC docstring, 7f410dc), [R]."""
-    notes = tc.git_show("HEAD", "docs/paper/NOTES.md")
-    m = re.search(r"Geweke row 205\s+\(G-small max \|z\| [\d.]+, G-full ([\d.]+)\), SBC row 205 \(min p ([\d.]+)\)", notes)
-    assert m, "NOTES item 13 (row 205)"
-    design = tc.section(tc.git_show("HEAD", "docs/phase2/DESIGN.md"), r"^### 9\.5 ")
-    e = re.search(r"Evidence\s+\(2026-10-23,\s+Apple\s+M5\s+Max\):\s+G-small\s+max\s+\|z\|\s+[\d.]+,\s+G-full\s+([\d.]+),"
-                  r"\s+SBC\s+min\s+p\s+([\d.]+)\s+\((\d+)\s+quantities\),\s+all\s+at\s+stage\s+1;\s+the\s+inexact\s+"
-                  r"variant's\s+G-full\s+max\s+\|z\|\s+(\d+\.\d+)", design)  # fmt: skip
-    assert e, "DESIGN 9.5 row 18 evidence"
-    msg = tc.git("log", "-1", "--format=%B", "7f410dc")
-    gm = re.search(r"G-full\s+([\d.]+)\s+\(([\d.]+)\);\s+inexact\s+([\d.]+)", msg)
-    assert gm and gm.group(1) == e.group(1) and gm.group(3) == e.group(4)
-    doc = re.sub(r"\s+", " ", c["sbc_doc"])
-    p18 = re.search(r"the row then passes at stage 1 \(ESS rule 100%, min p ([\d.]+), pooled ESS ≥ (\d+)\)", doc)
-    assert p18 and p18.group(1) == e.group(2)
-    return {205: {"gfull": m.group(1), "sbc_p": m.group(2), "src": "NOTES 13"},
-            18: {"gfull": e.group(1), "gfull_tcrit": gm.group(2), "inexact": e.group(4), "sbc_p": e.group(2),
-                 "Q": e.group(3), "stage": "1", "ess_fail": "0", "pooled": p18.group(2), "src": "DESIGN 9.5"}}  # fmt: skip
+def block_tier(path: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """Composition-level Tier B from the JUnit XML: ``{composition: [status, ...]}`` for the tests
+    parametrised by a composition, and ``{test id: status}`` for the rest (the volatility-block
+    invariance tests, parametrised by a block)."""
+    by_comp: dict[str, list[str]] = {}
+    other: dict[str, str] = {}
+    for key, st in tc.junit_cases(path).items():
+        mod, name = key.split("::")
+        if mod != "test_block_tier":
+            continue
+        fn, _, param = name.partition("[")
+        param = param.rstrip("]")
+        if fn == "test_invariance_vol_block":
+            other[name] = st
+        else:
+            by_comp.setdefault(param, []).append(st)
+    return by_comp, other
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     tc.add_common_args(ap)
     ap.add_argument("--records", type=Path, default=tc.RELEASE)
+    ap.add_argument("--junit", type=Path, default=tc.RELEASE_DIR / "junit_tests_sbc.xml")
     args = ap.parse_args()
     tc.apply_outdir(args)
+    meta = tc.release_meta()
     c = committed()
     rows = recompute(c["sizes"])
     gpath, spath = args.records / "geweke.jsonl", args.records / "sbc.jsonl"
-    released = gpath.exists() and spath.exists()
-    if released:
-        g = {(r["tier"], r["name"]): r for r in tc.read_jsonl(gpath)}
-        s = {r["name"]: r for r in tc.read_jsonl(spath)}
-    else:
-        rec = recorded_interim(c)
+    g = {(r["tier"], r["name"]): r for r in tc.read_jsonl(gpath)}
+    s = {r["name"]: r for r in tc.read_jsonl(spath)}
+    bt, bt_other = block_tier(args.junit)
+    assert set(bt) <= {r["name"] for r in rows}, set(bt) - {r["name"] for r in rows}
     t_max = {r["name"]: c["overrides"].get(r["name"], {}).get("t_max", c["t_max"]) for r in rows}
     assert t_max["reduced_sv_rw"] == 400 and c["t_max"] == 200
 
@@ -113,70 +110,68 @@ def main() -> None:
              r"\cmidrule(lr){3-6}\cmidrule(l){8-12}",
              r"Row & Composition & $G$ & $t_{C-1}$ & max $|z|$, stage & \code{exact=False} & Tier B & "
              r"min $p$, stage & $t_{\max}$ & max thin & ESS fail & pooled ESS \\", r"\midrule"]  # fmt: skip
+    n_fail = 0
     for r in sorted(rows, key=lambda x: x["row"]):
         row, name = r["row"], r["name"]
         has_inexact = row in c["inexact"]
-        if released:
-            # a composition without a record keeps its [REL] mark; ``stage`` is 1-based (= len(q))
-            gf = g.get(("G-full", name))
-            gi = g.get(("G-full-inexact", name))
-            sb = s.get(name)
-            if gf:
-                assert gf["stages"][0]["G"] == r["G"], (name, gf["stages"][0]["G"], r["G"])
-                assert gf["stage"] == len(gf["q"]), (name, gf["stage"], gf["q"])
-                gcell = f"{gf['stages'][-1]['max_abs_z']:.2f}, {gf['stage']}" + ("" if gf["passed"] else " (fail)")
-            else:
-                gcell = REL
-            icell = ("---" if not has_inexact else REL if not gi else
-                     f"{gi['stages'][-1]['max_abs_z']:.2f}" + ("" if gi["passed"] else " (fail)"))
-            if sb:
-                scell = f"{sb['min_p']:.3g}, {sb['stage']}" + ("" if sb["passed"] else " (fail)")
-                thin = str(sb.get("thin_max", "---"))
-                fail = str(sb["ess_fail"]) if "ess_fail" in sb else "---"
-                pooled = f"{sb['ess_pooled_min']:.0f}" if sb.get("ess_pooled_min") is not None else "---"
-            else:
-                scell, thin, fail, pooled = REL, REL, REL, REL
-        elif row in rec:
-            x = rec[row]
-            assert "gfull_tcrit" not in x or abs(float(x["gfull_tcrit"]) - r["t_crit"]) < 0.005, (row, x, r)
-            gcell = f"{x['gfull']}$^\\ast$" + (f", {x['stage']}" if "stage" in x else "")
-            icell = (f"{x['inexact']}$^\\ast$" if "inexact" in x else REL) if has_inexact else "---"
-            scell = f"{x['sbc_p']}$^\\ast$" + (f", {x['stage']}" if "stage" in x else "")
-            thin = REL
-            fail = f"{x['ess_fail']}$^\\ast$" if "ess_fail" in x else REL
-            pooled = f"$\\geq {x['pooled']}^\\ast$" if "pooled" in x else REL
+        # a composition without a record keeps its [REL] mark; ``stage`` is 1-based (= len(q))
+        gf = g.get(("G-full", name))
+        gi = g.get(("G-full-inexact", name))
+        sb = s.get(name)
+        if gf:
+            assert gf["stages"][0]["G"] == r["G"], (name, gf["stages"][0]["G"], r["G"])
+            assert abs(gf["stages"][0]["t_crit"] - r["t_crit"]) < 1e-9, (name, gf["stages"][0], r)
+            assert gf["stage"] == len(gf["q"]), (name, gf["stage"], gf["q"])
+            gcell = f"{gf['stages'][-1]['max_abs_z']:.2f}, {gf['stage']}" + ("" if gf["passed"] else " (fail)")
+            n_fail += not gf["passed"]
         else:
-            gcell, icell = REL, (REL if has_inexact else "---")
+            gcell = REL
+        assert gi is None or has_inexact, (name, has_inexact)
+        icell = ("---" if not has_inexact else REL if not gi else
+                 f"{gi['stages'][-1]['max_abs_z']:.2f}" + ("" if gi["passed"] else " (fail)"))
+        b = bt.get(name)
+        bcell = "---" if not b else (f"{b.count('passed')}/{len(b)}")
+        n_fail += bool(b) and b.count("passed") != len(b)
+        if sb:
+            assert sb["t_max"] == t_max[name], (name, sb["t_max"], t_max[name])
+            assert sb["stage"] == len(sb["q"]), (name, sb["stage"], sb["q"])
+            scell = f"{sb['min_p']:.3g}, {sb['stage']}" + ("" if sb["passed"] else " (fail)")
+            n_fail += not sb["passed"]
+            thin = str(sb["thin_max"])
+            fail = str(sb["ess_fail"])
+            pooled = f"{sb['ess_pooled_min']:.0f}"
+        else:
             scell, thin, fail, pooled = REL, REL, REL, REL
-        lines.append(f"{row} & {tc.code(name)} & {r['G']} & {r['t_crit']:.2f} & {gcell} & {icell} & {REL} & "
+        lines.append(f"{row} & {tc.code(name)} & {r['G']} & {r['t_crit']:.2f} & {gcell} & {icell} & {bcell} & "
                      f"{scell} & {t_max[name]} & {thin} & {fail} & {pooled} \\\\")  # fmt: skip
     lines += [r"\bottomrule", r"\end{tabular}"]
+    n_inexact = sum(k[0] == "G-full-inexact" for k in g)
+    n_b = sum(len(v) for v in bt.values())
+    assert all(v == "passed" for v in bt_other.values()), bt_other
+    print(f"G-full {sum(k[0] == 'G-full' for k in g)}, inexact {n_inexact}, SBC {len(s)}, Tier B "
+          f"{n_b} + {len(bt_other)} block-level; failures {n_fail}")  # fmt: skip
     sz = c["sizes"]
     foot = (f"{len(rows)} compositions of \\code{{src/rai_bvar/validation/joint.py}}. G-full: $C = {sz['C']}$, "
             f"$M_c = {sz['M_c']}$, $M_1 = 10^{{{int(round(math.log10(sz['M1'])))}}}$, $\\alpha = 10^{{{int(round(math.log10(sz['alpha'])))}}}$; "
-            r"$G$ and the stage-1 critical value are recomputed from the committed code. "
+            r"$G$ and the stage-1 critical value are recomputed from the committed code and equal the recorded ones; "
+            r"max $|z|$ is that of the last stage. "
             f"\\code{{exact=False}}: the inexact variant ({len(c['inexact'])} SV rows), recorded, not gating; "
-            r"--- where the row has none. B: composition-level Tier~B of \code{tests/sbc/test_block_tier.py}. "
+            r"--- where the row has none. Tier B: composition-level tests of \code{tests/sbc/test_block_tier.py} "
+            r"for the row, passed of run (--- where the row has none); its "
+            f"{len(bt_other)} invariance tests of the volatility blocks, parametrised by block, all passed. "
             f"SBC: $N = 1000$, $L = 99$, pilot {c['pilot']}, $\\alpha = 10^{{-2}}$; $t_{{\\max}}$ from "
-            r"\code{T_MAX} and \code{SBC_OVERRIDES}; ESS fail: replications failing the per-replication "
-            r"ESS rule; pooled ESS: minimum over quantities of the replication-pooled ESS.")  # fmt: skip
+            r"\code{T_MAX} and \code{SBC_OVERRIDES} (equal to the recorded one); max thin: the largest "
+            r"thinning used; ESS fail: replications failing the per-replication "
+            r"ESS rule; pooled ESS: minimum over quantities of the replication-pooled ESS. "
+            f"Release validation record at commit {tc.RELEASE_COMMIT} (clean tree), {tc.tex(meta['machine']['cpu'])}, "
+            f"{tc.tex(meta['started_utc'][:10])}: \\code{{record/geweke.jsonl}}, \\code{{record/sbc.jsonl}} and "
+            r"\code{junit_tests_sbc.xml} in \code{benchmarks/reports/validation/7f880e1_apple-m5-max/}.")  # fmt: skip
     body = tc.preamble(marks=True) + tc.fit("\n".join(lines)) + "\n" + tc.note(foot)
-    if not released:
-        body += "\n" + tc.note(
-            r"Placeholder: [REL] cells wait for the release records \code{geweke.jsonl} and "
-            r"\code{sbc.jsonl} in \code{docs/paper/data/release/} and a record hook for Tier~B (OUTLINE "
-            r"TODO 7). $^\ast$Recorded only, not release records: row 205 from \code{docs/paper/NOTES.md} "
-            r"item 13 of the main repository; row 18 from DESIGN \S9.5 (row 18 note), the docstring of "
-            r"\code{tests/sbc/test_sbc_compositions.py} and the commit message of 7f410dc (Apple M5 Max "
-            f"under load; SBC over {rec[18]['Q']} quantities, stage 1).", red=True)  # fmt: skip
-    status = "[REL] release records" if released else "PLACEHOLDER [REL] except rows 205 and 18 ([R], recorded only)"
-    sources = ([str(gpath), str(spath)] if released else
-               ["main repo docs/paper/NOTES.md item 13 (row 205)",
-                "main repo docs/phase2/DESIGN.md section 9.5 row 18 note; tests/sbc/test_sbc_compositions.py "
-                "docstring; commit message of 7f410dc (row 18)"])  # fmt: skip
+    sources = [str(p.relative_to(tc.REPO_ROOT)) for p in (gpath, spath, args.junit)]
     sources.append(f"main repo {GTEST} (G_FULL, INEXACT_ROWS), {STEST} (T_MAX, PILOT, SBC_OVERRIDES), "
                    "joint_spec(name, 'full').names at HEAD")
-    tc.write(NAME, body, generator="tab_geweke_full_sbc.py", status=status, sources=sources)
+    tc.write(NAME, body, generator="tab_geweke_full_sbc.py",
+             status=f"[REL] release records at {tc.RELEASE_COMMIT} (Apple M5 Max)", sources=sources)
 
 
 if __name__ == "__main__":

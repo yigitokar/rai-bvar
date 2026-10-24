@@ -1,8 +1,10 @@
 % =====================================================================================
 % sections/appendix.tex -- Appendices A--K (OUTLINE.md section 15).
 % Evidence tags are LaTeX comments at the end of the sentence they support:
-%   [V] committed test/fixture, [R] recorded (source named), [TC] to check, [REL] re-record on
-%   the release commit, [ACC] acceptance JSON, [FULL] first full run (551f181), [PREREG] c823d20.
+%   [V] committed test/fixture, [R] recorded (source named), [TC] to check, [REL] the release
+%   validation record at 7f880e1 (benchmarks/reports/validation/7f880e1_apple-m5-max/) or, for the
+%   per-PR tier on the release commit, CI run 40061724239, [ACC] acceptance JSON, [FULL] first full
+%   run (551f181), [PREREG] c823d20.
 % Line numbers into benchmarks/clark_ravazzolo.py are at c823d20; into src/ and dossiers at 62d15f6
 % unless stated. Script-generated table bodies are \input from figures/tables/<script stem>.tex,
 % written by figures/<script stem>.py (`make tables`; OUTLINE section 14.2 stems, which OUTLINE
@@ -459,7 +461,7 @@ over draws.
 % (companion-form oracle, h = 2..8, joint/leading/non-leading subsets, 6-s.d. tails, atol 1e-10),
 % ::test_integrated_lpd_is_the_mixture_of_exact_densities, ::test_horizon_one_is_the_conditioned_estimator_bitwise,
 % ::test_integrated_lpd_is_unit_equivariant; tests/mcmc/forecast/test_lpd_integrated_mcmc.py (jax.jacfwd);
-% [R] measured agreement 1.8e-14: b9c66c0 commit message; [REL] re-run on the release commit
+% [R] measured agreement 1.8e-14: b9c66c0 commit message; [REL] the D-34 tests are fast tests and passed in CI run 40061724239 (7f880e1); the agreement value is not re-measured
 Given each draw's volatility path, the conditioning is the one \citet[Appendix~D]{hiraki2026dynamic}
 use for predictive moments; with constant volatility the estimator is that of
 \citet{warne2017marginalized}, specialised to a VAR.
@@ -602,8 +604,8 @@ The reference is checked against the closed forms to $10^{-10}$ and by Kolmogoro
 the $\lambda$ draws against a quadrature CDF; Geweke row 205 gives a G-small maximum $|z|$ of 2.24,
 and the repository notes record G-full 2.76 and an SBC minimum $p$ of 0.018 for the same row.
 % [V] tests/validation/test_reference_dummies.py; G-small 2.24 reproduced at 62d15f6 (dossier 04 section 6.6);
-% [R] G-full 2.76 and SBC 0.018: NOTES 13 only, no committed record (dossier 04 sections 6.7, 7.6);
-% [REL] geweke.jsonl (tier G-full), sbc.jsonl
+% [R] G-full 2.76 and SBC 0.018: NOTES 13 (dossier 04 sections 6.7, 7.6);
+% [REL] the same values in the release record at 7f880e1 (record/geweke.jsonl G-full 2.76, record/sbc.jsonl min p 0.0178)
 In the sampler, Mode~II rows are weighted $1/\lambda_i$ like data rows, so the conditional of
 $\lambda_i$ gains $m/2$ in its shape and the rows' $\lambda$-free squared residuals in its scale.
 % [R] NOTES 12; the hand-injected omission count is withheld (TODO 24)
@@ -787,7 +789,7 @@ cross-lag tightness $\kappa_c \neq 1$ in structural form. % [R] src/rai_bvar/api
   \centering
   \small
   % (Tab2, moved from §4.2 in the integration pass.) Content read from src/rai_bvar/api.py (_resolve_auto, engine); cross-checked by
-  % docs/paper/figures/tab_resolution.py against tests/unit/test_api_resolution.py::test_resolution_table (OUTLINE §14, Tab2).
+  % hand against tests/unit/test_api_resolution.py::test_resolution_table (OUTLINE §14, Tab2; typed: the planned generator was not written).
   \begin{tabular}{@{}rllp{0.5\textwidth}@{}}
     \toprule
     \# & Prior form & Volatility & Engine and mode \\
@@ -1180,7 +1182,7 @@ agree, to $10^{-12}$ in the tests.
 \label{tab:TabC1}
 % [V] src/rai_bvar/forecast/result.py:1-19, :96-162 (62d15f6); tests/contract/test_forecast_contract.py,
 % tests/contract/test_forecast_contract_mcmc.py (13 MCMC compositions at 7f410dc, tests/mcmc/forecast/mcmc_fits.py:128-142);
-% lag_coefs added in b9c66c0 (D-34); checked against a live ForecastResult by docs/paper/figures/tab_contract.py
+% lag_coefs added in b9c66c0 (D-34); typed table (the generator planned in OUTLINE §14 was not written)
 \begin{tabular}{@{}p{0.20\linewidth}p{0.28\linewidth}p{0.45\linewidth}@{}}
 \toprule
 Field & Dimensions & Meaning \\
@@ -1211,7 +1213,7 @@ Reduced $\times$ SV($t$), reduced $\times$ SV(outliers, $t$) and the replication
 reduced $\times$ SV(rw, $t$) are not in this list.
 % [V] tests/mcmc/forecast/mcmc_fits.py COMPOSITIONS l.128-142 at 7f410dc (13 entries; "reduced-SV(rw)" added
 % in 7f410dc); tests/contract/test_forecast_contract_mcmc.py; [R] 7f410dc commit message (contract 10/10 for
-% the new composition; SV(rw, t) not added); [REL] re-run on the release commit
+% the new composition; SV(rw, t) not added); [REL] junit_tests_contract.xml at 7f880e1: 130 passed, reduced-SV(rw) 10 of 10
 
 % (moved from §6.1 in the page-budget pass; cited from §6.1)
 \subsection{Forecast draws, impulse responses and variance decompositions}\label{app:irf}
@@ -1314,15 +1316,24 @@ MCMC fits of compositions that are not order-invariant warn from $n = 4$ variabl
 
 This appendix gives the configurations, statistics and run records behind
 \cref{sec:validation}.
-The tables here are to be generated on the release commit, from the JSON records that the Geweke,
-SBC and mutation tests write when \code{RAI_BVAR_VALIDATION_RECORD} points to a directory and, for the
-tiers without such a hook, from the test run's output (\cref{app:repro}).
-% [V] record hooks only in tests/geweke/test_geweke_compositions.py, tests/sbc/test_sbc_compositions.py,
-% tests/mutation/test_mutants.py (git grep RAI_BVAR_VALIDATION_RECORD at d58c9ef)
+Its tables and figures are generated from the release validation record: the weekly tiers run at
+commit 7f880e1, the code of release 0.2.0, on an Apple M5 Max on 24 October 2026, with the JSON
+records that the Geweke, SBC and mutation tests write when \code{RAI_BVAR_VALIDATION_RECORD} points
+to a directory and, for the tiers without such a hook, pytest's JUnit XML (\cref{app:repro}).
+The per-PR tier on the release commit has only pass or fail outcomes, from continuous integration
+on Linux. The one x86-64 run of the weekly tiers, in continuous integration at commit 779957f
+(before D-35), passed the slow tests of \code{tests/analytic} and \code{tests/contract} and all 43
+slow Geweke tests, then reached
+its 330-minute limit about half-way, before the mutation, parity and SBC tests, with one failure:
+the replay test of F1 (\cref{sec:robustness-f1}), which replays one recorded chain and asserts its
+trajectory; the log does not show which assertion failed.
+% [R] CI run 40052069815 (workflow_dispatch at 779957f; job "nightly", step "Slow and network tests", -m "(slow or network) and not bench"; timed out after 330 min at 53%): excerpt docs/paper/figures/data/provenance/ci_run_40052069815_weekly_x86.txt (tests/geweke/test_geweke_compositions.py 31 + 12 passes; tests/mcmc/blocks/test_contemp_lstsq.py "F", its only slow test being test_g_full_reduced_sv_failing_chain_is_fixed); the uploaded validation-record artifact of that run was not downloaded
+% [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/ (README.md; meta.json: commit 7f880e1..., dirty false,
+% 2026-10-24T04:17:19Z-07:18:44Z, markers "(slow or network) and not bench"; record/geweke.jsonl 43, sbc.jsonl 23,
+% mutation.jsonl 37; junit_*.xml per test directory; tests/unit excluded, issue #3); per-PR tier: CI run 40061724239
+% (excerpt docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt); [V] record hooks only in
+% tests/geweke/test_geweke_compositions.py, tests/sbc/test_sbc_compositions.py, tests/mutation/test_mutants.py
 Where a number below was reproduced on an earlier commit, the commit and the machine are stated.
-\todo{TODO 7: record G-small, G-full, SBC, composition-level B, the \code{exact=False} rows,
-\code{parity_long}, the analytic twins and the mutation suite on the release commit (Apple M5 Max and
-x86-64 Linux) and commit the JSONL files.}
 
 % (Tab5 and its paragraph moved from §8 in the page-budget pass; §8 cites app:validation)
 \subsection{Tier map and cadence}\label{app:tiers}
@@ -1332,20 +1343,19 @@ pull request, on Linux for Python 3.12--3.14; the continuous-integration job nam
 weekly, so composition-level Tier~B, G-full, SBC, the large analytic twins, long parity runs and the
 mutation suite run weekly. % [V] .github/workflows/ci.yml (cron "17 3 * * 0"; job comment "nightly: # weekly despite the name")
 Every \code{RuntimeWarning} is an error, as is any silent float32 truncation in the MCMC tests. % [V] pyproject.toml [tool.pytest.ini_options]; tests/geweke/test_geweke_compositions.py pytestmark
-\todo{[REL] Refresh the counts in \cref{tab:Tab5} and in \cref{app:runtimes} from
-\code{docs/paper/data/release/collect.txt} on the release commit.} % b9c66c0 reports "Fast suite 4655 passed" [R]; at 7f410dc row 18 adds G and S test IDs (G-small, G-full, G-full-inexact, the RW h0 variant; SBC 22 -> 23)
+% Tab5 counts: [V] pytest --collect-only at the release code (docs/paper/figures/data/provenance/collect_4ac7969.txt); at 62d15f6 they were G 95, S 22, B 43 (dossier 04 §3.1-§3.2); row 18 (7f410dc) adds G and S IDs and three composition-level B tests
 
 \begin{table}[!htbp]
   \centering
   \caption{Validation tiers: content, decision rule, cadence as designed and as run in
     continuous integration (the job named ``nightly'' runs weekly), and parametrised test IDs
-    at commit 62d15f6, counted under the tier's pytest marker where one exists. Tiers~U, B and A
+    on the release commit, counted under the tier's pytest marker where one exists. Tiers~U, B and A
     have no tier-wide marker (for B see note a); the G count includes the kernel-level Geweke
     tests.}
   \label{tab:Tab5}
-  % Body to be regenerated by docs/paper/figures/tab_tiers.py from .github/workflows/ci.yml,
-  % pyproject.toml and docs/paper/data/release/collect.txt [REL]; counts below are at 62d15f6
-  % (dossier 04 §3.1-§3.2); row 18 (7f410dc) adds G and S IDs not counted here.
+  % Typed table (no generator); cadences from .github/workflows/ci.yml; IDs: pytest --collect-only -m <marker> at the
+  % release code, docs/paper/figures/data/provenance/collect_4ac7969.txt (geweke 100, sbc 23, parity_long 15, mutation 37;
+  % tests/sbc/test_block_tier.py 46; tests/parity 364).
   \footnotesize
   \begin{tabular}{@{}l p{0.28\textwidth} p{0.27\textwidth} p{0.2\textwidth} r@{}}
     \toprule
@@ -1357,15 +1367,15 @@ Every \code{RuntimeWarning} is an error, as is any silent float32 truncation in 
       & PR / PR & -- \\
     B & block-conditional SBC ($N = 200$, $L = 99$); one-block invariance ($N = 1000$, $L = 20$)
       & Bonferroni at $\alpha = 10^{-3}$; sequential wrapper
-      & PR / kernel level PR, composition level weekly & 43$^{a}$ \\
+      & PR / kernel level PR, composition level weekly & 46$^{a}$ \\
     G & Geweke: G-small ($C = 1000$, $M_c = 100$, $M_1 = 2\cdot10^5$) and G-full ($C = 4000$,
         $M_c = 500$, $M_1 = 10^6$)
       & $\min_g p_g \le \alpha/G$, $\alpha = 10^{-3}$ (small) or $10^{-2}$ (full); sequential
         wrapper
-      & small PR, full nightly / small PR, full weekly & 95 \\
+      & small PR, full nightly / small PR, full weekly & 100 \\
     S & SBC, $N = 1000$, $L = 99$, two-pass thinning, ESS gates
       & $\gamma$ test, Bonferroni at $\alpha = 10^{-2}$; no failed replication; ESS gates
-      & nightly / weekly & 22 \\
+      & nightly / weekly & 23 \\
     A & analytic twins and exact oracles A1--A7
       & $|z| \le \max(4, z_{\mathrm{Bonf}})$ (A2--A5); log ML to $10^{-10}$ (A1)
       & PR: A1, A2, A5 ($n = 3$), A6, a small A7; nightly: A3, A4, the rest / the
@@ -1417,9 +1427,11 @@ first-stage Bonferroni $q$ of 0.0012 ($|z| = 4.21$ on a log-scale data autocorre
 there with $q = 1.0$; and the minimum relative numerical efficiency per composition was 0.008--0.129
 (where it falls is stated in \cref{app:ar1-rule}).
 % [V] reproduced twice at 62d15f6 on Apple M5 Max (dossier 04 section 6.6 and its fact-check);
-% deterministic for fixed code and seed on that machine, not a cross-machine reproduction; [REL]
+% deterministic for fixed code and seed on that machine, not a cross-machine reproduction; [REL] no G-small statistics in the release record; pass in CI run 40061724239
 Row~18 passed at stage~1 with a largest $|z|$ of 1.98 against 4.42, in one run recorded with
-7f410dc (\cref{app:row18}). % [R] commit message 7f410dc; DESIGN §9.5 row 18 note (Apple M5 Max under load); [REL]
+7f410dc (\cref{app:row18}). % [R] commit message 7f410dc; DESIGN §9.5 row 18 note (Apple M5 Max under load)
+On the release commit all 16 pass in continuous integration on Linux, which records no statistics;
+the release validation record covers the weekly tiers only and has no G-small row. % [REL] CI run 40061724239 (fast suite at 7f880e1; tests/geweke/test_geweke_compositions.py 18 of 18 passed in each of the Python 3.12, 3.13 and 3.14 jobs; docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt); record/geweke.jsonl tiers G-full, G-full-inexact, G-small-block, G-small-rw-h0
 Batch means within chains \citep{flegal2010batch} give a non-gating cross-check of the chains'
 long-run variance. % [V] src/rai_bvar/validation/geweke.py docstring (b = floor(sqrt(M_c))); tests/validation/test_geweke_selftest.py::test_batch_means_follow_the_documented_formulas (moved from §8)
 The sequential design bounds the probability of a false rejection by
@@ -1437,11 +1449,11 @@ At the per-PR settings $\gamma = 0.0693$ and $\beta = (3.33\times10^{-4}, 4.81\t
 \centering\small
 \caption{G-small Geweke results for the 16 per-PR compositions: number of test functions
 $G$, $t_{C-1}$ critical value, maximum $|z|$ and its argument, Gandy--Scott stage and Bonferroni
-$q$, minimum relative numerical efficiency, and time. Generated from \code{geweke.jsonl}
-(\code{pytest tests/geweke -m "geweke and not slow"}) on the release commit.}
+$q$, minimum relative numerical efficiency, and time, from runs at earlier commits (note under the
+table); all 16 pass on the release commit.}
 \label{tab:TabD1}
-% [REL] docs/paper/data/release/geweke.jsonl; generated by docs/paper/figures/tab_geweke.py;
-% cross-check against dossier 04 section 6.6 (62d15f6)
+% [V] dossier 04 section 6.6 (62d15f6); [R] row 18: 7f410dc; [REL] pass on the release commit: CI run 40061724239;
+% generated by docs/paper/figures/tab_geweke.py (checks that the release record has no G-small row)
 \input{figures/tables/tab_geweke.tex}
 \end{table}
 
@@ -1501,9 +1513,9 @@ bug whatever the approximation, fails them.
 Composition-level Tier B consists of block-conditional SBC ($N = 200$, $L = 99$) of every exact-draw
 block, with ranks of the block's coordinates and of the exact log-likelihood, and one-block invariance
 ($N = 1000$ joint draws, $L = 20$ applications of the live blocks, two-sample Kolmogorov--Smirnov tests)
-for Metropolis--Hastings, ASIS and Gibbs-scan blocks; its 43 tests run weekly, while each kernel
+for Metropolis--Hastings, ASIS and Gibbs-scan blocks; its 46 tests run weekly, while each kernel
 suite runs its own Tier~B per PR.
-% [V] tests/sbc/test_block_tier.py docstring l.4-28 (pytestmark slow)
+% [V] tests/sbc/test_block_tier.py docstring l.4-28 (pytestmark slow); 46 IDs at the release code (collect_4ac7969.txt; 43 at 62d15f6, before row 18)
 SBC uses $N = 1000$ replications, $L = 99$ kept draws, burn-in 300, a pilot of 1000 sweeps,
 $t_{\max} = 200$ (400 for row~18) and $\alpha = 10^{-2}$ for the 23 compositions (rows 1--18 and
 201--205), inside the same sequential wrapper.
@@ -1548,21 +1560,21 @@ enough), to be at least $0.8L$ for every quantity.
 % [V] design change: DESIGN section 9.6 erratum; src/rai_bvar/validation/sbc.py docstring l.24-54;
 % [R] the "about 76%" and "0.836 L" figures are docstring-only (TODO 25)
 \todo{TODO 25: commit a small test for the 76\% and $0.836L$ figures, or keep them out.}
-\cref{tab:TabD3} collects the G-full, \code{exact=False}, composition-level B and SBC records.
-No committed record of these runs existed at 62d15f6; the only recorded numbers are those that the
-repository notes record for row 205 (G-full 2.76, SBC minimum $p$ 0.018) and, since 7f410dc, those
-recorded for row~18 (below).
-% [R] NOTES 13 (dossier 04 sections 6.7, 7.6); row 18: 7f410dc commit message, DESIGN §9.5 row 18 note; [REL] geweke.jsonl (tiers G-full, G-full-inexact), sbc.jsonl;
-% composition-level B has no record hook yet (TODO 7)
+\cref{tab:TabD3} collects the G-full, \code{exact=False}, composition-level B and SBC records of
+the release commit: every composition passes G-full and SBC, row~2 at the third G-full stage and
+row~15 at the second SBC stage, every composition-level B test passes, and no \code{exact=False}
+row has a non-finite test function. Row 205 repeats the values recorded in the repository notes
+(G-full 2.76, SBC minimum $p$ 0.018) and row~18 its G-full 1.90.
+% [REL] record/geweke.jsonl (G-full 23, G-full-inexact 12, all passed), record/sbc.jsonl (23, all passed), junit_tests_sbc.xml (test_block_tier 46 passed) at 7f880e1; [R] NOTES 13 (dossier 04 sections 6.7, 7.6) for row 205; 7f410dc commit message for row 18
 
 \begin{table}[!htbp]
 \centering\small
 \caption{G-full, the recorded \code{exact=False} rows, composition-level Tier~B and full SBC per
-composition: maximum $|z|$ or minimum $p$ and stage, the thinning cap and the largest thinning used,
-the number of replications failing the per-replication ESS rule, and the pooled ESS. Generated on
-the release commit.}
+composition on the release commit: maximum $|z|$ or minimum $p$ and stage, Tier~B tests passed,
+the thinning cap and the largest thinning used, the number of replications failing the
+per-replication ESS rule, and the pooled ESS.}
 \label{tab:TabD3}
-% [REL] docs/paper/data/release/geweke.jsonl (tiers G-full, G-full-inexact), sbc.jsonl; composition-level B needs a record hook (TODO 7); docs/paper/figures/tab_geweke_full_sbc.py
+% [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/record/geweke.jsonl (tiers G-full, G-full-inexact), record/sbc.jsonl, junit_tests_sbc.xml (composition-level B); docs/paper/figures/tab_geweke_full_sbc.py
 \input{figures/tables/tab_geweke_full_sbc.tex}
 \end{table}
 
@@ -1580,7 +1592,8 @@ Its references compose the reduced-form linear reference and the random-walk SV 
 row needed no new reference code. % [R] commit message 7f410dc ("References compose LinearReducedRef and SVRWRef (no kernel code)")
 In one run each recorded with 7f410dc (Apple M5 Max under load), its largest $|z|$ is 1.98 in
 G-small (critical value 4.42) and 1.90 in G-full (3.94), all at stage~1, and the recorded
-\code{exact=False} variant has a G-full largest $|z|$ of 2.49. % [R] commit message 7f410dc ("G-small max|z| 1.98 (t_crit 4.42); G-full 1.90 (3.94); inexact 2.49"); DESIGN §9.5 row 18 note; [REL]
+\code{exact=False} variant has a G-full largest $|z|$ of 2.49; the release record gives the same
+G-full values (\cref{tab:TabD3}). % [R] commit message 7f410dc ("G-small max|z| 1.98 (t_crit 4.42); G-full 1.90 (3.94); inexact 2.49"); DESIGN §9.5 row 18 note; [REL] record/geweke.jsonl at 7f880e1: reduced_sv_rw G-full 1.90 (stage 1), G-full-inexact 2.49
 In one-off runs on the row, with no committed test, its G-small rule fails, against the control's
 1.98, for three mutants of the suite, M1 (the CCM-2019 triangular step, 17.8), M15 (53.4) and M2
 (461), and for two errors that are not registered mutants, a dropped $h_0$ prior in the random-walk
@@ -1590,11 +1603,11 @@ $m_0$, in the random-walk AWOL step is numerically invisible, while the replicat
 $V_0 = 4$ with data-centred $m_0$; \code{test_g_small_rw_h0_prior} therefore runs G-small at
 $h_0 \sim \mathrm{N}(-1, 4)$ for row~18 on every PR and for row~14 weekly, and a $V_0$-as-precision
 mutant fails there (largest $|z|$ 13.8 for row~18 and 11.3 for row~14, against 2.33 and 1.39 for
-production; critical values 4.42 and 4.29). % [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior; [R] its docstring and DESIGN §9.5 row 18 note
+production; critical values 4.42 and 4.29). % [V] tests/geweke/test_geweke_compositions.py::test_g_small_rw_h0_prior; [R] its docstring and DESIGN §9.5 row 18 note; [REL] row 14's production run in record/geweke.jsonl at 7f880e1 (tier G-small-rw-h0, structural_sv_rw): max |z| 1.39, t_crit 4.29, passed; row 18's variant runs per PR (CI run 40061724239, pass only)
 SBC at the shared cap $t_{\max} = 200$ had a clean $\gamma$ test (minimum $p$ 0.019 over 59
 quantities), but 10 of 997 replications had pilot IATs of 187--319, one more than the 99\% ESS rule
 allows; the row's cap was then raised to 400, at which the rule covers every pilot IAT observed and
-the row passes at stage~1. % [R] tests/sbc/test_sbc_compositions.py docstring ("Row 18"); NOTES item 6
+the row passes at stage~1, as it does on the release commit (minimum $p$ 0.019). % [R] tests/sbc/test_sbc_compositions.py docstring ("Row 18"); NOTES item 6; [REL] record/sbc.jsonl at 7f880e1: reduced_sv_rw passed, stage 1, min p 0.0192, t_max 400, ESS fail 0
 That pass rests on the ESS rule's blind spot, a pilot that underestimates the IAT: with a pilot of
 4000 sweeps instead of the design's 1000, the same run fails the per-replication rule (981 of 997;
 pilot IAT 99th percentile 530, maximum 1438 against 319), while the $\gamma$ test and the pooled-ESS
@@ -1606,8 +1619,8 @@ therefore mix with IATs in the hundreds to thousands of sweeps under this compos
 tail that the $\gamma$ test does not see as a calibration error; the design's pilot of 1000 is
 kept, and the limitation is stated in \cref{sec:limitations}. % [R] same docstring; DESIGN §9.5 row 18 note; NOTES item 6
 Row~18 took 5.7~min of SBC at $t_{\max} = 200$ and 11.4~min at 400. % [R] same docstring (Apple M5 Max, load average 40-95 from other jobs)
-The contract tests pass for the composition (10 of 10), which is also fitted through the public
-\code{BVAR.fit} path. % [R] commit message 7f410dc ("contract 10/10"); [V] tests/mcmc/forecast/mcmc_fits.py "reduced-SV(rw)"; tests/unit/test_fit_mcmc_api.py COMPOSITIONS (("reduced", rb.SV(rw=True)))
+The contract tests pass for the composition (10 of 10, on the release commit too), which is also
+fitted through the public \code{BVAR.fit} path. % [R] commit message 7f410dc ("contract 10/10"); [REL] junit_tests_contract.xml at 7f880e1 (reduced-SV(rw): 10 passed); [V] tests/mcmc/forecast/mcmc_fits.py "reduced-SV(rw)"; tests/unit/test_fit_mcmc_api.py COMPOSITIONS (("reduced", rb.SV(rw=True)))
 
 \subsection{Analytic twins and exact oracles}\label{app:twins}
 
@@ -1641,7 +1654,8 @@ not: in Mode~II with dummy rows, the $\lambda$ step must count the rows (\cref{a
 control and its measured power, cadence, and result on the release commit.}
 \label{tab:TabD4}
 % [V] tests/analytic/test_mcmc_twin.py, test_mode1_quadrature.py, test_structural_nig.py;
-% tests/mcmc/blocks/test_sv_toy_quadrature.py, swa_oracle.py; [REL] docs/paper/data/release/twins.xml
+% tests/mcmc/blocks/test_sv_toy_quadrature.py, swa_oracle.py; [REL] Result column: junit_tests_analytic.xml and
+% junit_tests_mcmc_blocks.xml of benchmarks/reports/validation/7f880e1_apple-m5-max/ (weekly tests), CI run 40061724239 (PR tests)
 \input{figures/tables/tab_twins.tex}
 \end{table}
 
@@ -1698,7 +1712,8 @@ $\times$ SV, and exact mode has no external oracle beyond the reweighted \pkg{st
 relative tolerance.}
 \label{tab:TabD2}
 % [R] tests/parity/SV_PARAMETRIZATION.md section 6; BVAR_PARAMETRIZATION.md section 12;
-% BOE_BVAR_NOTES.md section 14; [REL] docs/paper/data/release/parity.jsonl (pytest -m parity_long)
+% BOE_BVAR_NOTES.md section 14; [REL] pass counts on the release commit: junit_tests_parity.xml of
+% benchmarks/reports/validation/7f880e1_apple-m5-max/ (13 passed, 1 skipped, 1 xfailed), CI run 40061724239 (per-PR tests)
 \input{figures/tables/tab_parity.tex}
 \end{table}
 
@@ -1770,10 +1785,11 @@ CCCM step. Caught by U and G.
 \end{description}
 % [V] catchers and seams: tests/mutation/mutants.py _ALL; 37/37 reproduced at 62d15f6 on Apple M5 Max
 % (dossier 04 section 11.2, re-run by its fact-check); [R] M1-M16 x86-64 Linux re-run and M17-M18 "4 passed":
-% mutants.py EVIDENCE header (machine labels to fix, TODO 8); [REL] mutation.jsonl, mutation_x86.jsonl
+% mutants.py EVIDENCE header (machine labels to fix, TODO 8); [REL] record/mutation.jsonl at 7f880e1 (37 checks, all caught,
+% every control passing; catchers as listed); no x86-64 record at the release commit
 Coverage is U 14 of 18, G 18 of 18, B 4 (every mutant with a registered B check) and S 1, which is
 37 mutant $\times$ tier checks.
-% [V] reproduced at 62d15f6 (dossier 04 section 11.2)
+% [V] reproduced at 62d15f6 (dossier 04 section 11.2); [REL] record/mutation.jsonl at 7f880e1: tiers U 14, B 4, G 18, S 1
 The four mutants without a U check, M2, M3, M5 and M16, carry \code{u_check=None} in the registry:
 they are errors of step order, of the simulator, of a sampler--model prior mismatch and of a model
 approximation, and no deterministic identity is registered for them.
@@ -1790,22 +1806,22 @@ by $(\Sigma^{-1})_{jj}$, a fixed-factor weight $2w$); these are not registered m
 
 \cref{fig:FigD1} shows, for each mutant and tier, the mutant's statistic relative to the
 tier's decision threshold, and \cref{fig:FigD2} places the G statistics of the mutants against
-the per-composition controls (G-full rows of the validation record and the mutation suite's
-G-small controls).
+the per-composition controls (G-full rows of the release validation record and the mutation
+suite's G-small controls).
 Recorded runs at earlier commits on x86-64 Linux, made in cloud agent sessions (M1--M16, then
 M17--M18; \cref{app:process}), also caught every mutant; statistics agree across machines to two or three significant figures, not bitwise (M2:
 702 / 2.48 in the committed evidence, labelled M1 Pro; 705 / 2.48 on the M5 Max; 705 / 2.47 on
-x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 [REL: mutation_x86.jsonl]
+x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 and in the release record at 7f880e1 (record/mutation.jsonl, M2-G); no x86-64 record at the release commit
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.85\linewidth]{figures/fig_mutation_heatmap.pdf}
 \caption{Mutation suite: mutants M1--M18 $\times$ tiers U, B, G, S. Cell colour is
 $\log_{10}$ of the mutant's statistic divided by the tier's decision threshold; a marker shows the
-control; grey means that no check is registered. Drawn from a local record without commit or
-machine field (tracked on the paper branch), not a release record.}
+control; grey means that no check is registered. From the release validation record (commit
+7f880e1, Apple M5 Max).}
 \label{fig:FigD1}
-% [REL] docs/paper/data/release/mutation.jsonl (+ mutation_x86.jsonl); docs/paper/figures/make_fig_mutation_heatmap.py
+% [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/record/mutation.jsonl; docs/paper/figures/make_fig_mutation_heatmap.py
 \end{figure}
 
 \begin{figure}[!htbp]
@@ -1814,19 +1830,13 @@ machine field (tracked on the paper branch), not a release record.}
 \caption{Geweke maximum $|z|$ per composition for the unmutated samplers (G-full rows and the
 recorded \code{exact=False} rows of the validation record, and the mutation suite's G-small controls
 at the mutation seeds) against the $t_{C-1}$ critical band, with the mutants' G statistics overlaid on a
-logarithmic scale; failed runs are drawn as crosses. Drawn from local records without commit or
-machine field, not release records; their failing G-full row of \code{reduced_sv} predates the
-kernel fix of \cref{sec:robustness-f1} (\cref{sec:validation-geweke}).}
-\todo{TODO 7: this draft figure is drawn from local records
-(\code{docs/paper/figures/data/validation_record/}, tracked on branch \code{paper-draft} since 33dd9f8,
-not on \code{main}) that carry no commit or machine field and hold no registered G-small rows. Their
-G-full row of \code{reduced_sv} (passed false, 28,068 non-finite values, seed 20261023) matches the
-2026-10-22 failure documented in \code{tests/geweke/test_geweke_compositions.py} and fixed in 3d3f51b,
-an ancestor of the replication's commits; the record itself cannot date itself. Redraw from the
-release records, which must carry commit and machine fields.}
-% macro referee major 1: the failing row is labelled as a pre-3d3f51b local record in the caption and in §8 and §12
+logarithmic scale; failed runs would be drawn as crosses (there are none). From the release
+validation record (commit 7f880e1, Apple M5 Max), which also gives the block configurations and
+row~14 at the random-walk $h_0$ prior $\mathrm{N}(-1, 4)$ but no per-PR G-small row
+(\cref{tab:TabD1}).}
+% macro referee major 1: the earlier draft drew this figure from a pre-3d3f51b local record with a failing reduced_sv row; that record is deleted
 \label{fig:FigD2}
-% [REL] docs/paper/data/release/geweke.jsonl (tiers G-small, G-full), mutation.jsonl; docs/paper/figures/make_fig_geweke_dots.py (--geweke/--mutation select the release records)
+% [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/record/geweke.jsonl (tiers G-full, G-full-inexact, G-small-block, G-small-rw-h0) and record/mutation.jsonl; docs/paper/figures/make_fig_geweke_dots.py
 \end{figure}
 
 \subsection{Runtime convergence diagnostics}\label{app:diagnostics}
@@ -1855,27 +1865,26 @@ A single chain is never converged, because split R-hat cannot see disagreement b
 
 \subsection{Suite size and runtimes}\label{app:runtimes}
 
-At commit 62d15f6 the suite collected 4,964 parametrised test IDs: 4,520 in the per-PR fast suite
-(\code{not slow and not network and not bench}), 441 in the CI job named ``nightly'', which runs
-weekly, and 3 benchmarks.
-% [V] pytest --collect-only, reproduced (dossier 04 section 3.1); .github/workflows/ci.yml (cron "17 3 * * 0")
-The harness code in \code{src/rai_bvar/validation/} has 4,233 lines at 7f410dc (4,230 at c823d20).
-% [V] wc -l over git show 7f410dc:src/rai_bvar/validation/*.py (row 18 adds three lines to joint.py)
-On an Apple M5 Max with a cold compilation cache and other jobs running (load average 3.5--18), the
-fast suite gave 4,507 passed, 12 skipped and 1 expected failure, with no failures, in 1,003\,s, and
-1,006.9\,s on a re-run; the skips are six live ArviZ comparisons (ArviZ not installed), three
-OpenBLAS thread-API tests (not available on macOS Accelerate) and three phase-gating checks.
-G-small for all per-PR compositions took 94.6\,s and 99.7\,s in two runs, and the mutation suite
-181.9\,s and 177.4\,s, with identical statistics.
-% [V] reproduced at 62d15f6 (dossier 04 sections 0 and 3.3, with its fact-check); [REL] collect.txt and timings
-The test modules record per-composition times for G-full (34\,s to 9\,min at the first stage, about
-1\,h for 17 rows) and for SBC (25\,s to 17\,min, about 2.5\,h for 17 rows run sequentially) on a
-machine they label M1 Pro, two SBC processes at a time.
-% [R] tests/geweke/test_geweke_compositions.py and tests/sbc/test_sbc_compositions.py docstrings
-\todo{TODO 8: fix the machine labels (M1 Pro vs M5 Max) in these docstrings and in the
-\code{mutants.py} EVIDENCE header before quoting them.}
-\todo{TODO 7: replace this paragraph with the counts in \code{collect.txt} and the timings of the
-release run; b9c66c0 reports ``Fast suite 4655 passed''.}
+On the release commit the suite collects 5,256 parametrised test IDs: 4,771 in the per-PR fast suite
+(\code{not slow and not network and not bench}), 482 in the CI job named ``nightly'', which runs
+weekly, and 3 benchmarks (4,964 at 62d15f6).
+% [V] pytest --collect-only at the release code: docs/paper/figures/data/provenance/collect_4ac7969.txt; CI run 40061724239 ("collected 5256 items / 485 deselected / 4771 selected"); 62d15f6: dossier 04 section 3.1; .github/workflows/ci.yml (cron "17 3 * * 0")
+The harness code in \code{src/rai_bvar/validation/} has 4,233 lines on the release commit (4,230 at
+c823d20, before row~18).
+% [V] wc -l over git show 7f880e1:src/rai_bvar/validation/*.py (4233, as at 7f410dc; row 18 adds three lines to joint.py)
+In continuous integration on the release commit (Linux, Python 3.12, 3.13 and 3.14) the fast suite
+gave 4,761 passed, 9 skipped and 1 expected failure in each job, with no failures, in 49--72\,min;
+the skips are six live ArviZ comparisons (ArviZ not installed) and three phase-gating checks.
+% [REL] CI run 40061724239 (excerpt docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt): "4761 passed, 9 skipped, 485 deselected, 1 xfailed" in 3879.98 s (3.12), 4334.52 s (3.13), 2964.81 s (3.14); SKIPPED [6] test_diagnostics_ext.py (arviz), [2] + [1] test_specs_phase2.py ("is part of this build")
+The weekly tiers of the release validation record took about three hours on the Apple M5 Max:
+83~min for \code{tests/geweke} (G-full 18\,s to 7.8\,min per composition), 82~min for
+\code{tests/sbc} (SBC 16\,s to 11.2\,min per composition), and 2--6~min each for the mutation
+suite, parity, the analytic twins and the block tier, run one directory at a time.
+% [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/summary.txt (geweke 4980.18 s, sbc 4928.15 s, mutation 145.20 s, parity 220.60 s, analytic 323.40 s, mcmc/blocks 197.67 s, contract 22.09 s) and meta.json (04:17:19-07:18:44 UTC, load average 3.4-4.7 at start and end); junit_tests_geweke.xml test_g_full 18.5 s (zero_sv) to 470.1 s (structural_sv); junit_tests_sbc.xml test_sbc 15.6 s (structural_constant) to 673.6 s (reduced_sv_outliers_t)
+Earlier, at commit 62d15f6, on the same kind of machine with a cold compilation cache and other jobs
+running (load average 3.5--18), G-small for all per-PR compositions took 94.6\,s and 99.7\,s in two
+runs, and the mutation suite 181.9\,s and 177.4\,s, with identical statistics.
+% [V] reproduced at 62d15f6 (dossier 04 sections 0 and 3.3, with its fact-check)
 
 % -------------------------------------------------------------------------------------
 \section{Numerical robustness and performance detail}\label{app:numerics}
@@ -2040,16 +2049,24 @@ and is about twice as fast, and the packed Gram, the precision draw and the SV c
 3.44\,ms of the 3.87\,ms sweep.
 % [R] baseline.json kernels; tests/bench/bench_kernels.py (dossier 03 section 13.5 arithmetic)
 These figures are from one non-idle machine at one commit and are not portable.
+The x86-64 column of \cref{tab:TabE2} is the report of the continuous-integration bench job on a
+shared GitHub runner with two logical CPUs (AMD EPYC 7763), at commit 779957f, before D-35:
+228.9\,s cold and 198.4\,s warm, 16.8\,ms per sweep (17.2\,ms at the runner's rate over the
+sampling sweeps), with \code{converged} false in all six runs. Such a runner is not the protocol's
+x86 machine, an idle laptop with four to eight cores, so the design reports this run and does not
+gate on the 120\,s target.
+% [R] benchmarks/reports/bench_p2_x86_github_779957f.json (main 3d5a407, PR #9): summary.wall_cold_s 228.89, wall_warm_s 198.44, sweep_ms_min3x1000 16.79, runner_ms_per_sweep 17.19, converged false x 6; machine.cpu "AMD EPYC 7763 64-Core Processor", logical_cpus 2, commit 779957f (an ancestor of 7f880e1; D-35 e8cf9f1 and PR #8 come after it); DESIGN WP24 "Amendment (Phase 2 closeout, 2026-10-23): reported on x86" ("reported, not gated"; "an idle 4-8 core AVX2 laptop")
 \todo{TODO 9: re-measure BENCH-P2 on an idle machine on the release commit; add an idle x86 entry and,
 optionally, the 4-device run.}
 
 \begin{table}[!htbp]
 \centering\small
-\caption{BENCH-P2 on the production engine: wall time cold and warm, compilation time, time
-per sweep, peak RSS, ESS and ESS per second by quantity group, the convergence flag, and the
-machine, load and commit.}
+\caption{BENCH-P2 on the production engine, on the reference Apple M5 Max (not idle) and on a
+2-vCPU x86-64 continuous-integration runner (reported, not gated): wall time cold and warm,
+compilation time, time per sweep, peak RSS, ESS and ESS per second by quantity group, the
+convergence flag, and the machines, load and commits.}
 \label{tab:TabE2}
-% [R] tests/bench/baseline.json (deb3929, non-idle Apple M5 Max); docs/paper/figures/tab_bench.py
+% [R] tests/bench/baseline.json (deb3929, non-idle Apple M5 Max); benchmarks/reports/bench_p2_x86_github_779957f.json (779957f, CI runner); docs/paper/figures/tab_bench.py
 \input{figures/tables/tab_bench.tex}
 \end{table}
 
@@ -2305,7 +2322,7 @@ in the first full run and in the acceptance run.
 coded (quoted below) in the first full run (history; report at 551f181, path-conditioned
 LPD, $4 \times 5000$ draws) and in the acceptance run (path-integrated LPD, $4 \times 20{,}000$ draws).}
 \label{tab:cr-criteria}\label{Tab12}\label{tab:Tab12}
-% data: acceptance JSON criteria[*].{id,met,rule,detail}; first run benchmarks/reports/clark_ravazzolo.json criteria (551f181); script tab_cr_criteria.py (OUTLINE §14)
+% data: acceptance JSON criteria[*].{id,met,rule,detail}; first run benchmarks/reports/clark_ravazzolo.json criteria (551f181); typed table (the generator planned in OUTLINE §14 was not written)
 % (Tab12, moved from §11 in the integration pass.) The "Rule as coded" column was removed in the page-budget pass: the rules are quoted verbatim in the list below.
 \begin{tabular}{@{}p{0.03\textwidth}p{0.56\textwidth}>{\leavevmode}p{0.08\textwidth}>{\leavevmode}p{0.25\textwidth}@{}}% \leavevmode: the \color that starts \fullrun and \acc would otherwise open the cell with an empty line
 \toprule
@@ -2821,33 +2838,50 @@ and the iw\_equivalent baseline are hypotheses that we did not test. % [FULL: re
 \section{Reproducibility record}\label{app:repro}
 % -------------------------------------------------------------------------------------
 
-\emph{Release.}
-Every table and figure of the paper is to be regenerated on one release commit of
-\pkg{rai-bvar}, whose hash, tag and archive are given here.
-\todo{TODO 20: merge \code{phase-2-cr-acceptance} into \code{main}, fix the release commit hash, tag
-the release, mint a Zenodo DOI for the release and the replication outputs, add the repository URL,
-and re-run \code{ex_a.py} and \code{ex_b.py} on that commit.}
+\emph{Code and data availability.}
+\pkg{rai-bvar} is developed at \url{https://github.com/yigitokar/rai-bvar} under Apache-2.0.
+This paper describes release 0.2.0, commit 4ac7969 on \code{main} (tag \code{v0.2.0}), which
+differs from commit 7f880e1 only in the version string and in the committed reports of the
+validation run below. It needs Python 3.12 or later and installs with
+\begin{center}
+\code{pip install git+https://github.com/yigitokar/rai-bvar@v0.2.0}
+\end{center}
+(there is no PyPI release and no archived DOI).
+\todo{TODO 20: push the tag \code{v0.2.0} at 4ac7969; it was not on origin on 2026-10-24, and the
+install line and the tag named in Section~1 depend on it.}
+% [V] git show 4ac7969:pyproject.toml (name rai-bvar, version 0.2.0, requires-python >=3.12, license Apache-2.0); git diff --name-only 7f880e1 4ac7969 (pyproject.toml and uv.lock: the version line only, no dependency version changed; benchmarks/reports/bench_p2_x86_github_779957f.json and benchmarks/reports/validation/7f880e1_apple-m5-max/, PR #9); PR #10 "Release 0.2.0: package version bump"
+% [V] install check, 2026-10-24: from git archive 4ac7969, uv build --offline gives rai_bvar-0.2.0-py3-none-any.whl (91 files under rai_bvar/; Requires-Dist jax>=0.12, numpy>=2.0, pandas>=2.2, scipy>=1.15, scoringrules>=0.11, xarray>=2024.10), which installs offline into a fresh Python 3.12 environment and imports as rai_bvar 0.2.0; the git+https line itself was not run (no network install; the repository is private until release)
+% [TC] tag v0.2.0: not on origin at 2026-10-24 07:32Z (git ls-remote --tags origin, gh api repos/yigitokar/rai-bvar/tags: empty); the install line needs it: create v0.2.0 at 4ac7969 and push it before submission (AUTHOR_TODO). No PyPI project: https://pypi.org/pypi/rai-bvar/json returned 404 (07:44Z); no Zenodo DOI (release facts)
+The repository holds, under \code{benchmarks/reports/}, the reports of the Clark--Ravazzolo runs
+(the quick run, the first full run, and the acceptance run with its log;
+\cref{sec:replication,app:cr}) and the pre-registration of the acceptance run
+(\code{clark_ravazzolo_preregistration.md}, committed with its configuration in c823d20,
+\cref{app:prereg}); the release validation record of \cref{app:validation}, in
+\code{benchmarks/reports/validation/7f880e1_apple-m5-max/}; and the x86-64 BENCH-P2 report of
+\cref{tab:TabE2}.
+The scripts that produced them are in the same commit (\code{benchmarks/clark_ravazzolo.py},
+\code{benchmarks/phase2_perf.py} and the test suite), and the paper's sources, figure and table
+scripts are on the branch \code{paper-draft} (\code{docs/paper}).
+% [V] git ls-tree 4ac7969 benchmarks/reports: clark_ravazzolo{,_quick,_acceptance}.{json,md}, clark_ravazzolo_acceptance.log, clark_ravazzolo_preregistration.md (c823d20), bench_p2_x86_github_779957f.json, validation/7f880e1_apple-m5-max/; clark_ravazzolo.json = first full run (551f181)
 
 \emph{Validation records.}
-With \code{RAI_BVAR_VALIDATION_RECORD} set to \code{docs/paper/data/release}, three test modules
-append one JSON line per run to that directory: \code{geweke.jsonl} from \code{tests/geweke}, for
-every Geweke tier (G-small, the block configurations, G-full and the recorded \code{exact=False}
-rows, distinguished by a \code{tier} field), \code{sbc.jsonl} from \code{tests/sbc} and
+With \code{RAI_BVAR_VALIDATION_RECORD} set to a directory, three test modules append one JSON line
+per run to it: \code{geweke.jsonl} from \code{tests/geweke}, for every Geweke tier (G-small, the
+block configurations, G-full, the recorded \code{exact=False} rows and the random-walk $h_0$
+variant, distinguished by a \code{tier} field), \code{sbc.jsonl} from \code{tests/sbc} and
 \code{mutation.jsonl} from \code{tests/mutation}.
-The release record is planned to add the x86-64 mutation record (under a separate name), the
-composition-level Tier~B, parity (\code{pytest -m parity_long}) and analytic-twin results, for
-which no record hook exists yet and pytest's JUnit XML is the fallback; \code{collect.txt} with
-\code{pytest --collect-only -q} and its per-marker variants; and \code{env.json} with the
-environment of \cref{tab:TabG2}.
-% [V] git grep RAI_BVAR_VALIDATION_RECORD at d58c9ef: tests/geweke/test_geweke_compositions.py (record("geweke", ...)
-% for tiers G-small, G-small-block, G-full, G-full-inexact), tests/sbc/test_sbc_compositions.py (sbc.jsonl),
-% tests/mutation/test_mutants.py (mutation.jsonl); none in tests/sbc/test_block_tier.py, tests/parity, tests/analytic;
-% [REL] the files themselves
-\todo{TODO 7: run and commit these records, adding record hooks (or JUnit capture) for composition-level
-Tier~B, parity and the twins. Geweke (block, G-full, \code{exact=False}), SBC and mutation
-records of unknown commit and machine sit under \code{docs/paper/figures/data/validation_record/},
-tracked on branch \code{paper-draft} since 33dd9f8 but not on \code{main}; they are not release
-records.}
+The release validation record ran the weekly tiers (\code{-m "(slow or network) and not bench"})
+at 7f880e1 on a clean tree, on an Apple M5 Max, from 04:17 to 07:18 UTC on 24 October 2026: its
+\code{record/} directory holds those three files (43 Geweke, 23 SBC and 37 mutation records), and
+pytest's JUnit XML of each test directory gives the pass or fail outcome of the tiers without a
+record hook (composition-level Tier~B, parity, the analytic twins, the contract tests);
+\code{meta.json} names the commit, machine, versions and load, and \code{README.md} the results.
+\code{tests/unit} was left out of that run, because its slow empirical-Bayes tests of Phase~1 hit
+an intermittent heap corruption in macOS Accelerate within one process (issue~\#3); they pass in
+isolation and feed no table.
+The per-PR tier passed on the release commit in continuous integration
+(\cref{app:runtimes}).
+% [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/README.md, meta.json (commit 7f880e18..., dirty false, started 2026-10-24T04:17:19Z, finished 07:18:44Z, markers, excluded tests/unit), summary.txt, record/*.jsonl (wc -l: 43, 23, 37), junit_tests_{geweke,sbc,mutation,parity,analytic,mcmc_blocks,validation,contract}.xml; [V] record hooks: git grep RAI_BVAR_VALIDATION_RECORD (tests/geweke/test_geweke_compositions.py, tests/sbc/test_sbc_compositions.py, tests/mutation/test_mutants.py); CI run 40061724239
 
 \emph{Data.}
 The FRED vintages are downloaded on demand from the St.\ Louis Fed, verified against the SHA-256
@@ -2866,17 +2900,15 @@ FRED-QD 2026-09 & \texttt{a144b1547ddbad5c68fc934c90c0c0f9837a5139571ba8e64afcc2
 
 \emph{Regeneration.}
 The \code{Makefile} in \code{docs/paper} regenerates the figures and the generated table bodies
-from committed code and data (\code{make figures}, \code{make tables}) and builds the paper
-(\code{make}); each script names its data source in its header, and \cref{tab:TabG2} is to give the
-command for each float.
+from committed code and data, \code{make tables} the 14 generated tables and \code{make figures}
+the figures (20\,s and 39\,s on the Apple M5 Max), and \code{make pdf} builds the paper; each
+script names its data source in its header, and \cref{tab:TabG2} gives the command for each float.
+The remaining tables, among them 11 of the floats that the plan lists in \cref{tab:TabG2}, are typed
+into the sources, with the source of each entry in its evidence tags.
 The acceptance tables and figures need \code{benchmarks/reports/clark_ravazzolo_acceptance.json},
-and \cref{fig:FigF1,fig:FigF3} the per-origin export of TODO~5.
-\todo{TODO 20: the 14 generators of the appendix tables run with \code{make tables}; the 11
-generators named only in comments of tables typed into the sources (\code{tab_components},
-\code{tab_resolution}, \code{tab_tiers}, \code{tab_mutation}, \code{tab_cr_criteria},
-\code{tab_cr_headline}, \code{tab_notation}, \code{tab_contract}, \code{tab_cr_data},
-\code{tab_cr_models}, \code{tab_reproducibility}) are not written: write them or drop the names,
-then state the one command and its wall time on the release commit.}
+and \cref{fig:FigF1,fig:FigF3} the per-origin export of the acceptance run, which the paper branch
+holds with its export script.
+% [V] make tables (real 19.81 s) and make figures (real 38.51 s), run 2026-10-24 at paper-draft fd8a3f7 + this stage's edits with the main repository at 4ac7969; every figure PDF other than FigD1 and FigD2 came out byte-identical (git status); figures/tables/tab_environment.tex lower panel: 27 of 38 planned floats have a generator, 11 typed; per-origin export: docs/paper/figures/data/cr_acceptance/ and docs/paper/figures/make_data_cr_per_origin.py
 
 \emph{What reproduces how.}
 \cref{tab:TabG1} states each guarantee with its scope.
@@ -2905,8 +2937,8 @@ variation, the guarantee, the test that establishes it, and its scope. ``Toys'' 
 test doubles in \code{tests/mcmc/runner/toys.py}, which implement the block protocols but are not
 the production kernels.}
 \label{tab:TabG1}
-% [V] dossier 03 section 10 (fact-checked at 62d15f6); the test IDs are checked against
-% pytest --collect-only by docs/paper/figures/tab_reproducibility.py
+% [V] dossier 03 section 10 (fact-checked at 62d15f6); typed table (the generator planned in OUTLINE §14,
+% which was to check the test IDs against pytest --collect-only, was not written)
 \begin{tabular}{@{}p{0.34\linewidth}p{0.26\linewidth}p{0.27\linewidth}c@{}}
 \toprule
 Variation & Guarantee & Scope & Tests \\
@@ -2968,12 +3000,13 @@ reuse the words of the transitory sub-keys. % [R] DESIGN §3.1 rule 5, §5.6; [V
 
 \begin{table}[!htbp]
 \centering\small
-\caption{Environment and regeneration record: versions of Python, NumPy, SciPy, \pkg{jax} and
-\pkg{jaxlib}, \pkg{scoringrules} and the BLAS backend; the machines; the release commit; and the
+\caption{Environment and regeneration record: the release validation record and the walk-through
+listings (commit, machine, versions of Python, NumPy, SciPy, \pkg{jax}, \pkg{jaxlib}, pandas,
+xarray and \pkg{scoringrules}), the BLAS backend, the benchmark machines, the release, and the
 command that regenerates each table and figure.}
 \label{tab:TabG2}
-% [REL] docs/paper/data/release/env.json (written by docs/paper/code/run_examples.py);
-% docs/paper/figures/tab_environment.py
+% [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/meta.json; docs/paper/code/out/env.json (written by
+% docs/paper/code/run_examples.py at d58c9ef, not re-run on the release commit); docs/paper/figures/tab_environment.py
 \input{figures/tables/tab_environment.tex}
 \end{table}
 
@@ -3154,8 +3187,9 @@ implementations are in \cref{sec:robustness}.
 % Drafted on 2026-10-23 by an agent session from the record named in the tags: the git history of all
 % refs at main ae5f8d6 and paper-draft a3478d4, gh pr view 1, 2, 4, 5, 6, gh issue view 3 --comments,
 % the DESIGN.md front matter and the headers of the notes and dossiers (OUTLINE TODO 30; referee
-% software major 8). No model version is named, by the repository's rule (issue #3, "No model IDs in
-% any file").
+% software major 8). Counts updated on 2026-10-24 to main 4ac7969 (release 0.2.0) and paper-draft
+% fd8a3f7 (git log over both), with gh pr list --state all (PRs 7-10). No model version is named, by the
+% repository's rule (issue #3, "No model IDs in any file").
 
 \paragraph{Statement.}
 \pkg{rai-bvar} and this paper were written with AI coding agents: Claude (Anthropic), used through
@@ -3163,7 +3197,7 @@ Claude Code, in local sessions and in cloud sessions on a four-core x86-64 Linux
 % [R] GitHub issue #3, body ("Overnight work queue for the local session ..., written by the cloud orchestrator session at the user's request"; "the loaded 4-core x86 cloud box"); committer "Claude" on the 16 cloud commits (below)
 % Verify pass (2026-10-23): "on the author's computer" dropped; the record has two local committer identities and
 % M1 Pro / M5 Max machine labels (TODO 8), so which local machines were the author's is not on record.
-Every commit except the five pull-request merges was made in an agent session (below).
+Every commit except the nine pull-request merges was made in an agent session (below).
 The agents wrote the algorithm notes and the Phase~2 design, implemented and reviewed the Phase~2
 work packages (the benchmark and replication scripts among them) and drafted this paper with its
 figure and table scripts, this appendix included (below); the specification (\code{SPEC.md}) and
@@ -3177,24 +3211,23 @@ The author set the product idea and the requirements; the specification (its v1 
 repository) and all of the code, that of Phases~0 and~1 included, were written by the agents under
 his direction.
 % [R] author's statement in the session of 2026-10-24 ("I set the idea, agents wrote it")
-\todo{author: add, in one sentence, what you did yourself (for example reading code, checking
-derivations, reading this paper in full) once your reading is complete.}
 
 \paragraph{The commit record.}
-At \code{main} ae5f8d6 and \code{paper-draft} a3478d4 the repository has 66 commits, made between
-21 October 2026 (21:54 UTC) and 24 October (02:16 UTC).
-Sixty-one carry a \code{Co-Authored-By} trailer that names the agent: both commits of Phase~0, both
-of Phase~1, 53 of the 57 commits of Phase~2 (with its close-out) and the four commits of the paper
-branch.
-The other five are the merge commits of the five pull requests, made on GitHub.
-% [V] git log --all --format='%h|%ce|%(trailers:key=Co-Authored-By,valueonly)': 66 commits, 61 with the trailer; the 5 without have committer "GitHub <noreply@github.com>" (888f620, 698ea24, 62d15f6, 08e1eda, ae5f8d6: PRs 1, 2, 4, 5, 6); Phase 0 = 5882cc2, bc3c075; Phase 1 = cded45e, bce0db3 (+ the PR 1 merge 888f620); Phase 2 = the other 57 commits of main; paper = git log paper-draft --not main (33dd9f8, e66b6be, 75db8a7, a3478d4); first commit 2026-10-21 17:54 -0400 (21:54Z), last 2026-10-23 22:16 -0400 (2026-10-24 02:16Z, the PR 6 merge)
+At \code{main} 4ac7969 (release 0.2.0) and \code{paper-draft} fd8a3f7 the repository has 77
+commits, made between 21 October 2026 (21:54 UTC) and 24 October (07:26 UTC).
+Sixty-eight carry a \code{Co-Authored-By} trailer that names the agent: both commits of Phase~0,
+both of Phase~1, 57 of the 65 commits of Phase~2 (with its close-out and the release) and the seven
+commits of the paper branch.
+The other nine are the merge commits of the nine pull requests, made on GitHub.
+% [V] git log 4ac7969 fd8a3f7 --format='%h|%ce|%(trailers:key=Co-Authored-By,valueonly)' (= git rev-list --all, 77): 68 with the trailer; the 9 without have committer "GitHub <noreply@github.com>" (888f620, 698ea24, 62d15f6, 08e1eda, ae5f8d6, 99f658a, 7f880e1, e92a31b, 4ac7969: PRs 1, 2, 4-10); Phase 0 = 5882cc2, bc3c075; Phase 1 = cded45e, bce0db3 (+ the PR 1 merge 888f620); Phase 2 = the other 65 commits of main (70 in all), 8 of them PR merges; paper = git log fd8a3f7 --not 4ac7969 (33dd9f8, e66b6be, 75db8a7, a3478d4, f42714c, 945e43c, fd8a3f7); first commit 2026-10-21 17:54 -0400 (21:54Z), last fd8a3f7 (committed 2026-10-24 03:26 -0400, 07:26Z); on main the last is the PR 10 merge (07:22Z). Commits after fd8a3f7 on paper-draft are not counted here
 Every commit has the author's name in its author field.
 On the 16 commits made in cloud sessions the author address is an Anthropic no-reply address and the
-committer is the agent (12 of them also link their session); on the other 45 non-merge commits
-author and committer are the author's own name and address, as on commits from local sessions.
-On those 45 only the trailer marks a commit made in an agent session, and no trailer shows how much
+committer is the agent (12 of them also link their session); on the other 52 commits outside GitHub,
+merges between branches among them, author and committer are the author's own name and address, as
+on commits from local sessions.
+On those 52 only the trailer marks a commit made in an agent session, and no trailer shows how much
 of a commit, if anything, the author wrote.
-% [V] git log --all --format='%an <%ae> / %cn <%ce>': author name "Yigit Okar" or "yigitokar" on all 66; author address noreply@anthropic.com and committer "Claude <noreply@anthropic.com>" on 16 (2026-10-22 18:48Z to 2026-10-23 02:46Z); a "Claude-Session:" link in 12 of the 16 messages (not deb3929, d37e059, 1093932, 2e09567); the author's own name and address as author and committer on 45; committer GitHub on 5
+% [V] git log 4ac7969 fd8a3f7 --format='%an <%ae> / %cn <%ce>': author name "Yigit Okar" or "yigitokar" on all 77; author address noreply@anthropic.com and committer "Claude <noreply@anthropic.com>" on 16 (2026-10-22 18:48Z to 2026-10-23 02:46Z); a "Claude-Session:" link in 12 of the 16 messages (not deb3929, d37e059, 1093932, 2e09567); the author's own name and address as author and committer on 52 (39 "Yigit Okar", 13 "yigitokar"); committer GitHub on 9
 
 \paragraph{Who did what.}
 \begin{description}
@@ -3227,9 +3260,11 @@ two defects), and the close-out by a verifier agent that checked 131 changed sta
 code and corrected 13.
 % [R] PR #2 ("Work packages WP1-WP22 ... are done, and each stage was reviewed independently before the next one started"); 8a622c5 (cloud commit: "WP23/WP24 review fixes"); issue #3 (WP23 "being reviewed independently in the cloud"; WP25 "got an independent review on x86-64 Linux, with no defects"; f60d736 "An independent review ... found no defect"); b9c66c0 and PR #5 ("An independent four-lens review found two defects"); 16fc36a and PR #6 ("An independent verifier checked 131 changed statements against the code and corrected 13")
 \item[Runs.] Agents ran, or started through continuous integration, the tests, benchmarks and
-replication runs reported here. The x86-64 runs (the
-mutation suite at earlier commits, BENCH-P2 under load, the quick replication run) were made in
-cloud sessions, the Apple runs in local sessions.
+replication runs reported here. The x86-64 runs of the mutation suite at earlier commits, an
+earlier BENCH-P2 under load and the quick replication run were made in cloud sessions; the x86-64
+BENCH-P2 report of \cref{tab:TabE2} and the per-PR tier on the release commit come from continuous
+integration, and the Apple runs, the release validation record among them, from local sessions.
+% [R] CI runs 40052067670 (bench job, workflow_dispatch at 779957f) and 40061724239 (push to main at 7f880e1), gh api actions/runs; 3d5a407 (release validation record: trailer, local committer)
 % [R] issue #3 body (x86 BENCH-P2 311 / 285 s on "the loaded 4-core x86 cloud box"; the M17/M18 x86 figures); 00524a9 ("the orchestrator's" x86 reproduction); b27c7bb (cloud commit: "mutation suite re-run independently"); TabF1 (quick run on a shared 4-core x86-64 VM)
 On the night of 22 to 23 October the cloud session wrote a work queue for a local session at the
 author's request (``The user is asleep: don't wait for their input''). The local session ran the
@@ -3299,7 +3334,7 @@ these the agents wrote the comparison code and chose what to compare.
 % [R] sec:validation-parity; git grep "scipy.stats" in tests/ (35 files at main), e.g. test_transitory.py::test_outlier_pmf_collapsed_matches_scipy_t
 No reviewer other than the agents is on record for the code or for this paper (no pull request has a
 GitHub review).
-% [V] gh pr view N --json reviews for N = 1, 2, 4, 5, 6: 0 reviews each
+% [V] gh pr list --state all --json reviews: 0 reviews each for PRs 1, 2 and 4-10
 No person took part in the reviews, judgements and fact-checks listed above: every one was an
 agent instance.
 % [R] session record (the orchestrating session launched each review, judge and fact-check as an agent)
@@ -3314,22 +3349,19 @@ for such resemblance is recorded.
 Yigit Okar is the sole author.
 On record, he directed the agents (the overnight queue, for example, was written at his request), and
 the design leaves some decisions to him as the project's owner: DESIGN Q14, the default convergence
-policy for SV fits, is marked ``the owner decides'' and is open at ae5f8d6.
+policy for SV fits, was marked ``the owner decides'' and open at ae5f8d6.
 % [R] issue #3 body ("written by the cloud orchestrator session at the user's request"); DESIGN section 12.2 at ae5f8d6 (Q14: "Open: the owner decides. No recommendation is adopted"). "Initiated" is not on record: moved to the Statement \todo.
 Q14 was resolved as an agent recommended, at the author's instruction of 2026-10-24 (D-35); DESIGN
 \S12.2 records that the recommendations for the earlier open questions were ``accepted as stated''
 on 2026-10-22, without saying by whom.
 % [R] session record of 2026-10-24 ("Q14 önerine göre yap"); DESIGN D-35
-Merging was reserved for him (``merging is the user's decision'', issue~\#3), and all five pull
+Merging was reserved for him (``merging is the user's decision'', issue~\#3), and all nine pull
 requests were merged from his GitHub account.
-% [V] gh pr list --state all --json mergedBy: yigitokar for #1, #2, #4, #5 and #6; issue #3 last comment ("PR #4 merged into phase-1-conjugate by the user")
-Pull requests \#1, \#4, \#5 and \#6 were merged by an agent session at the author's explicit
-instruction in that session; who merged \#2 is not on record beyond the account.
-% [R] session record of 2026-10-23/24 (the author's "pr merge", "merge devammm", "PR #1'i de merge et", "merge et")
-\todo{author: say how far you reviewed the pull requests, once your reading is complete.}
-The record does not show how far he read the code, re-derived the mathematics or read this text
-himself.
-\todo{author: state this.}
+% [V] gh pr list --state all --json mergedBy: yigitokar for #1, #2 and #4-#10; issue #3 last comment ("PR #4 merged into phase-1-conjugate by the user")
+Pull requests \#1 and \#4--\#10 were merged by an agent session at the author's explicit
+instruction in that session (\#8--\#10 under his instruction to finish the paper and prepare its
+arXiv package); who merged \#2 is not on record beyond the account.
+% [R] session record of 2026-10-23/24 (the author's "pr merge", "merge devammm", "PR #1'i de merge et", "merge et" for #1 and #4-#6; "merge et" for #7; "paper'ı bitir, arxiv paketini hazırla" for #8-#10)
 He is responsible for the paper and for the software.
 \todo{author: approve this appendix and the authorship statement, check both against arXiv's policy
 and the target venue's, and add any acknowledgements.}

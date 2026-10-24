@@ -17,9 +17,11 @@ Three kinds of cell need care (OUTLINE section 0.5):
   file. ``--check-acc REPORT`` verifies that every emitted key resolves in a report without
   printing a value.
 * first-full-run numbers (report 551f181) are wrapped in ``\\fullrun{}``.
-* numbers that must come from the release validation records (``docs/paper/data/release/``,
-  OUTLINE TODO 7) are a red ``[REL]`` mark (:func:`mark`) until those records exist. A mark left in
-  a build with ``\\draftmarksfalse`` is a LaTeX error, like ``\\acc`` and ``\\todo``.
+* numbers that come from the release validation records (:data:`RELEASE_DIR`,
+  ``benchmarks/reports/validation/7f880e1_apple-m5-max/`` of this repository: the JSON records in
+  ``record/``, pytest's JUnit XML per test directory, ``meta.json``) are read from them; a cell whose
+  record is missing is a red ``[REL]`` mark (:func:`mark`). A mark left in a build with
+  ``\\draftmarksfalse`` is a LaTeX error, like ``\\acc`` and ``\\todo``.
 
 Run the generators with the main repository's environment, without writing byte code::
 
@@ -44,7 +46,46 @@ PAPER = HERE.parent  # docs/paper
 DATA = HERE / "data"
 TABLES = HERE / "tables"
 MAIN_REPO = Path(os.environ.get("RAI_BVAR_REPO", "/Users/yigitokar/rai-bvar"))
-RELEASE = PAPER / "data" / "release"  # OUTLINE section 0.5 [REL]
+REPO_ROOT = PAPER.parent.parent  # the repository that holds docs/paper (branch paper-draft)
+# the release validation records (OUTLINE section 0.5 [REL]): slow tiers run at 7f880e1 on an Apple
+# M5 Max, committed to main in 3d5a407 (PR #9); README.md and meta.json there describe the run
+RELEASE_DIR = REPO_ROOT / "benchmarks" / "reports" / "validation" / "7f880e1_apple-m5-max"
+RELEASE = RELEASE_DIR / "record"  # geweke.jsonl, sbc.jsonl, mutation.jsonl
+RELEASE_COMMIT = "7f880e1"  # the commit the records were taken at (meta.json "commit")
+RELEASE_TAG_COMMIT = "4ac7969"  # main at release 0.2.0: 7f880e1 plus the version string (PR #10)
+# the CI run whose fast suite (pytest -m "not slow and not network and not bench") passed at
+# 7f880e1 on ubuntu-latest, Python 3.12, 3.13 and 3.14 (gh run view 40061724239)
+CI_FAST_RUN = "40061724239"
+CI_FAST_LOG = DATA / "provenance" / "ci_run_40061724239_fast_suite.txt"  # excerpt of its log
+
+
+def ci_fast_modules(path: Path = CI_FAST_LOG) -> dict[str, dict[str, str]]:
+    """``{job: {test module: progress characters}}`` from the CI log excerpt, after checking that
+    each of the three test jobs ends with a summary that has no failure or error. A module whose
+    progress runs over several lines is joined."""
+    jobs: dict[str, dict[str, str]] = {}
+    job = None
+    last = None
+    for ln in path.read_text().splitlines():
+        if ln.startswith("## "):
+            job = ln[3:]
+            jobs[job] = {}
+            continue
+        if not job or ln.startswith("#") or not ln.strip():
+            continue
+        text = ln.split(" ", 1)[1]
+        m = re.match(r"^(tests/\S+\.py) ([.sxXFE]+)\s+\[\s*\d+%\]$", text)
+        c = re.match(r"^([.sxXFE]+)\s+\[\s*\d+%\]$", text)
+        if m:
+            last = m.group(1)
+            jobs[job][last] = jobs[job].get(last, "") + m.group(2)
+        elif c and last:
+            jobs[job][last] += c.group(1)
+        elif re.match(r"^=+ \d+ passed", text):
+            assert " failed" not in text and " error" not in text, text
+            jobs[job]["__summary__"] = text
+    assert len(jobs) == 3 and all("__summary__" in v for v in jobs.values()), list(jobs)
+    return jobs
 ACCEPTANCE_JSON = MAIN_REPO / "benchmarks" / "reports" / "clark_ravazzolo_acceptance.json"
 
 OUTDIR = TABLES  # --outdir (dry runs write elsewhere, never over the paper's tables)
@@ -243,6 +284,33 @@ def md_table(text: str) -> list[dict[str, str]]:
 def read_jsonl(path: Path) -> list[dict]:
     with open(path) as f:
         return [json.loads(line) for line in f if line.strip()]
+
+
+def release_meta() -> dict:
+    """``meta.json`` of the release validation records, checked: the commit is 7f880e1 and the
+    working tree was clean."""
+    meta = json.loads((RELEASE_DIR / "meta.json").read_text())
+    assert meta["commit"].startswith(RELEASE_COMMIT) and meta["dirty"] is False, meta
+    return meta
+
+
+def junit_cases(path: Path) -> dict[str, str]:
+    """``{"<module stem>::<test name with its parameters>": status}`` of one pytest JUnit XML file,
+    status ``passed``, ``failed``, ``skipped`` or ``xfailed`` (pytest writes an xfail as a
+    ``skipped`` element of type ``pytest.xfail``)."""
+    import xml.etree.ElementTree as ET  # noqa: PLC0415
+
+    out = {}
+    for case in ET.parse(path).getroot().iter("testcase"):
+        key = case.get("classname", "").split(".")[-1] + "::" + case.get("name", "")
+        if case.find("failure") is not None or case.find("error") is not None:
+            st = "failed"
+        elif case.find("skipped") is not None:
+            st = "xfailed" if case.find("skipped").get("type") == "pytest.xfail" else "skipped"
+        else:
+            st = "passed"
+        out[key] = st
+    return out
 
 
 # -------------------------------------------------------------------------------------------- output

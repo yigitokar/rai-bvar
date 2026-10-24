@@ -1,12 +1,22 @@
 """TabG2 (Appendix G): environment and regeneration record.
 
-Upper panel, the environment: the release record ``docs/paper/data/release/env.json`` when it
-exists ([REL]); until then the environment record of the walk-through listings,
-``docs/paper/code/out/env.json`` (written by ``docs/paper/code/run_examples.py``), marked in red as
-not the release record (it was taken at the commit and with the tracked changes it names). The
-BLAS/LAPACK backend is not in that record: it is read from ``numpy.show_config()`` of the Python
-that runs this script (the main repository's environment) and labelled so. The release commit is a
-[TC] mark until OUTLINE TODO 20 fixes it.
+Upper panel, the environments, in two columns:
+
+* the release validation record at 7f880e1, ``meta.json`` of ``tc.RELEASE_DIR``
+  (``benchmarks/reports/validation/7f880e1_apple-m5-max/``) [REL]: commit, clean tree, machine,
+  operating system and the versions of Python, NumPy, SciPy and jax it records;
+* the environment record of the walk-through listings, ``docs/paper/code/out/env.json`` (written by
+  ``docs/paper/code/run_examples.py``), taken at the commit and with the tracked changes it names,
+  for the packages the release record does not list.
+
+The rai-bvar version is the ``version`` of ``pyproject.toml`` at each commit (``git show``). The
+BLAS/LAPACK backend is in neither record: it is read from ``numpy.show_config()`` of the Python that
+runs this script (the main repository's environment) and labelled so. The release row gives release
+0.2.0 (main 4ac7969, ``tc.RELEASE_TAG_COMMIT``) and checks with ``git diff`` that it differs from
+7f880e1 only in the version string (``pyproject.toml``, ``uv.lock``) and in the committed reports
+under ``benchmarks/reports/``. The BENCH-P2 row names both benchmark machines: the reference
+baseline (``tests/bench/baseline.json``) and the x86-64 report of the CI bench job
+(``benchmarks/reports/bench_p2_x86_github_779957f.json``).
 
 Lower panel, the regeneration command of every float that OUTLINE.md section 14 plans: the float
 id and the generator stem are parsed from the two tables of section 14; the generator file is
@@ -14,7 +24,7 @@ looked up under ``docs/paper/figures/`` (``make_<stem>.py`` for figures, ``<stem
 and ``docs/paper/code/``; floats whose generator does not exist are listed as such. The data
 options (``--acc``, the per-origin export) follow the variables of ``docs/paper/Makefile``.
 
-Usage: tab_environment.py [--outdir DIR] [--env PATH]
+Usage: tab_environment.py [--outdir DIR]
 """
 
 from __future__ import annotations
@@ -78,31 +88,64 @@ def command(stem: str, mv: dict) -> tuple[str, bool]:
     return "", False
 
 
+X86_BENCH = "benchmarks/reports/bench_p2_x86_github_779957f.json"
+
+
+def pyproject_version(commit: str) -> str:
+    return tc.grab(tc.git_show(commit, "pyproject.toml"), r'^version = "([^"]+)"$', flags=re.M)
+
+
+def release_equivalence() -> list[str]:
+    """Files that differ between 7f880e1 and the release 4ac7969, outside benchmarks/reports/:
+    must be the version string only."""
+    files = tc.git("diff", "--name-only", tc.RELEASE_COMMIT, tc.RELEASE_TAG_COMMIT).split()
+    other = [f for f in files if not f.startswith("benchmarks/reports/")]
+    assert sorted(other) == ["pyproject.toml", "uv.lock"], other
+    diff = tc.git("diff", "-U0", tc.RELEASE_COMMIT, tc.RELEASE_TAG_COMMIT, "--", "pyproject.toml")
+    changed = [ln for ln in diff.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
+    assert changed == ['-version = "0.0.1"', '+version = "0.2.0"'], changed
+    lock = tc.git("diff", "-U0", tc.RELEASE_COMMIT, tc.RELEASE_TAG_COMMIT, "--", "uv.lock")
+    versions = [ln for ln in lock.splitlines() if re.match(r"^[+-]version = ", ln)]
+    assert versions == ['-version = "0.0.1"', '+version = "0.2.0"'], versions  # no dependency moved
+    return other
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     tc.add_common_args(ap)
-    ap.add_argument("--env", type=Path, default=tc.RELEASE / "env.json")
     args = ap.parse_args()
     tc.apply_outdir(args)
-    released = args.env.exists()
-    env = json.loads((args.env if released else LISTINGS_ENV).read_text())
-    v = env["versions"]
+    meta = tc.release_meta()
+    env = json.loads(LISTINGS_ENV.read_text())
+    v, rv, mach = env["versions"], meta["versions"], meta["machine"]
+    for k in ("python", "numpy", "scipy", "jax"):  # the two records share these versions
+        assert rv[k] == v[k], (k, rv[k], v[k])
     bench = tc.git_show_json(tc.git("log", "-1", "--format=%h", "--", "tests/bench/baseline.json"),
                              "tests/bench/baseline.json")["machine"]  # fmt: skip
+    x86 = tc.git_show_json(tc.RELEASE_TAG_COMMIT, X86_BENCH)["machine"]
+    release_equivalence()
     dirty = env.get("tracked_changes") or []
-    up = [r"\begin{tabular}{@{}ll@{}}", r"\toprule", r"Item & Value \\", r"\midrule",
-          f"Python & {tc.tex(v['python'])} \\\\",
-          f"NumPy, SciPy, pandas, xarray & {v['numpy']}, {v['scipy']}, {v['pandas']}, {v['xarray']} \\\\",
-          f"\\pkg{{jax}}, \\pkg{{jaxlib}} & {v['jax']}, {v['jaxlib']} \\\\",
-          f"\\pkg{{scoringrules}} & {v['scoringrules']} \\\\",
-          f"\\pkg{{rai-bvar}} & {v['rai_bvar']} \\\\",
-          f"BLAS / LAPACK & {tc.tex(blas())}"
-          + ("" if released else r" (environment of this generator)") + r" \\",
-          f"Platform & {tc.tex(v['platform'])} \\\\",
-          f"Machine of the BENCH-P2 record & {tc.tex(bench['cpu'])}, {bench['physical_cores']} cores \\\\",
-          f"Commit of this record & {tc.code(env['commit'][:7])} (branch {tc.code(env['branch'])})"
-          + (f", {len(dirty)} tracked files modified" if dirty else ", clean") + r" \\",
-          f"Release commit & {tc.mark('TC')} OUTLINE TODO 20 \\\\",
+    rel_v, lst_v = pyproject_version(tc.RELEASE_COMMIT), pyproject_version(env["commit"])
+    os_name = re.sub(r"-arm-64bit$", "", meta["machine"]["os"])
+    up = [r"\begin{tabular}{@{}lll@{}}", r"\toprule",
+          r"Item & Release validation record & Walk-through listings \\", r"\midrule",
+          f"Commit & {tc.code(meta['commit'][:7])}, clean & {tc.code(env['commit'][:7])} (branch "
+          f"{tc.code(env['branch'])})" + (f", {len(dirty)} tracked files modified" if dirty else ", clean") + r" \\",
+          f"Started (UTC) & {tc.tex(meta['started_utc'][:16].replace('T', ' '))} & "
+          f"{tc.tex(env['started_utc'][:16].replace('T', ' '))} \\\\",
+          f"Machine, system & {tc.tex(mach['cpu'])}, {mach['ncpu']} cores, {tc.tex(os_name)} & "
+          f"{tc.tex(v['platform'])} \\\\",
+          f"Python; NumPy, SciPy & {tc.tex(rv['python'])}; {rv['numpy']}, {rv['scipy']} & "
+          f"{tc.tex(v['python'])}; {v['numpy']}, {v['scipy']} \\\\",
+          f"\\pkg{{jax}}, \\pkg{{jaxlib}} & {rv['jax']}, --- & {v['jax']}, {v['jaxlib']} \\\\",
+          f"pandas, xarray, \\pkg{{scoringrules}} & --- & {v['pandas']}, {v['xarray']}, {v['scoringrules']} \\\\",
+          f"\\pkg{{rai-bvar}} version (\\code{{pyproject.toml}}) & {rel_v} & {lst_v} \\\\",
+          f"BLAS / LAPACK & \\multicolumn{{2}}{{l}}{{{tc.tex(blas())} (environment of this generator)}} \\\\",
+          f"BENCH-P2 machines & \\multicolumn{{2}}{{l}}{{{tc.tex(bench['cpu'])}, {bench['physical_cores']} cores "
+          f"(reference baseline); {tc.tex(x86['cpu'])}, {x86['logical_cpus']} vCPU (CI runner)}} \\\\",
+          f"Release & \\multicolumn{{2}}{{l}}{{{pyproject_version(tc.RELEASE_TAG_COMMIT)}, "
+          f"{tc.code(tc.RELEASE_TAG_COMMIT)} on \\code{{main}}: {tc.code(tc.RELEASE_COMMIT)} plus the version "
+          r"string} \\",
           r"\bottomrule", r"\end{tabular}"]  # fmt: skip
 
     mv = make_vars()
@@ -113,8 +156,11 @@ def main() -> None:
     for fid, where, stems in rows:
         # the first planned generator that exists (OUTLINE may name a data step and a figure step)
         hit = [c for c in (command(st, mv) for st in stems) if c[1]]
+        # a typed float carries its OUTLINE id as a label, or a label named after its planned stem
+        # (Tab2: \label{tab:resolution} for tab_resolution.py)
+        labels = [re.escape(fid)] + [re.escape(st.removeprefix("tab_")) for st in stems if st.startswith("tab_")]
         inline = [n for n, t in sections.items()
-                  if re.search(r"\\label\{(tab:)?" + re.escape(fid) + r"\}", t)]
+                  if re.search(r"\\label\{(tab:)?(" + "|".join(labels) + r")\}", t)]
         if hit:
             cmd = hit[0][0]
             have += 1
@@ -131,27 +177,23 @@ def main() -> None:
           r"Float & \S & Generator & Float & \S & Generator \\", r"\midrule"]
     lo += [f"{x} & {y} \\\\" for x, y in zip(left, right, strict=True)]
     lo += [r"\bottomrule", r"\end{tabular}"]
-    foot = ("Upper panel: " + (r"release record \code{docs/paper/data/release/env.json}" if released else
-            r"the environment record of the walk-through listings, \code{docs/paper/code/out/env.json} "
-            f"(written {tc.tex(env['started_utc'])} by \\code{{code/run_examples.py}})") + ". "
+    foot = (r"Upper panel: the release validation record, \code{meta.json} in "
+            r"\code{benchmarks/reports/validation/7f880e1_apple-m5-max/}, and the environment record of the "
+            r"walk-through listings, \code{docs/paper/code/out/env.json} (written by \code{code/run_examples.py}); "
+            r"--- not recorded. "
             r"Lower panel: every float planned in OUTLINE \S14, with its generator (paths from \code{docs/paper}); run each with the "
             r"main repository's Python (\code{make figures} in \code{docs/paper} runs the figure "
             r"generators; \code{$ACC} is the acceptance report, \code{make per-origin} its per-origin "
             f"export). {have} of the {len(rows)} planned floats have a generator.")  # fmt: skip
-    body = "\\footnotesize\n" + tc.preamble(marks=True) + tc.fit("\n".join(up)) + "\n\n\\medskip\n" + tc.fit("\n".join(lo)) + "\n" + tc.note(foot)
-    if not released:
-        body += "\n" + tc.note(
-            r"Not the release record: taken at " + tc.code(env["commit"][:7])
-            + (f" with {len(dirty)} modified tracked files" if dirty else "")
-            + r"; regenerate from \code{docs/paper/data/release/env.json} on the release commit "
-            "(OUTLINE TODO 7, TODO 20).", red=True)  # fmt: skip
+    body = "\\footnotesize\n" + tc.fit("\n".join(up)) + "\n\n\\medskip\n" + tc.fit("\n".join(lo)) + "\n" + tc.note(foot)
     tc.write(NAME, body, generator="tab_environment.py",
-             status=("[REL] release env.json" if released else
-                     "INTERIM: docs/paper/code/out/env.json (listings record), not the release record"),
-             sources=[str((args.env if released else LISTINGS_ENV).relative_to(tc.PAPER.parent.parent))
-                      if (args.env if released else LISTINGS_ENV).is_relative_to(tc.PAPER.parent.parent) else str(args.env),
+             status=f"[REL] release meta.json at {tc.RELEASE_COMMIT}; listings env.json at {env['commit'][:7]}",
+             sources=[str((tc.RELEASE_DIR / "meta.json").relative_to(tc.REPO_ROOT)),
+                      str(LISTINGS_ENV.relative_to(tc.REPO_ROOT)),
                       "numpy.show_config() of the generating Python (BLAS/LAPACK)",
-                      "main repo tests/bench/baseline.json machine (CPU model)",
+                      f"main repo tests/bench/baseline.json machine (CPU model); {X86_BENCH} at {tc.RELEASE_TAG_COMMIT}",
+                      f"pyproject.toml at {tc.RELEASE_COMMIT}, {env['commit'][:7]} and {tc.RELEASE_TAG_COMMIT}; "
+                      f"git diff {tc.RELEASE_COMMIT} {tc.RELEASE_TAG_COMMIT}",
                       "docs/paper/OUTLINE.md section 14 (float ids and generator stems); docs/paper/Makefile"])  # fmt: skip
 
 

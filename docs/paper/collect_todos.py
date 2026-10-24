@@ -37,37 +37,72 @@ STATUS = {
        "c823d20 in its config line. The paper is filled (`acceptance_values.tex`, every key "
        "resolved, report sha256 d5c3ec8d...), the outcome prose of the abstract and Sections 1, "
        "11, 12 and 13 is written, and the TODO 2 mark of App. F is gone.",
-    5: "Done, not committed: `docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv` "
+    5: "Done; committed on `paper-draft` in a3478d4: `docs/paper/figures/data/cr_acceptance/cr_acceptance_per_origin.csv` "
        "(10,600 rows) with its `.meta.json` and README, exported read-only from the run's score "
        "cache with the code at c823d20; its check recomputes 2236 report values with maximum "
        "difference 0. FigF1 and FigF3 are drawn from it (the export moved from `docs/paper/data/` "
-       "to `figures/data/cr_acceptance/`). Commit it, with `figures/make_data_cr_per_origin.py`, "
-       "together with the paper.",
+       "to `figures/data/cr_acceptance/`), with `figures/make_data_cr_per_origin.py`.",
+    19: "Partly done (2026-10-24): the version is 0.2.0 at `main` 4ac7969 (PR #10), still classified "
+        "pre-alpha; Sections 1 and 12 say so. No PyPI release (https://pypi.org/pypi/rai-bvar/json: "
+        "404) and no tag on origin yet (TODO 20). The README banner and quick start were not checked "
+        "in this pass.",
+    23: "Partly (2026-10-24): the tiny-sigma tests and the fast tests of test_contemp_lstsq.py passed "
+        "on Linux in CI run 40061724239 (fast suite at 7f880e1, Python 3.12-3.14). The slow F1 replay "
+        "test (test_g_full_reduced_sv_failing_chain_is_fixed) passed in the release validation record "
+        "on the Apple M5 Max but FAILED on x86-64 Linux in the weekly CI run 40052069815 at 779957f "
+        "(the job timed out at 330 min, so no trace; the test asserts the recorded trajectory of chain "
+        "3214, h > 30 and old-path status 1003, which may be platform-specific). Open: find out why, "
+        "then make the replay platform-independent or restrict it; commit tests of the old-path values "
+        "at the F1 and F2 states; decide a relative pivot floor.",
     3: "Done for row 18 at integration (2026-10-23): 7f410dc registers row 18 `reduced_sv_rw` "
        "(G-small per PR, G-full and SBC weekly with a per-row t_max of 400, the N(-1, 4) h0 variant "
        "test), adds a `reduced-SV(rw)` contract fit and fits the composition through `BVAR.fit` "
        "(tests/unit/test_fit_mcmc_api.py). The paper states coverage at 7f410dc (23 composition rows, "
        "13 MCMC contract compositions; Sections 1, 3, 6, 8.10, 11, 12; App. C and D, app:row18). "
        "Open: the SV(rw, t) variant has no row or contract fit (the remaining TODO 3 marks), and the "
-       "row-18 numbers are one run each on a loaded machine (re-record on the release commit, TODO 7).",
-    20: "The paper's `Makefile` has `make tables` (the 14 appendix table generators `figures/tab_*.py` "
-        "-> `figures/tables/`) and `make arxiv` (`make_arxiv.sh`). The 11 generators named only in "
-        "comments of typed tables (`tab_components`, `tab_resolution`, ...) are not written (the "
-        "TODO 20 mark in App. G). OUTLINE section 14 names `figures/out/` as the output directory; "
-        "the generators write `figures/tables/`.",
+       "row-18 G-small number is one run on a loaded machine; its G-full, SBC and contract results are "
+       "re-recorded on the release commit (release validation record at 7f880e1, 2026-10-24).",
+    20: "Mostly done (2026-10-24). `phase-2-cr-acceptance` is merged into `main` (PR #5); release "
+        "0.2.0 is `main` 4ac7969 (PR #10: the version string only on top of 7f880e1 and the records of "
+        "PR #9). The paper gives the repository URL, the release, commit 4ac7969 and its equivalence "
+        "to 7f880e1, the install line (`pip install git+https://github.com/yigitokar/rai-bvar@v0.2.0`) "
+        "and a code-and-data availability paragraph (App. G; one sentence in Section 13); the TODO 20 "
+        "marks are gone. `make tables` (14 generators, 20 s) and `make figures` (39 s) are timed in "
+        "App. G; the typed tables' comments no longer name unwritten generators. OPEN: (a) the tag "
+        "`v0.2.0` does not exist on origin (git ls-remote --tags and gh api .../tags empty, 2026-10-24 "
+        "07:32Z): create it at 4ac7969 and push it, or the install line fails; (b) no Zenodo DOI and no "
+        "PyPI release (the paper says so); (c) `ex_a.py` and `ex_b.py` were not re-run on the release "
+        "commit; D-35 (e8cf9f1) changes the default MCMC budget of SV compositions, so the MCMC "
+        "listing may change; re-run `code/run_examples.py` with an environment at 4ac7969.",
     29: "Resolved in the text after the referee review (2026-10-23, macro referee minor 7): "
         "Section 9 (F2) and App. F (app:cr-history) now say that the committed quick report predates "
         "f60d736, so its random-walk SV numbers may have been affected and serve only as context, "
         "including as one run of reading rule B's yardstick; the TODO 29 mark is gone.",
     4: "Open. The script and the 520 + 424 fit records are tracked on branch `paper-draft` (since "
-       "33dd9f8) under `docs/paper/figures/data/convergence_diagnostic/`, not on `main` (888f620); "
+       "33dd9f8) under `docs/paper/figures/data/convergence_diagnostic/`, not on `main` (4ac7969); "
        "commit them to the main repository.",
+    7: "Done for Apple M5 Max (2026-10-24): the release validation record at 7f880e1 (clean tree; "
+       "`benchmarks/reports/validation/7f880e1_apple-m5-max/`, main 3d5a407) has the weekly tiers: "
+       "geweke.jsonl (43: G-full 23, G-full-inexact 12, block 7, row 14's h0 variant), sbc.jsonl (23), "
+       "mutation.jsonl (37), and JUnit XML for Tier B, parity, twins, contract; all passed (parity 13 "
+       "passed, 1 skipped, 1 xfailed). TabD3, TabD4, TabD2's pass counts, TabG2, Tab5's counts, FigD1 "
+       "and FigD2 are drawn from it; the old local records of unknown provenance are deleted. The "
+       "per-PR tier (G-small among it) passed on the release commit in CI run 40061724239 (pass/fail "
+       "only), so TabD1 keeps the 62d15f6 statistics (and row 18's from 7f410dc) with a note. OPEN: "
+       "no x86-64 record of the weekly tiers at the release commit; the one x86-64 weekly run (CI run "
+       "40052069815 at 779957f) timed out half-way and failed the F1 replay test "
+       "(test_g_full_reduced_sv_failing_chain_is_fixed), see TODO 23.",
+    9: "Partly done (2026-10-24): an x86-64 BENCH-P2 report from the CI bench job (779957f, AMD EPYC "
+       "7763, 2 vCPU: 228.9 s cold, 198.4 s warm, 16.8 ms per sweep, converged false; reported, not "
+       "gated, DESIGN WP24) is in TabE2, Section 10 and App. E. Still open: an idle-machine run on the "
+       "release commit and an idle 4-8 core x86 laptop (the TODO 9 marks).",
     30: "Drafted from the record (2026-10-23), for the author to confirm and approve. App. J "
         "(app:process, also labelled app:disclosure) now states, role by role, what the AI coding agents "
         "did (notes, design and judges, work packages, reviews, runs, the overnight queue of issue #3, "
         "the paper's dossiers, outline judges, section fact-checkers and three agent referees), the "
-        "commit record (61 of 66 commits carry the agent's Co-Authored-By trailer; the other 5 are the "
-        "GitHub merges of PRs 1, 2, 4, 5, 6), what 'independent' means (separate agent instances, not "
+        "commit record (updated 2026-10-24 to main 4ac7969 and paper-draft fd8a3f7: 68 of 77 commits "
+        "carry the agent's Co-Authored-By trailer; the other 9 are the GitHub merges of PRs 1, 2 and "
+        "4-10), what 'independent' means (separate agent instances, not "
         "people) and what that does and does not secure, a licensing caveat (training data), and "
         "the authorship statement. Independence wording is qualified in Sections 6.4 and 8.1 and in "
         "App. D, F, H and I. The title page has the two affiliations (Rational AI; CARE AI Research "
@@ -76,12 +111,13 @@ STATUS = {
         "cannot show into `author:` marks: who wrote SPEC.md (v1 is not in the repository) and the "
         "Phase 0-1 code; that you initiated the work (the title footnote no longer says 'directed'); "
         "how you took the owner's decisions (Q14 is open at ae5f8d6 and is being resolved as an "
-        "agent recommended). Open (the `author:` marks): the exact names and "
-        "capitalisation of both affiliations and a contact address; your own contribution; how "
-        "far you reviewed the code, the derivations and the text; approval of the pre-registered "
-        "settings; the owner's decisions; the merges; that no person took part in the reviews, or "
-        "the human reviewers and acknowledgements; a final check against arXiv's policy and the "
-        "venue's.",
+        "agent recommended). Since then: the affiliations are set; Q14 was resolved by D-35 at the "
+        "author's instruction; PRs 7-10 were merged by the session at the author's instruction. On "
+        "2026-10-24 the three `author:` marks about how far you read the code, the derivations, the "
+        "pull requests and this paper were removed together with the sentence 'The record does not "
+        "show how far he read ...', so the text makes no claim either way; add one only when you state "
+        "it. Open (the remaining `author:` mark): approval of App. J and the authorship statement, the "
+        "check against arXiv's policy and the venue's, and acknowledgements.",
     31: "Not needed under tectonic (XeTeX, TU encoding prints < and >); `main.tex` loads T1 only "
         "under pdfTeX, which is untested here. arXiv compiles with pdfLaTeX, so test that branch "
         "before submitting (`make arxiv` packages the sources; its --test build uses tectonic).",
@@ -151,30 +187,30 @@ the text.
    (App. F), and the runner algorithms C.9-C.11.
 3. **Table generators.** The 14 generators `figures/tab_*.py` write `figures/tables/*.tex`, which
    the appendix `\input`s (`make tables`). Cells that wait for data are `\acc{}` (acceptance run;
-   `fill_acceptance.py` now scans `figures/tables/` too) or a red `[REL]` mark (release validation
-   records, TODO 7), which stops a `\draftmarksfalse` build. TabD1, TabD3 and TabG2 carry red
-   "interim" notes.
+   `fill_acceptance.py` now scans `figures/tables/` too) or a red `[REL]` mark (a missing release
+   record), which stops a `\draftmarksfalse` build. Since 2026-10-24 the generators read the release
+   validation record at 7f880e1 (`tab_common.RELEASE_DIR`) and the committed excerpt of CI run
+   40061724239; no `[REL]` mark and no red "interim" note is left. TabD1 keeps statistics from
+   earlier commits, with a plain note, because the release record has no G-small row.
 4. **FigE1 (TODO 23), decided.** The figure stays. Section 9 (F2) states that before the fix the
    old random-walk path could return a finite but wrong answer at a tiny positive pivot, with no
    failure reported, as a recomputation at the synthetic test state, with the figure script as
    evidence; App. E (app:float64-oldpath) gives the grid numbers. Still open: a committed test of
    the old-path values (TODO 23) and whether pre-fix runs were affected (TODO 29).
-5. **Validation records of unknown provenance.** `docs/paper/figures/data/validation_record/`
-   (tracked on branch `paper-draft` since 33dd9f8, not on `main`) feeds FigD1 and FigD2. It carries
-   no commit or machine field and holds no G-small rows. Its G-full row of `reduced_sv` (passed
-   false, 28,068 non-finite values, 92 of 137 functions failing, seed 20261023) matches the
-   2026-10-22 failure documented in `tests/geweke/test_geweke_compositions.py` and fixed in 3d3f51b,
-   an ancestor of 4bb978a and c823d20, so it is almost certainly a stale pre-fix record; the record
-   cannot date itself. Section 8, Section 12 and the FigD2 caption now say so. A reviewer's re-run
-   at 75db8a7 passed but is uncommitted and not cited. Record G-full `reduced_sv` on the release
-   commit with commit and machine fields (TODO 7), then redraw both figures.
+5. **Validation records of unknown provenance (resolved 2026-10-24).** The local records in
+   `docs/paper/figures/data/validation_record/` (no commit or machine field; a pre-3d3f51b G-full
+   `reduced_sv` failure) are deleted. FigD1 and FigD2 are redrawn from the release validation record
+   at 7f880e1, in which G-full `reduced_sv` passes at stage 1 (max |z| 2.67) and the F1 replay test
+   passes on the Apple M5 Max; Sections 8 and 12 and the FigD2 caption say so. On x86-64 Linux the
+   replay test failed in the weekly CI run 40052069815 at 779957f (TODO 23).
 6. **Convergence-diagnostic records.** `docs/paper/figures/data/convergence_diagnostic/` (tracked on
    `paper-draft` since 33dd9f8, not on `main`: a script and 520 + 424 fit records) reproduces the
    pre-registration's budget numbers; commit it to the main repository (TODO 4) or keep TabF6 at
    [PREREG].
-7. **Abstract length.** 1893 characters as plain text with the acceptance values filled, after the
-   referee revision (about 1905 if pasted into the arXiv form with `--`, `$t$`, `$h > 1$` and
-   `\%`); the arXiv limit is 1920, so any addition needs an equal cut. The Lenza--Primiceri COVID-19
+7. **Abstract length.** 1899 characters as plain text with the acceptance values filled (1893 after
+   the referee revision, +6 for the release-record clause of 2026-10-24; about 1911 if pasted into
+   the arXiv form with `--`, `$t$`, `$h > 1$` and `\%`); the arXiv limit is 1920, so any addition
+   needs an equal cut. The Lenza--Primiceri COVID-19
    scaling and "a larger MCMC budget" were cut from the abstract to make room.
 8. **Sentences built on filled values.** Done for the acceptance report (2026-10-23): the outcome
    prose of the abstract, Sections 1, 11, 12 and 13 and App. F is written from the filled values,
@@ -188,6 +224,12 @@ the text.
    sections, the figure PDFs, `figures/tables/`, and the four listing inputs in `code/`); its
    `--test` build compiles it with tectonic in a clean directory. arXiv uses pdfLaTeX, whose branch
    of `main.tex` is untested (STATUS of TODO 31). Set `\draftmarksfalse` first.
+10. **D-35 is not yet in the text (2026-10-24).** D-35 (e8cf9f1, PR #7) gives SV compositions a
+   default budget of 4 x 10,000 kept draws with a warning below it, and is in release 0.2.0. Section
+   4 (`MCMCSettings` default 4 x 2000), Section 10 ("five times the default number of draws"),
+   Section 12 P3 (TODO 33, "decide the convergence-gate policy for SV at the default budget") and
+   the walk-through listings (run at d58c9ef, before D-35) still describe the earlier default; only
+   App. J mentions D-35.
 """
 
 

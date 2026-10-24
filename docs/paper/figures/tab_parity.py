@@ -13,9 +13,12 @@ and the results table of ``tests/parity/SV_PARAMETRIZATION.md`` section 6. Every
 upper panel is taken from the notes' sentences by a regular expression that must match exactly
 once. Neutral wording (OUTLINE TODO 13): the table states what our tests compare and what they
 measured, nothing about another package's sampler; the note's Student-t stochvol fixture row and
-the fold-fraction column (the sign-fold observation) are left out until TODO 13 is resolved. The
-release record (``pytest -m parity_long`` on the release commit, OUTLINE TODO 7) has no record hook
-yet; until it exists the notes are the source, with their machine label (TODO 8).
+the fold-fraction column (the sign-fold observation) are left out until TODO 13 is resolved. Parity
+has no record hook, so the statistics are those of the notes, with their machine label (TODO 8);
+the release validation record at 7f880e1 (``tc.RELEASE_DIR``) gives the pass/fail status of the
+weekly parity tests on the release commit (``junit_tests_parity.xml``, [REL]), which the note under
+the table states in counts, in neutral wording (the reason pytest records for the expected
+failure is not quoted, TODO 13).
 
 Usage: tab_parity.py [--outdir DIR]
 """
@@ -146,6 +149,20 @@ def main() -> None:
     args = ap.parse_args()
     tc.apply_outdir(args)
     head = tc.git("rev-parse", "--short", "HEAD")
+    meta = tc.release_meta()
+    junit = tc.RELEASE_DIR / "junit_tests_parity.xml"
+    cases = tc.junit_cases(junit)
+    count = {k: sum(v == k for v in cases.values()) for k in ("passed", "skipped", "xfailed", "failed")}
+    assert count["failed"] == 0, cases
+    xf = [k for k, v in cases.items() if v == "xfailed"]
+    sk = [k for k, v in cases.items() if v == "skipped"]
+    assert xf == ["test_stochvol::test_stochvol_parity_long[stochvol_v_t5]"], xf  # the row TODO 13 omits
+    assert len(sk) == 1 and sk[0].startswith("test_bayesianvars::"), sk
+    print(f"release parity record: {count}")
+    for job, mods in tc.ci_fast_modules().items():  # per-PR parity in CI: all pass, one xfail (v_t5)
+        prog = {m: p for m, p in mods.items() if m.startswith("tests/parity/")}
+        assert "".join(prog.values()).count("x") == 1 and set("".join(prog.values())) <= {".", "x"}, (job, prog)
+        assert "x" in prog["tests/parity/test_stochvol.py"], (job, prog)
     up, va = analytic()
     lo, vm = mcmc()
     foot = (r"Upper panel: \code{tests/parity/test_r_bvar.py} and \code{test_boe_bvar.py}; tolerances "
@@ -158,13 +175,22 @@ def main() -> None:
             r"stated), weekly size $4\times40{,}000$ (\pkg{stochvol}) or $4\times20{,}000$ (VAR); "
             r"--- not run at that size. Recorded in the notes (machine labelled "
             f"``{tc.tex(vm['machine'])}'' there, under review, OUTLINE TODO 8), main repository "
-            f"at {head}; to be re-recorded on the release commit (\\code{{-m parity_long}}, TODO 7). "
-            "The notes' Student-$t$ \\pkg{stochvol} fixture and fold fractions are not shown (TODO 13).")  # fmt: skip
+            f"at {head}. "
+            "The notes' Student-$t$ \\pkg{stochvol} fixture and fold fractions are not shown (TODO 13). "
+            f"On the release commit {tc.RELEASE_COMMIT} the weekly parity tests of \\code{{tests/parity}} "
+            f"gave {count['passed']} passed, {count['skipped']} skipped (no "
+            f"\\pkg{{bayesianVARs}} fixture) and {count['xfailed']} expected failure (the Student-$t$ "
+            "\\pkg{stochvol} row not shown here) in the release validation record "
+            f"({tc.tex(meta['machine']['cpu'])}, \\code{{junit_tests_parity.xml}}); in the fast suite of "
+            f"CI run {tc.CI_FAST_RUN} the per-PR parity tests passed, the per-PR Student-$t$ "
+            "\\pkg{stochvol} row again an expected failure.")  # fmt: skip
     body = (tc.fit("\n".join(up)) + "\n\n\\medskip\n" + tc.fit("\n".join(lo)) + "\n" + tc.note(foot))
     tc.write(NAME, body, generator="tab_parity.py",
-             status="[R] parity notes (neutral wording; stochvol_v_t5 and fold column omitted, TODO 13)",
+             status="[R] parity notes (neutral wording; stochvol_v_t5 and fold column omitted, TODO 13); "
+                    f"[REL] pass counts from the release JUnit XML at {tc.RELEASE_COMMIT}",
              sources=[f"main repo {BVAR} section 12 at {head}", f"main repo {BOE} section 14 at {head}",
-                      f"main repo {SV} section 6 at {head}"])  # fmt: skip
+                      f"main repo {SV} section 6 at {head}", str(junit.relative_to(tc.REPO_ROOT)),
+                      str(tc.CI_FAST_LOG.relative_to(tc.REPO_ROOT))])  # fmt: skip
 
 
 if __name__ == "__main__":

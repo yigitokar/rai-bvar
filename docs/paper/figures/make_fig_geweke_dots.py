@@ -6,13 +6,13 @@ Data (JSON lines written with ``RAI_BVAR_VALIDATION_RECORD=<dir>``):
     ``G-full-inexact``, the recorded ``exact=False`` rows, which do not gate);
   * ``mutation.jsonl`` from ``tests/mutation``: the G tier's mutant and control statistics (the
     controls are G-small runs of the unmutated sampler at the mutation seeds).
-Default input: the local records in ``docs/paper/figures/data/validation_record/``, which are
-tracked on branch paper-draft (33dd9f8) but not on main and carry no commit or machine field (the CI's weekly job sets no
-``RAI_BVAR_VALIDATION_RECORD``), so they are not release records; the figure then says so in a
-footer. That ``geweke.jsonl`` has G-full, G-full-inexact and G-small-block rows but no G-small row:
-the G-small controls drawn are then the mutation suite's controls only (legend "mutation seeds"),
-not the registered G-small runs of TabD1. The release records
-(``docs/paper/data/release/{geweke,geweke_full,mutation}.jsonl``, OUTLINE TODO 7) replace them via
+Default input: the release validation record at 7f880e1 (Apple M5 Max, clean tree),
+``benchmarks/reports/validation/7f880e1_apple-m5-max/record/{geweke,mutation}.jsonl`` [REL]; the
+footer names it, with commit, machine and date from its ``meta.json``. The release run ran the slow
+tiers only, so its ``geweke.jsonl`` has the tiers ``G-small-block``, ``G-full``, ``G-full-inexact``
+and ``G-small-rw-h0`` (row 14 at the random-walk ``h0`` prior N(-1, 4)) but no ``G-small`` row of the
+per-PR set (TabD1): the G-small controls drawn are then the mutation suite's controls only (legend
+"mutation seeds"), not the registered G-small runs of TabD1. Other records can be given with
 ``--geweke`` (repeatable) and ``--mutation``.
 
 Every record is plotted, failures included: a run that failed is drawn with a cross and labelled
@@ -34,7 +34,7 @@ import make_common as mc
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 
-REC = mc.DATA / "validation_record"
+REC = mc.RELEASE_RECORD
 
 # tier -> (label, colour slot, marker); categorical slots in their fixed order
 SERIES = {
@@ -44,6 +44,7 @@ SERIES = {
     "G-small-mut": ("G-small control (mutation seeds)", mc.SERIES[2], "D"),
     "G-full-inexact": ("G-full, exact=False (recorded, not gating)", mc.SERIES[3], "^"),
     "G-small-block": ("G-small, block configuration", mc.SERIES[2], "D"),
+    "G-small-rw-h0": ("G-small at the random-walk h0 prior N(-1, 4)", mc.SERIES[2], "v"),
 }
 
 
@@ -87,7 +88,7 @@ def main() -> None:
 
     # rows: compositions with a G-full record first (in record order), then the rest
     rows: list[str] = []
-    for tier in ("G-full", "G-full-inexact", "G-small", "G-small-mut", "mutant", "G-small-block"):
+    for tier in ("G-full", "G-full-inexact", "G-small", "G-small-mut", "mutant", "G-small-rw-h0", "G-small-block"):
         for p in pts:
             if p[1] == tier and p[0] not in rows:
                 rows.append(p[0])
@@ -104,7 +105,7 @@ def main() -> None:
     ax.text(np.sqrt(min(tc) * max(tc)), -1.0, f"$t_{{C-1}}$ {min(tc):.2f}-{max(tc):.2f}", ha="center",
             va="bottom", fontsize=6.5, color=mc.INK2)  # fmt: skip
     offsets = {"G-full": 0.0, "G-full-inexact": 0.22, "G-small": -0.22, "G-small-mut": -0.11,
-               "G-small-block": 0.0, "mutant": 0.0}  # fmt: skip
+               "G-small-rw-h0": -0.22, "G-small-block": 0.0, "mutant": 0.0}  # fmt: skip
     mut_count: dict[str, int] = {}
     ticked: set[str] = set()
     for name, tier, z, t, failed, note in pts:
@@ -133,13 +134,14 @@ def main() -> None:
     ax.tick_params(axis="y", length=0)
     handles = [Line2D([], [], ls="none", marker=SERIES[k][2], color=SERIES[k][1], markersize=5,
                       markeredgecolor="white", label=SERIES[k][0])
-               for k in ("G-full", *(t for t in ("G-small", "G-small-mut")
+               for k in ("G-full", *(t for t in ("G-small", "G-small-mut", "G-small-rw-h0")
                                      if any(p[1] == t for p in pts)),
                          "G-full-inexact", "mutant")]  # fmt: skip
     handles.append(Line2D([], [], ls="none", marker="X", color=mc.STATUS_CRITICAL, markersize=6,
                           markeredgecolor="white", label="failed run"))  # fmt: skip
     handles.append(Line2D([], [], color=mc.MUTED, lw=0.8, label=r"row's $t_{C-1}$ critical value"))
-    ax.legend(handles=handles, loc="lower right", ncol=1, fontsize=6.3, frameon=True,
+    # between the mutant labels of rows 6 (M14) and 16 (M16), clear of M11 and M12 at the bottom
+    ax.legend(handles=handles, loc="center right", bbox_to_anchor=(1.0, 0.615), ncol=1, fontsize=6.3, frameon=True,
               facecolor="white", edgecolor=mc.GRID, framealpha=1.0)  # fmt: skip
     mc.record_status_note(fig, [*gfiles, args.mutation])
     mc.save(fig, args.out)

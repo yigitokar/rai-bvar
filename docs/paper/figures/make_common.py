@@ -145,23 +145,27 @@ def placeholder(name: str, fig_id: str, title: str, needs: str, command: str,
     return save(fig, name)
 
 
-RELEASE_RECORD = PAPER / "data" / "release"
+REPO_ROOT = PAPER.parent.parent  # the repository that holds docs/paper (branch paper-draft)
+# the release validation records: slow tiers at 7f880e1 on an Apple M5 Max (main 3d5a407, PR #9)
+RELEASE_DIR = REPO_ROOT / "benchmarks" / "reports" / "validation" / "7f880e1_apple-m5-max"
+RELEASE_RECORD = RELEASE_DIR / "record"
 
 
 def record_status_note(fig, paths) -> None:
-    """A grey footer naming the validation record a figure was drawn from, when that record is
-    not the release record (``docs/paper/data/release/``, OUTLINE TODO 7). The local records in
-    ``docs/paper/figures/data/validation_record/`` (tracked on branch paper-draft since 33dd9f8, not
-    on main) carry no commit or machine field (sections/appendix.tex: "not release records"), so a
-    figure drawn from them must say so."""
+    """A grey footer naming the validation record a figure was drawn from: the release record at
+    7f880e1 (commit, machine and date from its ``meta.json``), or, for any other input, a warning
+    that it is not the release record."""
     paths = [Path(p).resolve() for p in paths]
+    names = ", ".join(p.name for p in paths)
     if all(p.is_relative_to(RELEASE_RECORD.resolve()) for p in paths):
-        return
-    names = ", ".join(str(p.relative_to(PAPER)) if p.is_relative_to(PAPER) else str(p)
-                      for p in paths)  # fmt: skip
-    fig.text(0.0, -0.01, f"Draft data: {names}; local record (paper branch, not main), commit and "
-             "machine not recorded; not the release record (OUTLINE TODO 7).", ha="left", va="top",
-             fontsize=5.6, color=MUTED, wrap=True)  # fmt: skip
+        meta = json.loads((RELEASE_DIR / "meta.json").read_text())
+        assert meta["dirty"] is False, meta
+        text = (f"Data: {names}, release validation record at commit {meta['commit'][:7]} (clean tree), "
+                f"{meta['machine']['cpu']}, {meta['started_utc'][:10]} "
+                "(benchmarks/reports/validation/7f880e1_apple-m5-max/record/).")
+    else:
+        text = f"Draft data: {names}; not the release validation record."
+    fig.text(0.0, -0.01, text, ha="left", va="top", fontsize=5.6, color=MUTED, wrap=True)
 
 
 def read_jsonl(path: Path) -> list[dict]:

@@ -1,11 +1,11 @@
 """FigD1 (Appendix D): mutation power heatmap, mutants M1-M18 x tiers U, B, G, S.
 
 Data: one JSON line per mutant x tier check, as written by ``tests/mutation/test_mutants.py`` with
-``RAI_BVAR_VALIDATION_RECORD=<dir>`` (``<dir>/mutation.jsonl``). Default input: the local record
-in ``docs/paper/figures/data/validation_record/mutation.jsonl``, which is tracked on branch
-paper-draft (33dd9f8) but not on main and carries no commit or machine field (the CI's weekly job sets no ``RAI_BVAR_VALIDATION_RECORD``), so it is not
-a release record; the figure then says so in a footer. The release record
-(``docs/paper/data/release/mutation.jsonl``, OUTLINE TODO 7) replaces it via ``--record``.
+``RAI_BVAR_VALIDATION_RECORD=<dir>`` (``<dir>/mutation.jsonl``). Default input: the release
+validation record at 7f880e1 (Apple M5 Max, clean tree),
+``benchmarks/reports/validation/7f880e1_apple-m5-max/record/mutation.jsonl`` [REL]; the footer names
+it, with commit, machine and date from its ``meta.json``. Another record can be given with
+``--record``; the footer then says that it is not the release record.
 
 Cell colour = log10 of the mutant's evidence ratio against the tier's threshold:
   U  identity error / tolerance                      (caught when > 1)
@@ -62,7 +62,7 @@ def ratios(rec: dict) -> tuple[float, float, str, str]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--record", type=Path, default=mc.DATA / "validation_record" / "mutation.jsonl")
+    ap.add_argument("--record", type=Path, default=mc.RELEASE_RECORD / "mutation.jsonl")
     ap.add_argument("--out", default="fig_mutation_heatmap")
     args = ap.parse_args()
     if not args.record.exists():
