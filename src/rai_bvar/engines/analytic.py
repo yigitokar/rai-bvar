@@ -699,6 +699,7 @@ class AnalyticFit:
                 "spec": spec,
                 "spec_hash": spec_hash_of(spec),
                 "tcodes": self.data.tcodes,
+                "ordering": list(self.data.variables),  # SPEC R8; same string as the MCMC engine
                 "seed": label,
                 "mh_seed": self.mh_seed if self.mh is not None else -1,
                 "converged": int(self.converged),
