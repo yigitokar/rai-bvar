@@ -1,0 +1,151 @@
+# Excerpt of GitHub Actions runs 40105877002 and 40106105193 of yigitokar/rai-bvar, made for PR #11 after release
+# 0.2.0, by pushes to the temporary branch diag/f1-x86 (deleted after the runs; the runs stay on GitHub, their
+# logs until they expire). Each job ran (1) the F1 replay test of release 0.2.0 verbatim
+# (tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed at 4ac7969, copied as
+# tests/mcmc/blocks/test_orig_f1_replay.py), (2) the same replay through tools/make_f1_state.py check, which prints
+# the fixture's recorded codes, this replay's codes ('before': the chain's status entering sweep 194;
+# 'previous_draw' and 'production': sweep 194 with the old and the production a-row draw; status codes are
+# sticky), in the second run also the first sweep before 194 at which the chain failed, and whether the replayed
+# sweep-194 state and codes are bitwise those of the fixture, and (3) the two new slow F1 tests of PR #11
+# (-m slow) and the whole test file. The lines below are copied, in log order, from the job logs
+# (gh run view --job <id> --log), each prefixed with its step name; written 2026-10-24T16:30Z.
+
+## run 40105877002: push on diag/f1-x86 @ fb799df8e3570554782dc3f7c6e6bf64cea5000b, created 2026-10-24T15:12:00Z, conclusion success
+## https://github.com/yigitokar/rai-bvar/actions/runs/40105877002
+### job 120907332524: f1 (macos-latest, 0) (success)
+  [runner] Apple M2 Pro (Virtual)
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [100%]
+  [original replay test (from 4ac7969), verbatim] ======================= 1 passed, 7 deselected in 10.63s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (macOS-26.6.2-arm64-arm-64bit, Apple M2 Pro (Virtual)): codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] bitwise identical
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 5.76s ========================
+  [whole test file] ========================= 7 passed, 2 skipped in 9.89s =========================
+### job 120907332761: f1 (ubuntu-latest, 1) (success)
+  [runner] AMD EPYC 7763 64-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 23.23s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 7763 64-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 13.38s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 22.64s =========================
+### job 120907332694: f1 (ubuntu-latest, 2) (success)
+  [runner] AMD EPYC 9V74 80-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 18.74s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 9V74 80-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 11.34s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 18.42s =========================
+### job 120907332528: f1 (ubuntu-latest, 3) (success)
+  [runner] AMD EPYC 7763 64-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 23.82s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 7763 64-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 13.62s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 23.62s =========================
+### job 120907332620: f1 (ubuntu-latest, 4) (success)
+  [runner] AMD EPYC 9V74 80-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 18.86s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 9V74 80-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 11.31s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 18.75s =========================
+
+## run 40106105193: push on diag/f1-x86 @ 012703b1473bb1b562a51e7be47e2d7c055b4017, created 2026-10-24T15:15:02Z, conclusion success
+## https://github.com/yigitokar/rai-bvar/actions/runs/40106105193
+### job 120908008757: f1 (macos-latest, 0) (success)
+  [runner] Apple M1 (Virtual)
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [100%]
+  [original replay test (from 4ac7969), verbatim] ======================= 1 passed, 7 deselected in 25.29s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (macOS-26.6.2-arm64-arm-64bit, Apple M1 (Virtual)): codes {'before': 0, 'previous_draw': 1003, 'production': 0}, first failure before sweep 194: none
+  [original replay, values] bitwise identical
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 16.56s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 27.24s =========================
+### job 120908008689: f1 (ubuntu-latest, 1) (success)
+  [runner] AMD EPYC 7763 64-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 23.37s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 7763 64-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}, first failure before sweep 194: sweep 170
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 13.64s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 23.05s =========================
+### job 120908008776: f1 (ubuntu-latest, 2) (success)
+  [runner] AMD EPYC 7763 64-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 24.78s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 7763 64-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}, first failure before sweep 194: sweep 170
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 14.81s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 24.81s =========================
+### job 120908008791: f1 (ubuntu-latest, 3) (success)
+  [runner] AMD EPYC 7763 64-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 24.58s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 7763 64-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}, first failure before sweep 194: sweep 170
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 14.26s =======================
+  [whole test file] ======================== 7 passed, 2 skipped in 24.00s =========================
+### job 120908008716: f1 (ubuntu-latest, 4) (success)
+  [runner] AMD EPYC 9V45 96-Core Processor
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py::test_g_full_reduced_sv_failing_chain_is_fixed FAILED [100%]
+  [original replay test (from 4ac7969), verbatim] >       assert int(pre.status.code[j]) == 0
+  [original replay test (from 4ac7969), verbatim] E       assert 1003 == 0
+  [original replay test (from 4ac7969), verbatim] tests/mcmc/blocks/test_orig_f1_replay.py:192: AssertionError
+  [original replay test (from 4ac7969), verbatim] ======================= 1 failed, 7 deselected in 14.97s =======================
+  [original replay, values] recorded on {'platform': 'macOS-26.6.2-arm64-arm-64bit', 'cpu': 'Apple M5 Max'} at 4ac7969: codes {'before': 0, 'previous_draw': 1003, 'production': 0}
+  [original replay, values] this replay (Linux-6.17.0-1022-azure-x86_64-with-glibc2.39, AMD EPYC 9V45 96-Core Processor): codes {'before': 1003, 'previous_draw': 1003, 'production': 1003}, first failure before sweep 194: sweep 162
+  [original replay, values] the replay departs from the committed state
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed PASSED [ 50%]
+  [new F1 tests (slow)] tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_runs_through PASSED [100%]
+  [new F1 tests (slow)] ======================= 2 passed, 7 deselected in 9.47s ========================
+  [whole test file] ======================== 7 passed, 2 skipped in 16.55s =========================

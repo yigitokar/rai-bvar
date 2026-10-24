@@ -133,6 +133,17 @@ re-derived before it goes into the paper).
     (`(φ+1)/2 ~ Beta(10, 3)` gives `P(max|h| > 30) < 5e-7` → 0 in 2e6 draws, from 5e-7) — would have
     hidden a real numerical weakness and dropped high-persistence coverage. Status: verified
     (`tests/mcmc/blocks/test_contemp_lstsq.py`).
+    **Replay replaced (2026-10-24, after release 0.2.0; PR #11, merge `3644c4b`):** the release's
+    slow replay of chain 3214 (194 sweeps with the old Cholesky draw, then status 1003 from it at
+    sweep 194) is not portable: at `cond(K_a) ≈ 1/ε` whether the old draw's Jacobi-scaled pivot is
+    0 or a few ε depends on the last bits of its inputs, and on x86-64 Linux the old-draw trajectory
+    already fails before sweep 194 (all 8 x86-64 jobs of CI runs 40105877002 and 40106105193; sweep
+    170 on the AMD EPYC 7763, 162 on the 9V45), while on macOS arm64 it is bitwise the committed one.
+    The chain's sweep-194 state is committed (`tests/fixtures/f1_reduced_sv_chain3214_sweep194.npz`;
+    bitwise the state replayed with 3d3f51b's code) and two slow tests use it and the chain's prior
+    draw; `tools/make_f1_state.py` keeps the replay. The numbers above (14.8 and 1.9e17) are those of
+    `K_a` after sweep 194's CCCM step; the test forms `K_a` entering the sweep (13.7 and 1.92e17).
+    Status: verified (PR #11 tests on 8 x86-64 Linux and 2 macOS arm64 jobs).
 11. **The design-review errata (E1–E28)** in DESIGN §0.2 document what independent reviewers caught
     in the proposals before implementation. Status: verified (in repository).
 

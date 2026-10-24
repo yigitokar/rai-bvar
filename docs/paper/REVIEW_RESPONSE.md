@@ -7,9 +7,10 @@ section). The entries further down are kept as written for the draft at 75db8a7;
 with this section, this section holds (the entries concerned carry an "Update" line).
 
 - **Release.** `main` 4ac7969 (release 0.2.0, which is 7f880e1 plus the version string) is merged.
-  No tag exists on origin (checked 07:32Z and 08:27Z), so the paper names the release by its commit
-  and the install line in App. G pins the full hash; the tag `v0.2.0` is no longer named anywhere.
-  The paper states that there is no PyPI release and no DOI.
+  There was no tag on origin at 07:32Z and 08:27Z. The annotated tag `v0.2.0` (8e7fb32, pointing to
+  4ac7969) and its GitHub release were created at 09:37Z; Section 1 names the tag and App. G installs
+  from `@v0.2.0` and names commit 4ac7969 (1b43f2d). The paper states that there is no PyPI release
+  and no DOI.
 - **Validation evidence (macro major 1, stat major 5).** The tables and figures of App. D read the
   release validation record at 7f880e1 (Apple M5 Max). The old local records of unknown provenance
   are deleted; G-full `reduced_sv` passes in the release record (stage 1, max |z| 2.67). TabD1 keeps
@@ -17,6 +18,13 @@ with this section, this section holds (the entries concerned carry an "Update" l
   pass/fail outcomes only (CI run 40061724239). The one x86-64 weekly run (CI run 40052069815, at
   779957f) stopped at its time limit with the F1 replay test failing. Sections 9 and 12 and Apps. D
   and E say so, and Sections 8 and 9 limit the replay claim to the Apple M5 Max.
+  Update, 2026-10-24, after the release: re-runs on GitHub's x86-64 runners (the weekly run's AMD EPYC
+  7763 among them) show that the old draw's trajectory itself fails before sweep 194 there, a
+  rounding outcome at cond(K_a) ~ 1/eps; PR #11 (3644c4b) replaces the replay with two tests of the
+  chain, one from its committed sweep-194 state and one from its prior draw, which pass on x86-64
+  Linux and macOS arm64. Section 9 and App. E now say so; Section 12 and App. D point to them, and
+  Section 8's printed text, which describes the release, is unchanged (its evidence comment cites
+  PR #11).
 - **Performance.** TabE2, Section 10 and App. E add the x86-64 BENCH-P2 report of the CI bench job
   (reported, not gated). The text now says that no idle-machine run exists, and none on the release
   commit.
@@ -372,8 +380,9 @@ scoring rule, or on both").
 
 **Major 1. No release identity.** valid_author. Author 20 (TODO 19, 20).
 *Update (2026-10-24):* release 0.2.0 is commit 4ac7969, named in Sections 1 and 13 and App. G.
-There is no tag on origin, so the install line pins the full hash. The listings were re-captured on
-that commit. Tag, PyPI and Zenodo are in AUTHOR_TODO.md, and the paper claims none of them.
+The tag `v0.2.0` (at 4ac7969) and its GitHub release exist since 09:37Z, and the install line uses
+`@v0.2.0`. The listings were re-captured on that commit. PyPI and Zenodo are in AUTHOR_TODO.md, and
+the paper claims neither.
 
 **Major 2. Stale arXiv tarball, `\draftmarkstrue`, untested pdfTeX branch.** valid_author.
 `make arxiv` was run as the last step: the new tarball has the 48 listed files and nothing else

@@ -752,7 +752,9 @@ The two draws are therefore the same function of $z$ in exact arithmetic, but th
 with $\operatorname{cond}(\mathcal{A}) = \operatorname{cond}(K)^{1/2}$ and never squares it
 \citep{higham2002accuracy,bjorck1996numerical}.
 % [V] tests/mcmc/blocks/test_contemp_lstsq.py::test_lstsq_draw_equals_the_cholesky_draw,
-% ::test_extreme_scale_state, ::test_g_full_reduced_sv_failing_chain_is_fixed (slow)
+% ::test_extreme_scale_state, ::test_g_full_reduced_sv_failing_chain_is_fixed (slow); after the release
+% (PR #11, merge 3644c4b): ::test_g_full_reduced_sv_failing_chain_is_fixed from the committed state,
+% ::test_g_full_reduced_sv_failing_chain_runs_through (both slow)
 
 % -------------------------------------------------------------------------------------
 \section{Algorithms}\label{app:algorithms}
@@ -1325,7 +1327,9 @@ on Linux. The one x86-64 run of the weekly tiers, in continuous integration at c
 slow Geweke tests, then reached
 its 330-minute limit about half-way, before the mutation, parity and SBC tests, with one failure:
 the replay test of F1 (\cref{sec:robustness-f1}), which replays one recorded chain and asserts its
-trajectory; the log does not show which assertion failed.
+trajectory; the log does not show which assertion failed (re-run on x86-64 Linux after the release,
+it fails at its first assertion; \cref{app:float64-tests}).
+% [V] CI runs 40105877002 and 40106105193 (gh run view <id> --repo yigitokar/rai-bvar --log; excerpt docs/paper/figures/data/provenance/ci_runs_40105877002_40106105193_f1_replay.txt): in all 8 x86-64 jobs pytest reports "assert int(pre.status.code[j]) == 0" / "E assert 1003 == 0" at l.192 of the verbatim copy (the first assertion of the 4ac7969 test; its fourth, with_new.status.code == 0, would print the same message), and tools/make_f1_state.py check prints 'before': 1003 in the same jobs; the weekly run ran on an AMD EPYC 7763 (sec:robustness-f1)
 % [R] CI run 40052069815 (workflow_dispatch at 779957f; job "nightly", step "Slow and network tests", -m "(slow or network) and not bench"; timed out after 330 min at 53%): excerpt docs/paper/figures/data/provenance/ci_run_40052069815_weekly_x86.txt (tests/geweke/test_geweke_compositions.py 31 + 12 passes; tests/mcmc/blocks/test_contemp_lstsq.py "F", its only slow test being test_g_full_reduced_sv_failing_chain_is_fixed); the uploaded validation-record artifact of that run was not downloaded
 % [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/ (README.md; meta.json: commit 7f880e1..., dirty false,
 % 2026-10-24T04:17:19Z-07:18:44Z, markers "(slow or network) and not bench"; record/geweke.jsonl 43, sbc.jsonl 23,
@@ -1403,7 +1407,7 @@ $O(\epsilon_{\mathrm{mach}}\operatorname{cond}(K))$, with $\operatorname{cond}(K
 precision, which reaches $10^6$ for Minnesota priors on level data. Path-against-path comparisons
 therefore use the envelope $2\times10^{-12} + 5\epsilon_{\mathrm{mach}}\operatorname{cond}(K)(1 + t)$ for means (with
 $t$ the largest posterior $t$-ratio) and $2\times10^{-12} + 5\epsilon_{\mathrm{mach}}\operatorname{cond}(K)$ for
-covariances. % [V] tests/mcmc/blocks/test_linear_fastpaths.py docstring l.7-10 and l.131-135; tests/mcmc/blocks/test_contemp_lstsq.py l.83
+covariances. % [V] tests/mcmc/blocks/test_linear_fastpaths.py docstring l.7-10 and l.131-135; tests/mcmc/blocks/test_contemp_lstsq.py::test_lstsq_draw_equals_the_cholesky_draw (envelope assert: l.83 at 4ac7969, l.96 at 3644c4b)
 Infrastructure checks cover float64 on every array, a JAX-free package import, typed keys with
 JAX's key-reuse checker, the invariances of \cref{sec:arch-repro} and the failure path.
 
@@ -1927,7 +1931,8 @@ The recorded diagnostics of F1 at the real state (the QR draw matches the exact 
 $1.6\times10^{-8}$ standard deviations) and of the old path of F2 at the test state (minimum pivot
 $2.22\times10^{-16}$ against an exact $5.308\times10^{-15}$; log-determinant $-36.04$ against
 $-32.8695$; $h_0 = -73.90$ against $-3.024$) come from commit messages and scratch computations, not
-from committed tests.
+from committed tests; after the release, a committed test checks F1's production draw at the chain's committed
+state, entering sweep 194, against the 60-digit exact conditional (below).
 % [R] commits 3d3f51b and f60d736; dossier 05 sections 2.2-2.3 (scratch R3, re-run by its fact-check)
 
 % (moved from §9 in the page-budget pass; §9 cites app:float64)
@@ -1937,12 +1942,34 @@ path-versus-path envelope of \cref{app:tier-u} at 20 random states of each of th
 reduced-form compositions; at a synthetic state with $\operatorname{cond}(K_a) > 10^{15}$ it matches
 the mean of a 60-digit exact conditional to $50\epsilon_{\mathrm{mach}}\operatorname{cond}(K_a)^{1/2}$
 and reproduces its noise map (only the QR side is run there); and a slow test replays chain 3214 of
-the failing G-full run, where the old draw returns status 1003 and the production sweep is finite.
+the failing G-full run with the old draw, asserting that the chain has not failed before sweep 194,
+that the old draw returns status 1003 there and that the production sweep is finite.
 % [V] tests/mcmc/blocks/test_contemp_lstsq.py::test_lstsq_draw_equals_the_cholesky_draw (20 states x 5
 % compositions: REDUCED = reduced_constant, reduced_sv, reduced_sv_outliers_t, reduced_iw_equivalent,
 % reduced_constant_dummies; envelope 2e-12 + 5 eps kappa (1 + t) in sd units), ::test_extreme_scale_state
 % (QR side only, the Cholesky path is not run there; tol 50 eps sqrt(cond); noise map d'Kd = z'z),
-% ::test_g_full_reduced_sv_failing_chain_is_fixed (slow: old draw status 1003, production sweep finite)
+% ::test_g_full_reduced_sv_failing_chain_is_fixed at the release, 4ac7969 (slow: status 0 entering sweep 194, codes sticky; max h > 30;
+% old draw 1003; production 0 and finite; [REL] passed at 7f880e1, Apple M5 Max; replaced after the release by PR #11, below)
+That replay is not portable. Re-run after the release on GitHub's runners (ten jobs), it passes on
+two macOS arm64 virtual machines (Apple M1, M2 Pro), where the replayed state at sweep 194 is bitwise
+the committed one (below), and fails at its first assertion on all eight x86-64 Linux jobs (AMD EPYC
+7763, 9V74, 9V45): there the old draw already fails before sweep 194 (where the log gives the sweep,
+at 170 on the EPYC 7763 and 162 on the 9V45).
+Along this chain $\operatorname{cond}(K_a) \approx 1/\epsilon_{\mathrm{mach}}$, so whether the
+Jacobi-scaled pivot of the formed Gram is zero or a few $\epsilon_{\mathrm{mach}}$ is a rounding outcome.
+After the release, PR~\#11 (3644c4b) replaces the replay with two slow tests, which pass in all
+ten jobs. From the chain's committed state at sweep 194 ($\max h > 30$; exact
+$\operatorname{cond}(K_a) > 1/\epsilon_{\mathrm{mach}}$), the production draw matches the exact
+conditional within the synthetic-state tolerances and the production sweep succeeds; and the
+production kernel runs the chain from its prior draw through sweep 194 with status 0 throughout.
+On the Apple M5 Max, a replay with the code of the fix's commit 3d3f51b reaches the committed state
+bitwise. The first of the two tests forms $K_a$ as the state enters sweep 194, before the sweep's CCCM step redraws $\Pi$, so its exact eigenvalues,
+13.7 and $1.92\times10^{17}$, differ slightly from those of \cref{tab:TabE1}, which follow that step;
+on the M5 Max the old draw's pivot is zero at both.
+The old draw's outcome is no longer asserted; \code{tools/make_f1_state.py} keeps the 194-sweep
+replay, run offline.
+% [V] computed 2026-10-24 on the Apple M5 Max with the test's _f1_state, _contexts and _exact_2x2 at 3644c4b: entering sweep 194 (the test's context, Pi of sweep 193): eigenvalues 13.656 and 1.9191e17, cond 1.405e16, mean (-0.233, -0.615), sd (0.212, 0.168), max h in equation 0 36.64, production-draw mean error 2.13e-8 sd (tolerance 1.32e-6); after the sweep's CCCM pre-step (production_sweep(...).program.global_pre with keys.step_key(ckey, 194, block)): eigenvalues 14.824 and 1.9191e17, cond 1.295e16, mean (-0.1726, -0.6631), sd (0.203, 0.162), the values of commit 3d3f51b's message; the old draw's pivot is 0 (ok False) in both; the 500-chain seam replay run with 3d3f51b's src (git archive 3d3f51b src) gives codes 0/1003/0 and a sweep-194 state equal to the fixture (max abs difference 0.0 on every float leaf)
+% [V] PR #11 (merge 3644c4b): tests/mcmc/blocks/test_contemp_lstsq.py::test_g_full_reduced_sv_failing_chain_is_fixed (fixture tests/fixtures/f1_reduced_sv_chain3214_sweep194.npz; [R] recorded at 4ac7969, src unmodified, on the Apple M5 Max: the fixture's meta field and the PR #11 description; [V] asserts status 0, max h[0] > 30, exact cond > 1/eps, mean within 50 eps sqrt(cond) sd, noise map d'Kd = z'z to rtol 1e-6, production sweep status 0 and finite), ::test_g_full_reduced_sv_failing_chain_runs_through; CI runs 40105877002 and 40106105193 (docs/paper/figures/data/provenance/ci_runs_40105877002_40106105193_f1_replay.txt); [R] rounding mechanism: PR #11 description, tools/make_f1_state.py docstring
 The tiny-$\sigma$ tests of F2 use the synthetic problem \code{problem(4, T_eff=88, T_pad=96, rw=True,
 sigma=5e-9)} of \code{test_sv_core.py}: 88 periods, two of them masked, padded to 96.
 Against its 60-digit reference the excess-pivot recursion gives the smallest pivot to a relative
@@ -1969,9 +1996,10 @@ The other formed-Gram draws, the structural coefficient step and the CCCM $\Pi$ 
 any positive pivot, without a relative floor; whether reachable states expose them is not known.
 % [V] src/rai_bvar/components/mean/linear.py l.386, 418; linear_reduced.py l.208 (ok rule: pivot > 0)
 No test asserts the old-path values; they are recomputed by the script of \cref{fig:FigE1}.
-On Linux, in continuous integration, the tiny-$\sigma$ tests and the fast F1 tests pass, and the
-replay test failed in the one weekly run (\cref{app:validation}).
-% [V] CI run 40061724239 at 7f880e1 (tests/mcmc/blocks/test_sv_core.py and test_contemp_lstsq.py fast tests, ubuntu-latest, Python 3.12-3.14: all passed); [R] CI run 40052069815 at 779957f (test_contemp_lstsq.py "F", its only slow test the replay; provenance excerpt); docs/paper/figures/make_fig_laplacian_pivots.py (old-path values, a script, not a test)
+On Linux, in continuous integration, the tiny-$\sigma$ tests and the fast F1 tests pass and the replay
+test of the release fails; after the release, on GitHub's x86-64 runners, the two tests that replace
+it pass (above).
+% [V] CI run 40061724239 at 7f880e1 (tests/mcmc/blocks/test_sv_core.py and test_contemp_lstsq.py fast tests, ubuntu-latest, Python 3.12-3.14: all passed); [R] CI run 40052069815 at 779957f (test_contemp_lstsq.py "F", its only slow test the replay; provenance excerpt); [V] CI runs 40105877002 and 40106105193 (pushes on the temporary branch diag/f1-x86 after the release; docs/paper/figures/data/provenance/ci_runs_40105877002_40106105193_f1_replay.txt): the release's replay test "assert 1003 == 0" on all 8 x86-64 Linux jobs, PR #11's ::test_g_full_reduced_sv_failing_chain_is_fixed and ::test_g_full_reduced_sv_failing_chain_runs_through passed on all 10 jobs; docs/paper/figures/make_fig_laplacian_pivots.py (old-path values, a script, not a test)
 \cref{fig:FigE1} shows the level pivot and the error in the level of $h$ as $\sigma$
 decreases, for both factorisations.
 
@@ -2119,6 +2147,8 @@ A Phase~1 empirical-Bayes test intermittently crashes the interpreter on the sam
 cause is unknown and it is not tied to the MCMC code.
 % [R] issue #3; dossier 05 section 5.7
 Linux CI is the reference platform; neither observation is attributed to a particular library.
+
+\clearpage
 
 % -------------------------------------------------------------------------------------
 \section{Clark--Ravazzolo supplement}\label{app:cr}
@@ -3201,7 +3231,7 @@ Claude Code, in local sessions and in cloud sessions on a four-core x86-64 Linux
 % [R] GitHub issue #3, body ("Overnight work queue for the local session ..., written by the cloud orchestrator session at the user's request"; "the loaded 4-core x86 cloud box"); committer "Claude" on the 16 cloud commits (below)
 % Verify pass (2026-10-23): "on the author's computer" dropped; the record has two local committer identities and
 % M1 Pro / M5 Max machine labels (TODO 8), so which local machines were the author's is not on record.
-Every commit except the nine pull-request merges was made in an agent session (below).
+Every commit except the pull-request merges was made in an agent session (below).
 The agents wrote the algorithm notes and the Phase~2 design, implemented and reviewed the Phase~2
 work packages (the benchmark and replication scripts among them) and drafted this paper with its
 figure and table scripts, this appendix included (below); the specification (\code{SPEC.md}) and
@@ -3339,7 +3369,7 @@ these the agents wrote the comparison code and chose what to compare.
 % [R] sec:validation-parity; git grep "scipy.stats" in tests/ (35 files at main), e.g. test_transitory.py::test_outlier_pmf_collapsed_matches_scipy_t
 No reviewer other than the agents is on record for the code or for this paper (no pull request has a
 GitHub review).
-% [V] gh pr list --state all --json reviews: 0 reviews each for PRs 1, 2 and 4-10
+% [V] gh pr list --state all --json reviews: 0 reviews each for PRs 1, 2 and 4-11
 No person took part in the reviews, judgements and fact-checks listed above: every one was an
 agent instance.
 % [R] session record (the orchestrating session launched each review, judge and fact-check as an agent)
@@ -3360,13 +3390,14 @@ Q14 was resolved as an agent recommended, at the author's instruction of 2026-10
 \S12.2 records that the recommendations for the earlier open questions were ``accepted as stated''
 on 2026-10-22, without saying by whom.
 % [R] session record of 2026-10-24 ("Q14 önerine göre yap"); DESIGN D-35
-Merging was reserved for him (``merging is the user's decision'', issue~\#3), and all nine pull
-requests were merged from his GitHub account.
-% [V] gh pr list --state all --json mergedBy: yigitokar for #1, #2 and #4-#10; issue #3 last comment ("PR #4 merged into phase-1-conjugate by the user")
-Pull requests \#1 and \#4--\#10 were merged by an agent session at the author's explicit
+Merging was reserved for him (``merging is the user's decision'', issue~\#3), and all ten pull
+requests (the nine of the commit record and \#11, merged after the release) were merged from his
+GitHub account.
+% [V] gh pr list --state all --json mergedBy: yigitokar for #1, #2 and #4-#11 (checked again 2026-10-24 after the merge of #11; #1, #2 and #4-#10 are the nine GitHub merges of the commit record, the last, #10, being 4ac7969; #11 = 3644c4b, merged 2026-10-24T16:17:23Z); issue #3 last comment ("PR #4 merged into phase-1-conjugate by the user")
+Pull requests \#1 and \#4--\#11 were merged by an agent session at the author's explicit
 instruction in that session (\#8--\#10 under his instruction to finish the paper and prepare its
-arXiv package); who merged \#2 is not on record beyond the account.
-% [R] session record of 2026-10-23/24 (the author's "pr merge", "merge devammm", "PR #1'i de merge et", "merge et" for #1 and #4-#6; "merge et" for #7; "paper'ı bitir, arxiv paketini hazırla" for #8-#10)
+arXiv package, \#11 under his instruction to merge it and update the paper); who merged \#2 is not on record beyond the account.
+% [R] session record of 2026-10-23/24 (the author's "pr merge", "merge devammm", "PR #1'i de merge et", "merge et" for #1 and #4-#6; "merge et" for #7; "paper'ı bitir, arxiv paketini hazırla" for #8-#10; "merge et, paper'ı da güncelle" for #11)
 He is responsible for the paper and for the software.
 % The author's approval of this appendix, any statement of his own reading, and acknowledgements are left to him (AUTHOR_TODO.md); the text makes no claim about how far he read the code or the paper.
 
