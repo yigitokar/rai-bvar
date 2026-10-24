@@ -136,6 +136,8 @@ COMPOSITIONS = {
     "structural-Constant(iw_equivalent)": ("structural", Constant("iw_equivalent")),
     "reduced-SV": ("reduced", SV()),
     "reduced-SV(outliers)": ("reduced", SV(outliers=True)),
+    "reduced-SV(t)": ("reduced", SV(tails="t")),
+    "reduced-SV(outliers,t)": ("reduced", SV(outliers=True, tails="t")),
     "reduced-SV(rw)": ("reduced", SV(rw=True)),  # the Clark–Ravazzolo primary SV arm
     "reduced-Constant(ig)": ("reduced", Constant("ig")),
     "reduced-Constant(iw_equivalent)": ("reduced", Constant("iw_equivalent")),

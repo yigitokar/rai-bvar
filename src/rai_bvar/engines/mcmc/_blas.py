@@ -13,8 +13,10 @@ draw at load 12, against 0.7 ms single-threaded, while the sweep itself costs �
 it afterwards. Below OpenBLAS's threading threshold it changes no result: a column of a
 triangular solve and a Cholesky smaller than ``128 × 128`` are computed by the same kernel
 sequence whatever the thread count (checked bitwise on BENCH-P2-shaped fits, whose largest
-factor is ``81 × 81``: every monitor value, stored draw and the final state; and by the
-engine's bitwise-invariance tests). A Cholesky of ``128 × 128`` or more (``k = 1 + np ≥ 128``)
+factor is the ``100 × 100`` precision of the fused structural ``(δ_i, a_i)`` draw,
+``q = k + n − 1`` with ``k = 81``: every monitor value, stored draw and the final state; and by
+the engine's bitwise-invariance tests). A Cholesky of ``128 × 128`` or more (structural form:
+``q = k + n − 1 ≥ 128``; reduced form: the CCCM ``K_j``, ``k = n_d + np ≥ 128``)
 is blocked differently when threaded, so its last bits (≈ 1e-15 relative) can differ from the
 threaded result; single-threaded, they no longer depend on the machine's core count, which makes
 such runs more reproducible, not less. Where no OpenBLAS with a thread-count API is loaded (macOS

@@ -57,8 +57,12 @@ re-derived before it goes into the paper).
    23.5 vs control 2.59). Status: verified.
 8. **Every mutant must be caught by some tier** (DESIGN §9.7): the table of mutant × catching tier
    with statistics is a natural paper table. Status: verified, 33/33 mutant × tier checks caught
-   with passing controls (`tests/mutation`, ~10 min with a warm compilation cache). Re-run on
-   the release commit for the paper table (`RAI_BVAR_VALIDATION_RECORD=<dir>` writes the JSON).
+   with passing controls (`tests/mutation`, ~10 min with a warm compilation cache; machine not
+   recorded). Re-run on the release commit for the paper table (`RAI_BVAR_VALIDATION_RECORD=<dir>`
+   writes the JSON). **Count superseded (2026-10-23):** 33 was M1–M16 only. WP25 added M17–M18
+   (U and G each), so the suite has 37 mutant × tier checks (`pytest --collect-only -m mutation
+   tests/mutation` collects the 37 `test_mutant_caught` cases), all 37 caught on
+   `408a7f4`; the weekly CI job now records them in `mutation.jsonl`.
 
 8b. **The path-conditioned RB log score breaks down in the tails at h > 1.** SPEC §7's estimator
    averages p(y_{T+h} | θ_s, simulated path_s up to T+h−1). For outcomes far in the predictive's tail
@@ -112,6 +116,11 @@ re-derived before it goes into the paper).
    burn-in piece sizes, fused/unfused plans and `chains='map'`, but not across `vmap` batch sizes,
    platforms (OpenBLAS vs Accelerate) or `shard_map`; those are compared at rtol ≈ 1e-12.
    Evidence: tests under `tests/mcmc/` (invariance tests). Status: verified in CI (Linux).
+   **Tolerance corrected (2026-10-23):** rtol 1e-12 holds for the toy kernels; the production SV
+   and CCCM kernels are compared at rtol 1e-9 on short runs (chain-count prefixes under `vmap`,
+   `shard_map`; `tests/mcmc/runner/test_chunking.py`, `test_devices_bitwise.py`, DESIGN §5.2), and
+   the bitwise cases above are tested with the toy kernels, plus production chain prefixes with
+   `chains="map"`.
 10. **Float64 failure in the prior's extreme tail.** One Geweke chain out of 4000 reached `h₀ ≈ 30`
     where `|y| ≈ 1e8` made a Cholesky pivot zero; the engine reports it (no silent jitter).
     Evidence: `tests/geweke/test_geweke_compositions.py` docstring. Status: recorded.
