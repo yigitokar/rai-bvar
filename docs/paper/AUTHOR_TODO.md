@@ -26,22 +26,11 @@ file to upload (tested with pdfLaTeX) and the submission steps; these two releas
    App. J and the authorship statement against arXiv's policy and the target venue's, and any
    acknowledgements.
 
-2. **Release: public repository, paper branch, tag, PyPI, Zenodo.** No tag exists on origin (checked
-   2026-10-24 07:32Z, 08:27Z and 09:28Z: `git ls-remote --tags origin`, `gh api .../tags` and
-   `.../releases` empty), so the paper names release 0.2.0 by its commit and pins the full hash in
-   the install line of App. G:
-   `pip install git+https://github.com/yigitokar/rai-bvar@4ac796997df80157d086c568714168fc2387f093`.
-   - Make the repository public; the paper gives its URL (Section 1, Section 13, App. G).
-   - Push the branch `paper-draft` to origin (the submitted sources are local commits ahead of
-     origin/paper-draft, which is at 945e43c): App. F (the convergence diagnostic), App. G (the
-     paper's sources, figure and table scripts) and the caption of Fig. F.1 (the per-origin export)
-     point to that branch.
-   - Optionally create and push the tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093 (and a
-     GitHub release); the install line can then read `@v0.2.0` (App. G, `sections/appendix.tex`,
-     "Code and data availability"). Both forms were checked offline on 2026-10-24 from a scratch
-     clone (`uv pip install --offline --no-deps "git+file://<clone>@<hash>"`, and `@v0.2.0` after
-     tagging 4ac7969 in that clone only): each installs rai-bvar 0.2.0. Keep the hash line until the
-     tag is on origin.
+2. **Release: PyPI and Zenodo (optional).** Done on 2026-10-24: the repository is public, the tag
+   `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093 and its GitHub release exist, and the branch
+   `paper-draft` is pushed (App. F, App. G and the caption of Fig. F.1 point to it). The install line
+   of App. G reads `pip install git+https://github.com/yigitokar/rai-bvar@v0.2.0`; at 09:41Z it
+   installed rai-bvar 0.2.0 from the network into a fresh Python 3.12 environment.
    - A PyPI release and Zenodo DOIs (the release, and the replication outputs) do not exist and the
      paper claims none ("there is no PyPI release and no archived DOI", App. G; "it is not on PyPI",
      Section 12, "Release state"). If you create them, update those two places and the install line.

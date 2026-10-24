@@ -11,7 +11,14 @@
 #                            clean temporary directory: (a) as arXiv does, pdflatex three times on
 #                            the shipped main.bbl, no BibTeX; (b) pdflatex, bibtex, pdflatex,
 #                            pdflatex, and the regenerated main.bbl compared with the shipped one
-#   (--test and --pdflatex may be given together)
+#   ./make_arxiv.sh --keep-comments
+#                            ship the .tex files with their comments (by default the tarball's
+#                            copies of main.tex, sections/*.tex, figures/tables/*.tex and
+#                            acceptance_values.tex are stripped of comment text by strip_comments.py:
+#                            arXiv publishes the sources, and the evidence notes and TODO tags stay
+#                            on the branch paper-draft; the typeset output is the same; main.bbl and
+#                            the listing inputs are shipped as they are)
+#   (the options may be given together)
 #
 # The tarball holds what the LaTeX build reads and nothing else:
 #   main.tex, main.bbl (arXiv does not run BibTeX), refs.bib,
@@ -32,10 +39,12 @@ cd "$(dirname "$0")"
 OUT=arxiv.tar.gz
 TEST=0
 PDFLATEX=0
+STRIP=1
 for a in "$@"; do
   case "$a" in
     --test) TEST=1;;
     --pdflatex) PDFLATEX=1;;
+    --keep-comments) STRIP=0;;
     *) echo "unknown option $a" >&2; exit 2;;
   esac
 done
@@ -90,9 +99,25 @@ if grep -q '^\\draftmarkstrue' main.tex; then
        "submission build" >&2
 fi
 
+# stage the files; the .tex files lose their comment text unless --keep-comments
+stage=$(mktemp -d "${TMPDIR:-/tmp}/rai-bvar-arxiv-stage.XXXXXX")
+nstrip=0
+for f in "${uniq_files[@]}"; do
+  mkdir -p "$stage/$(dirname "$f")"
+  case "$f" in
+    *.tex)
+      if [[ $STRIP == 1 ]]; then
+        python3 strip_comments.py "$f" "$stage/$f"; nstrip=$((nstrip + 1)); continue
+      fi;;
+  esac
+  cp -p "$f" "$stage/$f"
+done
+
 rm -f "$OUT"
-COPYFILE_DISABLE=1 tar -czf "$OUT" "${uniq_files[@]}"
-echo "wrote $OUT: ${#uniq_files[@]} files, $(du -h "$OUT" | cut -f1 | tr -d ' ')"
+COPYFILE_DISABLE=1 tar -czf "$PWD/$OUT" -C "$stage" "${uniq_files[@]}"
+rm -rf "$stage"
+echo "wrote $OUT: ${#uniq_files[@]} files, $(du -h "$OUT" | cut -f1 | tr -d ' ')" \
+     "($nstrip of them stripped of comments)"
 tar -tzf "$OUT" | sed 's/^/  /'
 
 if [[ $TEST == 1 ]]; then

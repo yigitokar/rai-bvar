@@ -20,11 +20,24 @@ Still yours, both optional:
 
 ## 1. The file to upload
 
-`docs/paper/arxiv.tar.gz`: 48 files, 573,197 bytes, SHA-256
-`316570fb298fc0259156223657605f47348209db34c0f9d06b48728a6bd8641f` (the tarball tested below,
-built 2026-10-24 09:38Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`; 47 of its 48
-files are byte-identical to the committed source at 1b43f2d; the 48th, `main.bbl`, is generated
-from `refs.bib` and gitignored, and the test's TeX Live 2026 BibTeX regenerates it byte for byte).
+`docs/paper/arxiv.tar.gz`: 48 files, 506,949 bytes, SHA-256
+`449444a562a855113e8eddfd7d4147d3b819887023e6e775da57c795cb6762c2` (the tarball tested below,
+built 2026-10-24 09:47Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1` from the sources of
+the commit that records this checksum).
+
+arXiv publishes the source files of a submission, so `make_arxiv.sh` ships its 31 `.tex` files
+(`main.tex`, `sections/*.tex`, `figures/tables/*.tex`, `acceptance_values.tex`) stripped of
+comment text by `strip_comments.py`; the annotated sources, with their evidence notes and TODO
+tags, stay on the branch `paper-draft`. Checked on 2026-10-24:
+- stripping the committed `.tex` files reproduces the 31 shipped copies byte for byte, and the
+  other 17 files are byte-identical to the sources (`main.bbl` is generated from `refs.bib` and
+  gitignored; the test's TeX Live 2026 BibTeX regenerates it byte for byte);
+- the stripped tarball typesets to the same PDF as an unstripped one: the pdfLaTeX builds of both
+  have 106 pages with byte-identical page content streams (compared with pypdf);
+- the shipped `.tex` files hold no comment text; the only local path left in the tarball is in the
+  header comments of `code/ex_a.py` and `code/ex_b.py`, lines the listings do not print.
+
+`./make_arxiv.sh --keep-comments` ships the `.tex` files with their comments instead.
 The tarball is not committed (`.gitignore`). Rebuild and test it with
 
 ```sh
@@ -203,7 +216,7 @@ exclusive transfer of copyright, choose arXiv's non-exclusive distribution licen
 
 ## 6. Steps
 
-1. Do the blocking items of Section 0. Then check that the repository URL opens in a private
+1. Section 0 is done. Check that the repository URL opens in a private
    browser window, and that `git ls-remote origin paper-draft` shows the commit that adds this
    file, or a later one.
 2. `cd docs/paper && STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`. It must end with
