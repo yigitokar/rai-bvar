@@ -125,8 +125,16 @@ if [[ $TEST == 1 ]]; then
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/rai-bvar-arxiv.XXXXXX")
   tar -xzf "$OUT" -C "$tmp"
   echo "== test build in $tmp"
-  ( cd "$tmp" && tectonic main.tex --keep-logs > build.txt 2>&1 ) \
+  ( cd "$tmp" && tectonic main.tex --keep-intermediates --keep-logs > build.txt 2>&1 ) \
     || { echo "test build FAILED; see $tmp/build.txt" >&2; tail -30 "$tmp/build.txt" >&2; exit 1; }
+  # rerun while main.aux still changes (tectonic can stop one pass short; see build.sh)
+  for _ in 1 2 3; do
+    cp "$tmp/main.aux" "$tmp/main.aux.prev"
+    ( cd "$tmp" && tectonic main.tex --keep-intermediates --keep-logs >> build.txt 2>&1 )
+    cmp -s "$tmp/main.aux.prev" "$tmp/main.aux" && break
+  done
+  cmp -s "$tmp/main.aux.prev" "$tmp/main.aux" \
+    || { echo "test build: main.aux still changes after three extra runs" >&2; exit 1; }
   pages=$(grep -o 'Output written on main.xdv ([0-9]* pages' "$tmp/main.log" | grep -o '[0-9]* pages' || true)
   undef=$(grep -c "undefined" "$tmp/main.log" || true)
   miss=$(grep -c 'Missing character' "$tmp/main.log" || true)

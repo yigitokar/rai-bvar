@@ -47,7 +47,7 @@ with this section, this section holds (the entries concerned carry an "Update" l
   with no replacement: App. J makes no claim either way.
 - **Submission build.** `\draftmarksfalse` is set. `STRICT=1 ./build.sh --check` reports 0 undefined
   citations, 0 undefined references, 0 multiply-defined labels, 0 missing characters and 0 overfull
-  boxes. The PDF has 106 pages: the main text runs to page 35, the appendices from page 36 to 97,
+  boxes. The PDF has 107 pages: the main text runs to page 35, the appendices from page 36 to 98,
   then the references. `build.sh` no longer fails when no `\todo` is left.
 - **AUTHOR_TODO.md** lists only the items left to the author after submission: his own reading
   statement and approval of App. J; the release steps (public repository, push of `paper-draft`,

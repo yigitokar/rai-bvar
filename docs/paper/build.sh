@@ -21,10 +21,23 @@ STRICT="${STRICT:-0}"
 if [[ "${1:-}" != "--check" ]]; then
   command -v tectonic >/dev/null || { echo "tectonic not found (brew install tectonic)" >&2; exit 2; }
   tectonic main.tex --keep-intermediates --keep-logs
+  # tectonic decides its own reruns and can stop one pass short of a fixed point: from no
+  # main.aux, the sources of cd8d605 gave 108 pages, one more pass 107 (the converged layout,
+  # which is also pdfLaTeX's). Rerun while main.aux still changes, up to three more times.
+  for _ in 1 2 3; do
+    cp main.aux main.aux.prev
+    tectonic main.tex --keep-intermediates --keep-logs > /dev/null 2>&1
+    if cmp -s main.aux.prev main.aux; then break; fi
+    echo "note: main.aux changed; rerunning tectonic" >&2
+  done
+  if ! cmp -s main.aux.prev main.aux; then
+    echo "warning: main.aux still changes after three extra runs" >&2; status_conv=1
+  fi
+  rm -f main.aux.prev
 fi
 [[ -f main.log ]] || { echo "no main.log" >&2; exit 2; }
 
-status=0
+status=${status_conv:-0}
 echo "== section files"
 grep -o 'rai-bvar: [A-Za-z]* sections/[^ ]*' main.log | sed 's/^rai-bvar: /  /' || true
 if grep -q 'rai-bvar: MISSING' main.log && [[ "$STRICT" == 1 ]]; then status=1; fi
