@@ -1322,7 +1322,7 @@ commit 7f880e1, the code of release 0.2.0, on an Apple M5 Max on 24 October 2026
 records that the Geweke, SBC and mutation tests write when \code{RAI_BVAR_VALIDATION_RECORD} points
 to a directory and, for the tiers without such a hook, pytest's JUnit XML (\cref{app:repro}).
 The per-PR tier on the release commit has only pass or fail outcomes, from continuous integration
-on Linux. The one x86-64 run of the weekly tiers, in continuous integration at commit 779957f
+on Linux. Before the release, the one x86-64 run of the weekly tiers, in continuous integration at commit 779957f
 (before D-35), passed the slow tests of \code{tests/analytic} and \code{tests/contract} and all 43
 slow Geweke tests, then reached
 its 330-minute limit about half-way, before the mutation, parity and SBC tests, with one failure:
@@ -1336,6 +1336,21 @@ it fails at its first assertion; \cref{app:float64-tests}).
 % mutation.jsonl 37; junit_*.xml per test directory; tests/unit excluded, issue #3); per-PR tier: CI run 40061724239
 % (excerpt docs/paper/figures/data/provenance/ci_run_40061724239_fast_suite.txt); [V] record hooks only in
 % tests/geweke/test_geweke_compositions.py, tests/sbc/test_sbc_compositions.py, tests/mutation/test_mutants.py
+
+After the release, the weekly tier ran in full twice on x86-64 Linux in continuous integration, on
+the release's code (\code{src} unchanged from 4ac7969) with the F1 replay replaced by the tests of
+PR~\#11 (\cref{app:float64-tests}): once in one job on an AMD EPYC 9V45 with 4~vCPU, and once
+split into six parallel jobs (PR~\#12, merged as 2c71fb2) on AMD EPYC 7763s with 4~vCPU, in 72 to
+120 minutes each and 121 minutes end to end. In both, the 483 tests of the tier
+gave 481 passes, one skip (the bayesianVARs parity test, whose fixture does not exist) and one
+expected failure (the \code{stochvol} Student-$t$ case): among them the 43 slow Geweke tests, the 23
+SBC tests, the 46 composition-level Tier~B tests, the 37 mutation checks and the slow tests of
+\code{tests/unit} (\cref{app:repro}).
+The single job took 274 minutes, within the 330-minute limit that the earlier run, on a 2-vCPU
+EPYC 7763, reached half-way.
+Both runs uploaded their validation records; the paper uses only the pass or fail outcomes in
+their logs, and its tables stay those of the Apple M5 Max record.
+% [V] weekly CI runs 40106532730 (workflow_dispatch on the PR #11 branch at 8f2c969, job nightly 120909267923, 15:20:38-19:54:43Z, "481 passed, 1 skipped, 4774 deselected, 1 xfailed ... in 16410.93s (4:33:30)", runner "AMD EPYC 9V45 96-Core Processor, 4 vCPU") and 40140397848 (workflow_dispatch on the PR #12 branch at b1e3801; job nightly-plan: shards geweke-structural 22, geweke-other 21, sbc-structural 29, sbc-other 43, unit 61, rest 307, tier 483 (tests/sbc 72 = tests/sbc/test_block_tier.py 46, composition-level Tier B, + test_sbc 23 + test_truth_and_forecast_core_are_the_same_map 3, pytest --collect-only at 2c71fb2); shard jobs 72.2-119.7 min, run created 22:52:31Z, record job done 00:53:18Z; shard summaries 22 + 21 + 29 + 43 + 61 + 305 passed, rest also 1 skipped and 1 xfailed; every shard on "AMD EPYC 7763 64-Core Processor, 4 vCPU"); skip: tests/parity/test_bayesianvars.py:440 "no bayesianVARs parity fixture"; xfail: tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_v_t5]; excerpt docs/paper/figures/data/provenance/ci_runs_40106532730_40140397848_weekly_x86.txt; git diff --quiet 4ac7969 8f2c969 -- src and 4ac7969 b1e3801 -- src; tests/{unit,mutation,sbc,parity,analytic,contract} identical to 4ac7969 at both; [R] DESIGN section 9.10 at 2c71fb2 (the sharded weekly tier); the validation-record artifacts of both runs were not downloaded
 Where a number below was reproduced on an earlier commit, the commit and the machine are stated.
 
 % (Tab5 and its paragraph moved from §8 in the page-budget pass; §8 cites app:validation)
@@ -1810,9 +1825,10 @@ tier's decision threshold, and \cref{fig:FigD2} places the G statistics of the m
 the per-composition controls (G-full rows of the release validation record and the mutation
 suite's G-small controls).
 Recorded runs at earlier commits on x86-64 Linux, made in cloud agent sessions (M1--M16, then
-M17--M18; \cref{app:process}), also caught every mutant; statistics agree across machines to two or three significant figures, not bitwise (M2:
+M17--M18; \cref{app:process}), also caught every mutant, as did both complete x86-64 weekly runs after the release
+(37 of 37, outcomes only); statistics agree across machines to two or three significant figures, not bitwise (M2:
 702 / 2.48 in the committed evidence, labelled M1 Pro; 705 / 2.48 on the M5 Max; 705 / 2.47 on
-x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 and in the release record at 7f880e1 (record/mutation.jsonl, M2-G); no x86-64 record at the release commit
+x86-64). % [R] tests/mutation/mutants.py comment above EVIDENCE (l.827-833) and EVIDENCE["M2"]; [V] 705 / 2.48 at 62d15f6 and in the release record at 7f880e1 (record/mutation.jsonl, M2-G); no x86-64 record at the release commit; after the release: weekly CI runs 40106532730 and 40140397848, tests/mutation/test_mutants.py 37 passed in each (docs/paper/figures/data/provenance/ci_runs_40106532730_40140397848_weekly_x86.txt)
 
 \begin{figure}[!htbp]
 \centering
@@ -2910,8 +2926,9 @@ pytest's JUnit XML of each test directory gives the pass or fail outcome of the 
 record hook (composition-level Tier~B, parity, the analytic twins, the contract tests);
 \code{meta.json} names the commit, machine, versions and load, and \code{README.md} the results.
 \code{tests/unit} was left out of that run, because its slow empirical-Bayes tests of Phase~1 hit
-an intermittent heap corruption in macOS Accelerate within one process (issue~\#3); they pass in
-isolation and feed no table.
+an intermittent heap corruption on macOS within one process (issue~\#3); they pass in
+isolation and feed no table. After the release they also passed in one process on x86-64 Linux, in
+both complete weekly runs there (\cref{app:validation}).
 The per-PR tier passed on the release commit in continuous integration
 (\cref{app:runtimes}).
 % [REL] benchmarks/reports/validation/7f880e1_apple-m5-max/README.md, meta.json (commit 7f880e18..., dirty false, started 2026-10-24T04:17:19Z, finished 07:18:44Z, markers, excluded tests/unit), summary.txt, record/*.jsonl (wc -l: 43, 23, 37), junit_tests_{geweke,sbc,mutation,parity,analytic,mcmc_blocks,validation,contract}.xml; [V] record hooks: git grep RAI_BVAR_VALIDATION_RECORD (tests/geweke/test_geweke_compositions.py, tests/sbc/test_sbc_compositions.py, tests/mutation/test_mutants.py); CI run 40061724239
@@ -3296,8 +3313,8 @@ code and corrected 13.
 \item[Runs.] Agents ran, or started through continuous integration, the tests, benchmarks and
 replication runs reported here. The x86-64 runs of the mutation suite at earlier commits, an
 earlier BENCH-P2 under load and the quick replication run were made in cloud sessions; the x86-64
-BENCH-P2 report of \cref{tab:TabE2} and the per-PR tier on the release commit come from continuous
-integration, and the Apple runs, the release validation record among them, from local sessions.
+BENCH-P2 report of \cref{tab:TabE2}, the per-PR tier on the release commit and the x86-64 weekly runs
+before and after the release come from continuous integration, and the Apple runs, the release validation record among them, from local sessions.
 % [R] CI runs 40052067670 (bench job, workflow_dispatch at 779957f) and 40061724239 (push to main at 7f880e1), gh api actions/runs; 3d5a407 (release validation record: trailer, local committer)
 % [R] issue #3 body (x86 BENCH-P2 311 / 285 s on "the loaded 4-core x86 cloud box"; the M17/M18 x86 figures); 00524a9 ("the orchestrator's" x86 reproduction); b27c7bb (cloud commit: "mutation suite re-run independently"); TabF1 (quick run on a shared 4-core x86-64 VM)
 On the night of 22 to 23 October the cloud session wrote a work queue for a local session at the

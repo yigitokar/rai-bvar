@@ -25,6 +25,13 @@ with this section, this section holds (the entries concerned carry an "Update" l
   Linux and macOS arm64. Section 9 and App. E now say so; Section 12 and App. D point to them, and
   Section 8's printed text, which describes the release, is unchanged (its evidence comment cites
   PR #11).
+  Update, 2026-10-25, after the release: the weekly tier ran in full twice on x86-64 Linux on the
+  release's code with PR #11's F1 tests: run 40106532730 in one job (AMD EPYC 9V45, 4 vCPU,
+  4 h 34 min) and run 40140397848 in six shards (PR #12, merge 2c71fb2; AMD EPYC 7763, 4 vCPU,
+  72-120 min each). Each: 483 tests, 481 passed, 1 skipped, 1 xfailed, with the 43 Geweke, 23 SBC, 46 composition-level Tier B
+  and 37 mutation tests and the slow tests of tests/unit. Sections 8, 9 and 12 say so in a clause,
+  App. D gives the runs, App. G the tests/unit point and App. J the provenance; only the logs'
+  pass or fail outcomes are used, and the tables stay those of the M5 Max record.
 - **Performance.** TabE2, Section 10 and App. E add the x86-64 BENCH-P2 report of the CI bench job
   (reported, not gated). The text now says that no idle-machine run exists, and none on the release
   commit.

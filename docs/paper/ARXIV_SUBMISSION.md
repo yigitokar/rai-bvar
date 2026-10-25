@@ -4,7 +4,7 @@ What to paste into the arXiv form, which file to upload, and how that file was t
 engine (pdfLaTeX). State of 2026-10-24, from the sources of the latest commit that changes this
 file on branch `paper-draft` (first written in 8511b6c; Sections 0, 1 and 4 updated after the final
 adversarial check of the same day; Sections 0, 1, 2, 4, 5 and 6 updated after the post-release F1
-edits of cd8d605). Every number below comes from a build or a command run that
+edits of cd8d605, and again after the weekly-tier edits of the next commit). Every number below comes from a build or a command run that
 day; the commands are given so that they can be repeated.
 
 ## 0. Before you submit
@@ -15,6 +15,7 @@ Done on 2026-10-24:
 - **Branch pushed:** `paper-draft`, which holds the paper's sources, figure and table scripts and data that App. F, App. G and Fig. F.1 point to.
 - **Date:** the title-page date is fixed to "October 2026" (`main.tex`, submission build), so arXiv's compile date does not appear.
 - **After the release:** PR #11 (merge 3644c4b) replaced the non-portable F1 replay test; Sections 9 and 12 and Apps. D, E and J describe it (cd8d605), and the paper still describes release 0.2.0.
+- **Weekly tier on Linux:** after the release it passed in full twice on x86-64 Linux (runs 40106532730 and 40140397848; the second sharded by PR #12, merge 2c71fb2); Sections 8, 9 and 12 and Apps. D, G and J say so.
 
 Still yours, both optional:
 - Your own statement for App. J (AUTHOR_TODO.md, item 1). The paper makes no claim about how far you read the code or the paper, nor about whether you reviewed the acceptance run's pre-registered settings before its launch.

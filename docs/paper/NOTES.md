@@ -226,6 +226,19 @@ re-derived before it goes into the paper).
     Evidence: DESIGN §12.2 Q14 and D-35; `tests/unit/test_default_budget.py` for the policy.
     Status: recorded (Apple M5 Max, one run each; BENCH-P2 under load).
 
+## G. The weekly tier on Linux (after release 0.2.0)
+
+19. **The weekly tier passes on x86-64 Linux.** The one weekly run before the release
+    (40052069815, on a 2-vCPU AMD EPYC 7763) stopped at its 330-minute limit about half-way. After the release, with `src/` unchanged from 4ac7969 and the
+    F1 replay replaced by PR #11's tests, the whole tier passed twice: run 40106532730 in one job on
+    a 4-vCPU AMD EPYC 9V45 (274 min) and run 40140397848 in six shards on 4-vCPU AMD EPYC 7763s
+    (PR #12, `tools/weekly_shards.py`; 72–120 min each, 121 min end to end). Each: 483 tests, 481
+    passed, 1 skipped (no bayesianVARs fixture), 1 xfailed (stochvol Student-t). The slow
+    empirical-Bayes tests of `tests/unit`, left out of the macOS release record because of the
+    macOS heap corruption (cause unknown, issue #3), passed in one process there. Evidence:
+    `figures/data/provenance/ci_runs_40106532730_40140397848_weekly_x86.txt`; DESIGN §9.10 at
+    2c71fb2. Status: verified (CI logs; the validation-record artifacts were not downloaded).
+
 ## Before submission
 
 - Re-run every "recorded" / "to check" item on the release commit and cite the commit hash.

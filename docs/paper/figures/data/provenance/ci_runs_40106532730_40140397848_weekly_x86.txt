@@ -1,0 +1,126 @@
+# Excerpt of the logs of two GitHub Actions runs of the weekly tier (workflow CI, workflow_dispatch) of
+# yigitokar/rai-bvar on x86-64 Linux after release 0.2.0, both with src/ identical to 4ac7969 (git diff --quiet
+# 4ac7969 <sha> -- src) and the F1 tests of PR #11: run 40106532730 on branch claude/musing-einstein-c1f296 (PR #11)
+# in one job, and run 40140397848 on branch claude/charming-shaw-6ca6e6 (PR #12, merged as 2c71fb2) split into six
+# shards by tools/weekly_shards.py. Markers: -m "(slow or network) and not bench". Kept, in log order under a
+# heading per job, each line with its log timestamp cut to whole seconds: the runner line of step "XLA cache key",
+# the shard plan of job nightly-plan, the pytest progress lines (per-file lines and their wrapped continuation
+# lines), the SKIPPED/XFAIL reason lines and the final summary line of each test job.
+# Retrieved with gh run view --job <id> --log; written 2026-10-25T13:29Z.
+
+## run 40106532730: workflow_dispatch on claude/musing-einstein-c1f296 @ 8f2c969634a228009a569a58894f858106d19115, created 2026-10-24T15:20:35Z, updated 2026-10-24T19:54:44Z, conclusion success
+## https://github.com/yigitokar/rai-bvar/actions/runs/40106532730
+### job 120909267923: nightly (success; 2026-10-24T15:20:38Z to 2026-10-24T19:54:43Z)
+  2026-10-24T15:20:45Z runner: AMD EPYC 9V45 96-Core Processor, 4 vCPU, ISA 19f5e5f6d5b6, XLA_FLAGS none
+  2026-10-24T15:21:12Z tests/analytic/test_conjugate.py .                                       [  0%]
+  2026-10-24T15:21:48Z tests/analytic/test_hierarchy.py ...                                     [  0%]
+  2026-10-24T15:23:12Z tests/analytic/test_mcmc_twin.py ........                                [  2%]
+  2026-10-24T15:28:51Z tests/analytic/test_mh_covid.py .........................                [  7%]
+  2026-10-24T15:32:59Z tests/analytic/test_mode1_quadrature.py ......                           [  8%]
+  2026-10-24T15:33:52Z tests/contract/test_forecast_contract_mcmc.py .......................... [ 14%]
+  2026-10-24T15:35:06Z ........................................................................ [ 29%]
+  2026-10-24T15:35:47Z ................................                                         [ 35%]
+  2026-10-24T16:37:31Z tests/geweke/test_geweke_compositions.py ............................... [ 42%]
+  2026-10-24T17:11:27Z ............                                                             [ 44%]
+  2026-10-24T17:11:45Z tests/integration/test_backtest_lpd_integrated.py .                      [ 44%]
+  2026-10-24T17:12:39Z tests/integration/test_backtest_mcmc.py ..                               [ 45%]
+  2026-10-24T17:16:17Z tests/integration/test_ordering.py ..                                    [ 45%]
+  2026-10-24T17:18:27Z tests/mcmc/blocks/test_cccm.py ...............                           [ 48%]
+  2026-10-24T17:18:35Z tests/mcmc/blocks/test_contemp_lstsq.py ..                               [ 49%]
+  2026-10-24T17:21:31Z tests/mcmc/blocks/test_sv_core.py ...............                        [ 52%]
+  2026-10-24T17:21:49Z tests/mcmc/diagnostics/test_diagnostics_ext.py .....                     [ 53%]
+  2026-10-24T17:22:08Z tests/mcmc/forecast/test_forecast_core.py .                              [ 53%]
+  2026-10-24T17:22:24Z tests/mcmc/forecast/test_irf_mcmc.py .                                   [ 53%]
+  2026-10-24T17:22:53Z tests/mcmc/runner/test_chunking.py .                                     [ 54%]
+  2026-10-24T17:24:52Z tests/mcmc/runner/test_plan.py ....................                      [ 58%]
+  2026-10-24T17:27:30Z tests/mcmc/runner/test_runner.py .................                       [ 61%]
+  2026-10-24T17:34:33Z tests/mutation/test_mutants.py .....................................     [ 69%]
+  2026-10-24T17:35:50Z tests/parity/test_bayesianvars.py ...s                                   [ 70%]
+  2026-10-24T17:37:41Z tests/parity/test_stochvol.py ........x..                                [ 72%]
+  2026-10-24T17:41:48Z tests/sbc/test_block_tier.py ........................................... [ 81%]
+  2026-10-24T17:42:24Z ...                                                                      [ 81%]
+  2026-10-24T19:01:27Z tests/sbc/test_sbc_compositions.py ..........................            [ 87%]
+  2026-10-24T19:01:29Z tests/unit/test_datasets.py ..                                           [ 87%]
+  2026-10-24T19:01:32Z tests/unit/test_diagnostics.py .....                                     [ 88%]
+  2026-10-24T19:48:06Z tests/unit/test_eb_convergence.py ...................                    [ 92%]
+  2026-10-24T19:51:16Z tests/unit/test_fit_mcmc_api.py .................                        [ 96%]
+  2026-10-24T19:51:27Z tests/unit/test_fit_warnings.py ...                                      [ 96%]
+  2026-10-24T19:51:37Z tests/unit/test_labels_and_specs.py ..                                   [ 97%]
+  2026-10-24T19:51:43Z tests/unit/test_numerics_regressions.py ....                             [ 98%]
+  2026-10-24T19:53:52Z tests/unit/test_outliers.py ...                                          [ 98%]
+  2026-10-24T19:54:09Z tests/unit/test_psi_default.py .....                                     [ 99%]
+  2026-10-24T19:54:23Z tests/unit/test_scores.py .                                              [100%]
+  2026-10-24T19:54:27Z SKIPPED [1] tests/parity/test_bayesianvars.py:440: no bayesianVARs parity fixture bvars_bayesianvars_*.nc; bayesianVARs parity (DESIGN sec. 9.9) is blocked; the reduced-form sampler is compared instead with the exact system-wide Gibbs oracle fixtures bvars_swa_*.nc, which use rai-bvar's own conventions (P1-P5 do not arise there)
+  2026-10-24T19:54:27Z XFAIL tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_v_t5] - stochvol 3.2.1's Student-t sampler misses the exact standardized-t SV posterior (SV_PARAMETRIZATION.md §3.2); replaced by the exact importance-sampling oracle
+  2026-10-24T19:54:27Z = 481 passed, 1 skipped, 4774 deselected, 1 xfailed, 117 warnings in 16410.93s (4:33:30) =
+
+## run 40140397848: workflow_dispatch on claude/charming-shaw-6ca6e6 @ b1e380102ff92c7b02328b04dee53ec7b8818706, created 2026-10-24T22:52:31Z, updated 2026-10-25T00:53:19Z, conclusion success
+## https://github.com/yigitokar/rai-bvar/actions/runs/40140397848
+### job 121010734401: nightly-plan (success; 2026-10-24T22:52:34Z to 2026-10-24T22:53:27Z)
+  2026-10-24T22:53:25Z geweke-structural      22 tests/geweke -k structural
+  2026-10-24T22:53:25Z geweke-other           21 tests/geweke -k not structural
+  2026-10-24T22:53:25Z sbc-structural         29 tests/sbc -k structural
+  2026-10-24T22:53:25Z sbc-other              43 tests/sbc -k not structural
+  2026-10-24T22:53:25Z unit                   61 tests/unit
+  2026-10-24T22:53:25Z rest                  307 tests --ignore=tests/geweke --ignore=tests/sbc --ignore=tests/unit
+  2026-10-24T22:53:25Z tier                  483 -m (slow or network) and not bench
+### job 121010918560: nightly (geweke-other) (success; 2026-10-24T22:53:29Z to 2026-10-25T00:15:37Z)
+  2026-10-24T22:53:39Z runner: AMD EPYC 7763 64-Core Processor, 4 vCPU, ISA 07ef0386558b, XLA_FLAGS none
+  2026-10-25T00:15:31Z tests/geweke/test_geweke_compositions.py .....................           [100%]
+  2026-10-25T00:15:31Z ========== 21 passed, 40 deselected, 5 warnings in 4897.97s (1:21:37) ==========
+### job 121010918593: nightly (geweke-structural) (success; 2026-10-24T22:53:29Z to 2026-10-25T00:53:10Z)
+  2026-10-24T22:53:34Z runner: AMD EPYC 7763 64-Core Processor, 4 vCPU, ISA 07ef0386558b, XLA_FLAGS none
+  2026-10-25T00:53:04Z tests/geweke/test_geweke_compositions.py ......................          [100%]
+  2026-10-25T00:53:04Z ========== 22 passed, 39 deselected, 7 warnings in 7157.73s (1:59:17) ==========
+### job 121010918527: nightly (rest) (success; 2026-10-24T22:53:29Z to 2026-10-25T00:07:41Z)
+  2026-10-24T22:53:34Z runner: AMD EPYC 7763 64-Core Processor, 4 vCPU, ISA 07ef0386558b, XLA_FLAGS none
+  2026-10-24T22:54:21Z tests/analytic/test_conjugate.py .                                       [  0%]
+  2026-10-24T22:56:02Z tests/analytic/test_hierarchy.py ...                                     [  1%]
+  2026-10-24T22:58:16Z tests/analytic/test_mcmc_twin.py ........                                [  3%]
+  2026-10-24T23:11:45Z tests/analytic/test_mh_covid.py .........................                [ 12%]
+  2026-10-24T23:20:04Z tests/analytic/test_mode1_quadrature.py ......                           [ 14%]
+  2026-10-24T23:21:28Z tests/contract/test_forecast_contract_mcmc.py .......................... [ 22%]
+  2026-10-24T23:23:30Z ........................................................................ [ 45%]
+  2026-10-24T23:24:37Z ................................                                         [ 56%]
+  2026-10-24T23:25:02Z tests/integration/test_backtest_lpd_integrated.py .                      [ 56%]
+  2026-10-24T23:26:20Z tests/integration/test_backtest_mcmc.py ..                               [ 57%]
+  2026-10-24T23:33:00Z tests/integration/test_ordering.py ..                                    [ 57%]
+  2026-10-24T23:36:50Z tests/mcmc/blocks/test_cccm.py ...............                           [ 62%]
+  2026-10-24T23:37:04Z tests/mcmc/blocks/test_contemp_lstsq.py ..                               [ 63%]
+  2026-10-24T23:41:16Z tests/mcmc/blocks/test_sv_core.py ...............                        [ 68%]
+  2026-10-24T23:41:44Z tests/mcmc/diagnostics/test_diagnostics_ext.py .....                     [ 70%]
+  2026-10-24T23:42:15Z tests/mcmc/forecast/test_forecast_core.py .                              [ 70%]
+  2026-10-24T23:42:39Z tests/mcmc/forecast/test_irf_mcmc.py .                                   [ 70%]
+  2026-10-24T23:43:27Z tests/mcmc/runner/test_chunking.py .                                     [ 71%]
+  2026-10-24T23:46:36Z tests/mcmc/runner/test_plan.py ....................                      [ 77%]
+  2026-10-24T23:50:43Z tests/mcmc/runner/test_runner.py .................                       [ 83%]
+  2026-10-25T00:01:50Z tests/mutation/test_mutants.py .....................................     [ 95%]
+  2026-10-25T00:04:02Z tests/parity/test_bayesianvars.py ...s                                   [ 96%]
+  2026-10-25T00:07:28Z tests/parity/test_stochvol.py ........x..                                [100%]
+  2026-10-25T00:07:30Z SKIPPED [1] tests/parity/test_bayesianvars.py:440: no bayesianVARs parity fixture bvars_bayesianvars_*.nc; bayesianVARs parity (DESIGN sec. 9.9) is blocked; the reduced-form sampler is compared instead with the exact system-wide Gibbs oracle fixtures bvars_swa_*.nc, which use rai-bvar's own conventions (P1-P5 do not arise there)
+  2026-10-25T00:07:30Z XFAIL tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_v_t5] - stochvol 3.2.1's Student-t sampler misses the exact standardized-t SV posterior (SV_PARAMETRIZATION.md §3.2); replaced by the exact importance-sampling oracle
+  2026-10-25T00:07:30Z = 305 passed, 1 skipped, 2700 deselected, 1 xfailed, 81 warnings in 4422.96s (1:13:42) =
+### job 121010918565: nightly (sbc-other) (success; 2026-10-24T22:53:29Z to 2026-10-25T00:05:43Z)
+  2026-10-24T22:53:35Z runner: AMD EPYC 7763 64-Core Processor, 4 vCPU, ISA 07ef0386558b, XLA_FLAGS none
+  2026-10-24T22:58:44Z tests/sbc/test_block_tier.py ................................            [ 74%]
+  2026-10-25T00:05:32Z tests/sbc/test_sbc_compositions.py ...........                           [100%]
+  2026-10-25T00:05:32Z ========== 43 passed, 30 deselected, 9 warnings in 4304.54s (1:11:44) ==========
+### job 121010918553: nightly (sbc-structural) (success; 2026-10-24T22:53:29Z to 2026-10-25T00:12:30Z)
+  2026-10-24T22:53:35Z runner: AMD EPYC 7763 64-Core Processor, 4 vCPU, ISA 07ef0386558b, XLA_FLAGS none
+  2026-10-24T22:55:02Z tests/sbc/test_block_tier.py ..............                              [ 48%]
+  2026-10-25T00:12:21Z tests/sbc/test_sbc_compositions.py ...............                       [100%]
+  2026-10-25T00:12:21Z ========= 29 passed, 44 deselected, 14 warnings in 4714.02s (1:18:34) ==========
+### job 121010918566: nightly (unit) (success; 2026-10-24T22:53:29Z to 2026-10-25T00:06:32Z)
+  2026-10-24T22:53:38Z runner: AMD EPYC 7763 64-Core Processor, 4 vCPU, ISA 07ef0386558b, XLA_FLAGS none
+  2026-10-24T22:53:54Z tests/unit/test_datasets.py ..                                           [  3%]
+  2026-10-24T22:54:00Z tests/unit/test_diagnostics.py .....                                     [ 11%]
+  2026-10-24T23:55:21Z tests/unit/test_eb_convergence.py ...................                    [ 42%]
+  2026-10-25T00:00:02Z tests/unit/test_fit_mcmc_api.py .................                        [ 70%]
+  2026-10-25T00:00:23Z tests/unit/test_fit_warnings.py ...                                      [ 75%]
+  2026-10-25T00:00:43Z tests/unit/test_labels_and_specs.py ..                                   [ 78%]
+  2026-10-25T00:00:55Z tests/unit/test_numerics_regressions.py ....                             [ 85%]
+  2026-10-25T00:05:20Z tests/unit/test_outliers.py ...                                          [ 90%]
+  2026-10-25T00:05:59Z tests/unit/test_psi_default.py .....                                     [ 98%]
+  2026-10-25T00:06:23Z tests/unit/test_scores.py .                                              [100%]
+  2026-10-25T00:06:23Z ========= 61 passed, 2055 deselected, 1 warning in 4354.12s (1:12:34) ==========
+### job 121034681567: nightly-record (success; 2026-10-25T00:53:12Z to 2026-10-25T00:53:18Z)
