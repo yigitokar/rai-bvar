@@ -396,8 +396,13 @@ jobs:
           stopifnot(packageVersion("bayesianVARs") == "0.1.8", packageVersion("bvars") == "1.1",
                     packageVersion("stochvol") >= "3.2.5")
           EOF
+          # clean room (Phase 3 DESIGN, review m21): a failed build of a GPL package is diagnosed
+          # from the exit status, the failing step and toolchain messages; compiler diagnostics
+          # that quote package source (file:line: messages and their source excerpts) are dropped
           set -o pipefail
-          Rscript "$RUNNER_TEMP/install.R" 2>&1 | tee "$OUT/install.log"
+          Rscript "$RUNNER_TEMP/install.R" 2>&1 \
+            | { grep -v -E '\.(c|cc|cpp|cxx|h|hh|hpp|f|f90|f95|for)(:[0-9]+)+|^ *[0-9]* *\| |^(g\+\+|gcc|gfortran|clang|clang\+\+|ccache) ' || true; } \
+            | tee "$OUT/install.log"
       - name: R fixtures (stochvol SV-t, bayesianVARs, bvars)
         env:
           RAI_BVAR_CI_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

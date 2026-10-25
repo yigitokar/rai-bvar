@@ -68,7 +68,9 @@
 # CRAN binary for R 4.1 and does not build without gfortran; see section (f).)
 #
 # Licensing (SPEC §2.1): BVAR and stochvol are GPL (BVAR GPL-3, stochvol GPL >= 2), bayesianVARs is
-# GPL-3, bvars and bsvars are GPL (>= 3). This script *runs* them, including a few internal BVAR
+# GPL-3, bvars and bsvars are GPL (>= 3). A failed build or install of a GPL package is diagnosed
+# from the exit status, the failing step and dependency or toolchain messages only; compiler
+# diagnostics that quote package source are filtered out of the CI log and never read. This script *runs* them, including a few internal BVAR
 # functions through `:::`, as numerical oracles; their outputs are data. It never prints, deparses
 # or stores a function, closure, R6 method or call of theirs (as_data() drops them; errors and
 # warnings are reported by their message only). Nothing in this file is part of the rai-bvar
@@ -1970,6 +1972,7 @@ if ("stochvol" %in% SECTIONS) {
 #   rai-bvar arrays are built directly (priors.reduced.explicit_reduced), so P1–P5 do not arise.
 
 SWA_CHAINS <- 4L
+SWA_TRANSFORM <- NULL   # set by P6 when both sides must use pre-standardised data
 SWA_DRAWS <- if (QUICK) 600L else 20000L
 SWA_BURN <- if (QUICK) 300L else 2000L
 SWA_PATH_THIN <- 10L
@@ -2252,6 +2255,8 @@ run_swa_fixture <- function(fx, self_checks, single_step_z) {
   variables <- setdiff(names(data$frame), "date")
   Yraw <- as.matrix(data$frame[, variables])
   storage.mode(Yraw) <- "double"
+  swa_tr <- if (is.null(SWA_TRANSFORM)) NULL else SWA_TRANSFORM(Yraw)
+  if (!is.null(swa_tr)) Yraw <- swa_tr$Y
   p <- fx$lags
   n <- ncol(Yraw)
   des <- swa_design(Yraw, p)
@@ -2349,6 +2354,9 @@ run_swa_fixture <- function(fx, self_checks, single_step_z) {
     lags = p, n = n, T = Tn, k = k,
     data_file = file.path("data", data$file),
     data_md5 = data$md5,
+    data_transform = if (is.null(swa_tr)) "none" else swa_tr$note,
+    data_center = if (is.null(swa_tr)) NULL else I(swa_tr$center),
+    data_scale = if (is.null(swa_tr)) NULL else I(swa_tr$scale),
     seed = fx$seed,
     chain_seeds = I(fx$seed + 1000L * seq_len(SWA_CHAINS)),
     draws = SWA_DRAWS, burnin = SWA_BURN, chains = SWA_CHAINS, h_path_thin = SWA_PATH_THIN,
@@ -2656,15 +2664,18 @@ PROBES <- list(
       "GK App. B prints the U step without the minus sign (N04 sec. 3.4); vcov() documents",
       "Sigma_t draws as T x M x M x draws"),
     dataset = paste(
-      "data/var_sv_n7.csv (n = 7, p = 1, SV) and data/probe_corr.csv (n = 2, p = 1,",
-      "corr(u1, u2) = +0.8)"),
+      "data/var_sv_n7.csv (n = 7, p = 1, SV), data/probe_corr3.csv (n = 3, p = 1, known A) and",
+      "data/probe_corr.csv (n = 2, p = 1, corr(u1, u2) = +0.8)"),
     design = paste(
-      "Sigma_t from the documented vcov() against A^-1 D_t A^-T, D_t = diag(exp(logvar)), for",
-      "every candidate reading of the U draws (M x M matrix or vector of free elements; upper",
-      "or lower triangle, column- or row-major; A = t(U), 2I - t(U), solve(t(U)), ...) at",
-      "three (t, draw) pairs: a candidate within 1e-8 (relative) answers; guard: the posterior",
-      "mean correlation of u1, u2 on probe_corr is +0.8 +- 0.1 by vcov() and by the selected",
-      "mapping")),
+      "(a) Sigma_t from the documented vcov() against A^-1 D_t A^-T, D_t = diag(exp(logvar)), for",
+      "every candidate reading of the U draws (M x M matrix or vector of free elements; upper or",
+      "lower triangle, column- or row-major; A = t(U), 2I - t(U), solve(t(U)) or A = U, 2I - U,",
+      "solve(U)) at three (t, draw) pairs on var_sv_n7: the readings within 1e-8 (relative) that",
+      "give a unit lower-triangular A must all give the same A (one mapping); (b) probe_corr3:",
+      "under the selected layout, exactly the selected one of A = U', 2I - U', (U')^-1 puts the",
+      "posterior mean of every free a_ij within 0.05 of the A of the LDL' factor of the OLS",
+      "residual covariance (loose prior, constant variances); (c) probe_corr: posterior mean",
+      "corr(u1, u2) = +0.8 +- 0.1 by vcov() and by the selected mapping")),
   P3 = list(
     question = "Which row of the returned PHI draws holds the intercept, and in which order are the lags?",
     documented = "undocumented (N04 sec. 3.4, sec. 10 item 4)",
@@ -2682,10 +2693,12 @@ PROBES <- list(
       "data/probe_sv.csv (n = 3, p = 1, T = 400, mu = (-3, 0, 2), phi = (0.8, 0.9, 0.97),",
       "sigma = (0.4, 0.3, 0.15))"),
     design = paste(
-      "the posterior means of the sv_para slices are matched to the distinct true",
-      "(mu, phi, sigma) of the three equations, both orientations of the array, sigma against",
-      "the s.d. and the variance (tolerances 0.6, 0.1, 0.12); among slices near mu, the one most",
-      "correlated with h_1 is h_0")),
+      "over every (orientation of the array, permutation of its series axis), the posterior",
+      "means of the slices against the true (mu, phi, sigma, sigma^2) rows: a pair satisfies the",
+      "rule iff every slice is nearest to exactly one target at less than 0.5 x its distance to",
+      "the second-nearest, and mu, phi and one of sigma / sigma^2 are each matched once (two",
+      "slices near mu: the one most correlated with h_1 is h_0); decided iff exactly one pair",
+      "satisfies it")),
   P5 = list(
     question = paste(
       "Is cholesky_priorhomoscedastic = cbind(shape, scale) the inverse-gamma scale beta0 of",
@@ -2695,9 +2708,10 @@ PROBES <- list(
       "NA with an undocumented substitute (N04 sec. 3.3)"),
     dataset = "data/probe_tiny.csv (n = 2, p = 1, T_eff = 4)",
     design = paste(
-      "cholesky_heteroscedastic = FALSE, cholesky_priorhomoscedastic = cbind(50, 100):",
-      "posterior mean of lambda ~ 2 (IG scale) or ~ 2e-4 (scale of a Gamma on 1/lambda);",
-      "a second fit with the default NA records the substituted value (prior object field)"))
+      "cholesky_heteroscedastic = FALSE, cholesky_priorhomoscedastic = cbind(50, 100): posterior",
+      "mean of lambda within +-0.2 decades of 100/49 => IG scale; below 0.2 => the scale of a",
+      "Gamma on 1/lambda; a second fit with the default NA records the substituted value",
+      "(the prior object's field)"))
 )
 
 BV_LOOSE_PHI <- 'prior = "normal", normal_sds = 100, priormean = 0, PHI_tol = 0'
@@ -2745,8 +2759,18 @@ probe_p3 <- function() {
     describe = c(describe(a$fit, "probe_corr_fit"), describe(b$fit, "var_sv_n3_fit")))
 }
 
+# The A of the LDL' factorisation of the OLS residual covariance (A S A' = D, A unit lower
+# triangular): under a loose prior and constant variances, the posterior mean of A.
+ols_ldl_a <- function(Y, p) {
+  des <- swa_design(Y, p)
+  E <- des$Y - des$X %*% solve(crossprod(des$X), crossprod(des$X, des$Y))
+  L <- t(chol(crossprod(E) / nrow(E)))
+  solve(L %*% diag(1 / diag(L)))
+}
+
 probe_p2 <- function() {
   D <- if (QUICK) 300L else 1000L
+  # (a) the documented vcov() at n = 7: which readings of the U draws reproduce Sigma_t
   r <- bv_probe_fit("var_sv_n7.csv", 1L, BV_LOOSE_PHI,
                     bv_sigma_args("sv", normal_sds = "100"), "100", draws = D, burnin = 300L)
   f <- unclass(r$fit)
@@ -2765,11 +2789,39 @@ probe_p2 <- function() {
       max(abs(S - Sv)) / max(abs(Sv))
     })), error = function(e) Inf)
   }, numeric(1))
-  hit <- names(err)[err < 1e-8]
   unit_lower <- function(A) max(abs(A[upper.tri(A)])) < 1e-12 && max(abs(diag(A) - 1)) < 1e-12
-  hit <- hit[vapply(hit, function(h) unit_lower(a_from_u(u_draw(U, 1L), cands[[h]], M)),
-                    logical(1))]
-  # guard on probe_corr (+0.8)
+  hit <- names(err)[err < 1e-8]
+  hit <- hit[vapply(hit, function(h) unit_lower(a_from_u(u_draw(U, 1L), cands[[h]], M)), logical(1))]
+  # readings that reproduce vcov() must be one mapping: the same A on every checked draw
+  one_mapping <- length(hit) >= 1L && all(vapply(hit, function(h) max(apply(pts, 1, function(pt) {
+    max(abs(a_from_u(u_draw(U, pt[2]), cands[[h]], M) - a_from_u(u_draw(U, pt[2]), cands[[hit[1]]], M)))
+  })) < 1e-12, logical(1)))
+  sel <- if (one_mapping) cands[[hit[1]]] else NULL
+  # (b) n = 3 (probe_corr3): with the selected layout, A = U', 2I - U' and (U')^-1 differ in the
+  # (3, 1) entry; exactly the selected one must put the posterior mean of every free a_ij within
+  # 0.05 of the OLS LDL' factor
+  b_txt <- "not run (no unique mapping in (a))"
+  b_ok <- FALSE
+  if (!is.null(sel)) {
+    r3 <- bv_probe_fit("probe_corr3.csv", 1L, BV_LOOSE_PHI, BV_HOMO_LOOSE, "100",
+                       draws = if (QUICK) 1000L else 5000L)
+    U3 <- draws_last(unclass(r3$fit)$U, r3$D)
+    ops <- if (sel$rep == "matrix" || startsWith(sel$fill, "upper")) c("t", "flip_t", "inv_t") else c("id", "flip", "inv")
+    if (sel$rep == "matrix" && !(sel$op %in% ops)) ops <- c("id", "flip", "inv")
+    target <- ols_ldl_a(r3$data, 1L)
+    free3 <- which(lower.tri(diag(3L)))
+    dev <- vapply(ops, function(op) {
+      cd <- modifyList(sel, list(op = op))
+      Am <- Reduce(`+`, lapply(seq_len(r3$D), function(d) a_from_u(u_draw(U3, d), cd, 3L))) / r3$D
+      max(abs(Am[free3] - target[free3]))
+    }, numeric(1))
+    within <- names(dev)[dev < 0.05]
+    b_ok <- identical(within, sel$op)
+    b_txt <- sprintf("probe_corr3: max |posterior mean a_ij - OLS LDL' a_ij| %s (band 0.05; OLS LDL' a21, a31, a32 = %s)",
+                     paste(sprintf("%s %.3f", names(dev), dev), collapse = ", "),
+                     paste(signif(target[free3], 4), collapse = ", "))
+  }
+  # (c) n = 2 guard (probe_corr, corr(u1, u2) = +0.8): by vcov() and by the selected mapping
   rc <- bv_probe_fit("probe_corr.csv", 1L, BV_LOOSE_PHI, BV_HOMO_LOOSE, "100", draws = D,
                      burnin = 300L)
   fc <- unclass(rc$fit)
@@ -2777,44 +2829,46 @@ probe_p2 <- function() {
   Vc <- bv_vcov(rc$fit, Tc, 2L, D)
   corr_v <- mean(Vc[Tc, 1, 2, ] / sqrt(Vc[Tc, 1, 1, ] * Vc[Tc, 2, 2, ]))
   corr_m <- NA_real_
-  if (length(hit)) {
+  if (!is.null(sel)) {
     Uc <- draws_last(fc$U, D)
     lvc <- bv_logvar(fc, 2L, D)
     corr_m <- mean(vapply(seq_len(D), function(d) {
-      S <- sigma_from_a(a_from_u(u_draw(Uc, d), u_candidates(Uc, 2L)[[hit[1]]], 2L),
-                        exp(lvc[lv_row(Tc, dim(lvc)[1], Tc), , d]))
+      S <- sigma_from_a(a_from_u(u_draw(Uc, d), sel, 2L), exp(lvc[lv_row(Tc, dim(lvc)[1], Tc), , d]))
       S[1, 2] / sqrt(S[1, 1] * S[2, 2])
     }, numeric(1)))
   }
   guard <- abs(corr_v - 0.8) < 0.1 && is.finite(corr_m) && abs(corr_m - 0.8) < 0.1
-  status <- if (length(hit) && guard) "answered" else "unresolved"
+  status <- if (one_mapping && b_ok && guard) "answered" else "unresolved"
   list(
     status = status,
-    answer = if (status == "answered") paste0(cands[[hit[1]]]$label,
-                                              " (A unit lower triangular, A u_t = e_t)")
+    answer = if (status == "answered") paste0(sel$label, " (A unit lower triangular, A u_t = e_t)")
       else "(undecided)",
     evidence = paste0(
-      sprintf("U draws: dim %s; logvar: dim %s; vcov(): dim %s; ",
-              paste(dim(U), collapse = " x "), paste(dim(lv), collapse = " x "),
-              paste(dim(V), collapse = " x ")),
-      "relative error of Sigma_t per candidate: ",
+      sprintf("U draws: dim %s, dimnames %s; logvar: dim %s; vcov(): dim %s; ",
+              paste(dim(U), collapse = " x "), paste(utils::head(dimnames(U)[[1]], 6), collapse = ","),
+              paste(dim(lv), collapse = " x "), paste(dim(V), collapse = " x ")),
+      "(a) relative error of Sigma_t per candidate reading (var_sv_n7): ",
       paste(sprintf("%s %.2e", names(err), err), collapse = "; "),
-      sprintf("; probe_corr posterior mean corr(u1, u2): vcov() %.3f, selected mapping %.3f",
-              corr_v, corr_m)),
-    layout = list(u_cand = if (length(hit)) cands[[hit[1]]] else NULL,
-                  u_rep = if (length(dim(U)) == 3L) "matrix" else "vector"),
+      sprintf("; readings within 1e-8: %s (one mapping: %s); (b) %s; (c) probe_corr posterior mean corr(u1, u2): vcov() %.3f, selected mapping %.3f",
+              paste(hit, collapse = ", "), one_mapping, b_txt, corr_v, corr_m)),
+    layout = list(u_cand = sel, u_rep = if (length(dim(U)) == 3L) "matrix" else "vector"),
     describe = describe(r$fit, "var_sv_n7_fit"))
 }
 
 bv_svpara <- function(f, M, D, sv) {
   S <- draws_last(f$sv_para, D)
   if (sv$orient == "cols_params") S <- aperm(S, c(2, 1, 3))
-  get <- function(row) t(matrix(S[row, , ], nrow = M))      # D x M
+  perm <- sv$series_perm %||% seq_len(M)
+  get <- function(row) t(matrix(S[row, perm, ], nrow = M))      # D x M, equations in data order
   out <- list(mu = get(sv$rows[["mu"]]), phi = get(sv$rows[["phi"]]),
               sigma = get(sv$rows[["sigma"]]))
   if (sv$sigma_is == "variance") out$sigma <- sqrt(out$sigma)
   out$h0 <- if (!is.na(sv$rows[["h0"]])) get(sv$rows[["h0"]]) else NULL
   out
+}
+
+perms3 <- function() {
+  list(c(1L, 2L, 3L), c(1L, 3L, 2L), c(2L, 1L, 3L), c(2L, 3L, 1L), c(3L, 1L, 2L), c(3L, 2L, 1L))
 }
 
 probe_p4 <- function() {
@@ -2827,12 +2881,13 @@ probe_p4 <- function() {
   lv <- bv_logvar(f, M, D)
   truth <- rbind(mu = c(-3, 0, 2), phi = c(0.8, 0.9, 0.97), sigma = c(0.4, 0.3, 0.15),
                  sigma2 = c(0.4, 0.3, 0.15)^2)
-  # rule: every slice is nearest to exactly one target row, at less than half its distance to
-  # the second-nearest target; mu, phi and one of sigma / sigma^2 must be matched
-  try_orient <- function(orient) {
+  # rule: for an (orientation, series permutation), every slice is nearest to exactly one
+  # target row at less than half its distance to the second-nearest target; mu, phi and one of
+  # sigma / sigma^2 are each matched once; P4 is decided iff exactly one pair satisfies it
+  try_pair <- function(orient, perm) {
     So <- if (orient == "cols_params") aperm(S, c(2, 1, 3)) else S
     if (dim(So)[2] != M) return(NULL)
-    pm <- apply(So, c(1, 2), mean)
+    pm <- apply(So, c(1, 2), mean)[, perm, drop = FALSE]
     dist <- t(apply(pm, 1, function(row) apply(truth, 1, function(tr) max(abs(row - tr)))))
     near <- apply(dist, 1, which.min)
     clear <- apply(dist, 1, function(d) {
@@ -2847,7 +2902,7 @@ probe_p4 <- function() {
     if (sum(tn == "mu") == 2L) {     # h_0 next to mu: the slice most correlated with h_1
       two <- which(tn == "mu")
       cr <- vapply(two, function(rw) mean(vapply(seq_len(M), function(j) {
-        stats::cor(So[rw, j, ], lv[lv_row(1L, dim(lv)[1], nrow(r$data) - 1L), j, ])
+        stats::cor(So[rw, perm[j], ], lv[lv_row(1L, dim(lv)[1], nrow(r$data) - 1L), j, ])
       }, numeric(1))), numeric(1))
       rows[["h0"]] <- two[which.max(cr)]
       rows[["mu"]] <- two[which.min(cr)]
@@ -2855,32 +2910,40 @@ probe_p4 <- function() {
     ok <- all(clear) && !anyNA(rows[c("mu", "phi", "sigma")]) &&
       length(unique(rows[!is.na(rows)])) == sum(!is.na(rows)) &&
       nrow(pm) == sum(!is.na(rows))
-    list(orient = orient, rows = rows,
+    list(orient = orient, series_perm = perm, rows = rows,
          sigma_is = if (length(sig) == 1L && tn[sig] == "sigma2") "variance" else "sd",
          ok = ok, pm = pm, dist = dist)
   }
-  res <- Filter(Negate(is.null), lapply(c("rows_params", "cols_params"), try_orient))
+  res <- list()
+  for (orient in c("rows_params", "cols_params")) for (perm in perms3()) {
+    x <- try_pair(orient, perm)
+    if (!is.null(x)) res[[length(res) + 1L]] <- x
+  }
   good <- Filter(function(x) x$ok, res)
   dn <- dimnames(S)
   status <- if (length(good) == 1L) "answered" else "unresolved"
   g <- if (length(good) == 1L) good[[1]] else NULL
+  shown <- Filter(function(x) identical(x$series_perm, 1:3), res)
   list(
     status = status,
     answer = if (status == "answered") sprintf(
-      "sv_para is (parameter, equation, draw): slice %d = mu, %d = phi, %d = sigma (%s)%s",
+      "sv_para is (parameter, equation, draw)%s: slice %d = mu, %d = phi, %d = sigma (%s)%s",
+      if (identical(g$series_perm, 1:3)) ", equations in data order" else
+        paste0(", equations permuted as (", paste(g$series_perm, collapse = ", "), ")"),
       g$rows[["mu"]], g$rows[["phi"]], g$rows[["sigma"]], if (g$sigma_is == "sd")
         "the s.d. of the h innovation" else "a variance",
       if (is.na(g$rows[["h0"]])) "; no h_0 slice" else sprintf("; h_0 = slice %d", g$rows[["h0"]]))
       else "(undecided)",
     evidence = paste0(
-      sprintf("sv_para: dim %s; dimnames %s; ", paste(dim(S), collapse = " x "),
-              if (is.null(dn)) "none" else paste(vapply(dn, function(z) paste(z, collapse = ","),
-                                                         ""), collapse = " | ")),
-      paste(vapply(res, function(x) sprintf("%s: posterior means %s; distance to (mu, phi, sigma, sigma^2) %s (ok = %s)",
-                                            x$orient, paste(apply(signif(x$pm, 4), 1, paste, collapse = "/"), collapse = "; "),
-                                            paste(apply(signif(x$dist, 3), 1, paste, collapse = "/"), collapse = "; "),
-                                            x$ok), ""), collapse = " || ")),
-    layout = list(sv = if (!is.null(g)) g[c("orient", "rows", "sigma_is")] else NULL),
+      sprintf("sv_para: dim %s; dimnames %s; (orientation, series permutation) pairs satisfying the rule: %d of %d; ",
+              paste(dim(S), collapse = " x "),
+              if (is.null(dn)) "none" else paste(vapply(dn, function(z) paste(z, collapse = ","), ""), collapse = " | "),
+              length(good), length(res)),
+      paste(vapply(shown, function(x) sprintf("%s (data order): posterior means %s; distance to (mu, phi, sigma, sigma^2) %s (ok = %s)",
+                                              x$orient, paste(apply(signif(x$pm, 4), 1, paste, collapse = "/"), collapse = "; "),
+                                              paste(apply(signif(x$dist, 3), 1, paste, collapse = "/"), collapse = "; "),
+                                              x$ok), ""), collapse = " || ")),
+    layout = list(sv = if (!is.null(g)) g[c("orient", "series_perm", "rows", "sigma_is")] else NULL),
     describe = describe(r$fit, "probe_sv_fit"))
 }
 
@@ -3269,13 +3332,14 @@ PROBES_P3 <- list(
     documented = "not documented",
     dataset = "data/var_sv_n3.csv (n = 3, p = 2)",
     design = paste(
-      "the R1 parameter set (informative Normal prior on PHI, cholesky_normal_sds = 1e6, SV",
-      "defaults) on the data and on the data with series 1 x 100, the prior transformed",
-      "equivariantly (s.d. of the coefficient of equation i on variable j x d_i/d_j, intercept",
-      "s.d. x d_i); 4 runs x 10,000 draws each; the back-transformed PHI quantiles of the",
-      "scaled fit against those of the base fit under the Phase 2 rule: pass => no internal",
-      "standardisation (both sides use the data as committed); fail => both sides receive",
-      "pre-standardised data")),
+      "where the prior matters (review M11): Normal prior with s.d. 0.05 on every lag coefficient",
+      "and 0.1 on the intercepts, cholesky_normal_sds = 1e6, SV defaults; fits B (data, prior P),",
+      "S (series 1 x 100, prior P) and T (data, the raw-unit image of P: s.d. x d_j/d_i,",
+      "intercept s.d. / d_i), 4 runs x 10,000 draws each; S against (i) the equivariant image",
+      "D PHI_B D^-1, (ii) PHI_B unchanged, (iii) the image of PHI_T, each under the Phase 2",
+      "rule: exactly (i) or exactly (ii) passes => both sides receive pre-standardised data",
+      "((y - mean)/sd) in R1-R9 and the SWA fixtures are regenerated on it; exactly (iii) =>",
+      "raw data")),
   P7 = list(
     question = "What are the grouping matrices of global_grouping = global, equation-wise, covariate-wise, olcl-lagwise?",
     documented = "manual: subgroups for semi-global shrinkage, or a lags*M x M indicator matrix",
@@ -3325,49 +3389,77 @@ probe_p6 <- function(L) {
   M <- 3L
   p <- 2L
   K <- 7L
-  dsc <- c(100, 1, 1)
-  prior <- swa_prior_arrays(M, p)
-  var_s <- prior$var
-  var_s[1, ] <- prior$var[1, ] * dsc^2
-  for (r in 2:K) var_s[r, ] <- prior$var[r, ] * (dsc / dsc[((r - 2L) %% M) + 1L])^2
+  dsc <- c(100, 1, 1)                       # series 1 x 100
+  jvar <- function(r) if (r == 1L) NA_integer_ else ((r - 2L) %% M) + 1L
   prm <- bv_predicted_rowmap(M, p, L)
   draws <- if (QUICK) 1000L else 10000L
+  # a prior that matters (DESIGN 9.8, review M11): s.d. 0.05 on every lag coefficient, 0.1 on the
+  # intercepts; loose a_ij (so their prior order does not enter) and the SV defaults
+  sd_lag <- 0.05
+  sd_int <- 0.1
+  sds_P <- matrix(sd_lag, K, M)
+  sds_P[1, ] <- sd_int
+  # the raw-unit image of P: the prior on the base-unit coefficients that P on the scaled-data
+  # coefficients is when no standardisation happens (s.d. x d_j / d_i, intercept s.d. / d_i)
+  sds_T <- sds_P
+  for (r in seq_len(K)) sds_T[r, ] <- sds_P[r, ] * (if (r == 1L) 1 else dsc[jvar(r)]) / dsc
   call <- bv_call(p, draws, BV_PROBE_BURN,
-                  'prior = "normal", normal_sds = bv_normal_sds, priormean = 0.5, PHI_tol = 0',
+                  'prior = "normal", normal_sds = bv_normal_sds, priormean = 0, PHI_tol = 0',
                   bv_sigma_args("sv", normal_sds = "1e6"), "prior_int")
-  run <- function(Yd, vs, pint, seed0) lapply(1:4, function(ch) {
-    r <- bv_eval(call, list(data = Yd, M = M, bv_normal_sds = bv_slot_vector(vs, L, prm, M, p),
-                            prior_int = pint), seed0 + ch)
+  run <- function(Yd, sds, seed0) lapply(1:4, function(ch) {
+    r <- bv_eval(call, list(data = Yd, M = M,
+                            bv_normal_sds = bv_slots(sds, L, prm, M, p),   # P1: s.d. values
+                            prior_int = sds[1, ]), seed0 + ch)
     rmap <- bv_row_map(r$fit, Yd, p, L$intercept_rule)
     if (!identical(rmap$bv_to_ours, prm$bv_to_ours)) stop("unexpected PHI row order")
     bv_phi(unclass(r$fit), M, K, draws)[prm$phi_rows, , , drop = FALSE]
   })
-  base <- run(Y, prior$var, c(10, 10, 10), BV_PROBE_SEED + 600L)
+  if (!identical(L$normal_reading, "standard deviation")) stop("P6 assumes P1's s.d. reading")
   Ys <- Y %*% diag(dsc)
   colnames(Ys) <- colnames(Y)
-  scl <- run(Ys, var_s, 10 * dsc, BV_PROBE_SEED + 700L)
-  back <- lapply(scl, function(P) {
-    for (r in seq_len(K)) {
-      dj <- if (r == 1L) 1 else dsc[((r - 2L) %% M) + 1L]
-      P[r, , ] <- P[r, , ] * dj / dsc
-    }
+  fB <- run(Y, sds_P, BV_PROBE_SEED + 600L)
+  fS <- run(Ys, sds_P, BV_PROBE_SEED + 700L)
+  fT <- run(Y, sds_T, BV_PROBE_SEED + 800L)
+  image <- function(P) {                     # base-unit draws mapped to scaled-data units
+    for (r in seq_len(K)) P[r, , ] <- P[r, , ] * dsc / (if (r == 1L) 1 else dsc[jvar(r)])
     P
-  })
-  pairs <- list()
-  for (r in seq_len(K)) for (i in seq_len(M)) {
-    pairs[[length(pairs) + 1L]] <- list(a = mc_summary(lapply(base, function(P) P[r, i, ])),
-                                        b = mc_summary(lapply(back, function(P) P[r, i, ])))
   }
-  cmp <- parity_compare(pairs)
+  cmp <- function(a, b) {
+    pairs <- list()
+    for (r in seq_len(K)) for (i in seq_len(M)) {
+      pairs[[length(pairs) + 1L]] <- list(a = mc_summary(lapply(a, function(P) P[r, i, ])),
+                                          b = mc_summary(lapply(b, function(P) P[r, i, ])))
+    }
+    parity_compare(pairs)
+  }
+  c_eq <- cmp(fS, lapply(fB, image))        # (i) internal standardisation, back-transformed
+  c_un <- cmp(fS, fB)                       # (ii) standardised output (unchanged)
+  c_raw <- cmp(fS, lapply(fT, image))       # (iii) no standardisation, raw-unit prior
+  pass <- c(equivariant = c_eq$pass, unchanged = c_un$pass, raw = c_raw$pass)
+  decided <- sum(pass) == 1L
+  outcome <- if (decided) names(pass)[pass] else "undecided"
   list(
-    status = "answered",
-    answer = if (cmp$pass) paste(
-      "no internal standardisation: PHI rescales equivariantly; both sides use the data as",
-      "committed") else "PHI is not equivariant: both sides receive pre-standardised data",
-    evidence = sprintf(
-      "max |z| = %.2f over m = %d quantile comparisons (bound %.2f); call %s", cmp$max_abs_z,
-      cmp$m, cmp$bound, call),
-    layout = list(standardise = !cmp$pass), max_abs_z = cmp$max_abs_z)
+    status = if (decided) "answered" else "unresolved",
+    answer = switch(outcome,
+      equivariant = paste(
+        "PHI is equivariant (internal standardisation with back-transform): both sides receive",
+        "pre-standardised data in R1-R9, (y - colMeans(y)) / sd(y), and the SWA fixtures are",
+        "regenerated on the same data"),
+      unchanged = paste(
+        "PHI is unchanged (standardised output): both sides receive pre-standardised data in",
+        "R1-R9, (y - colMeans(y)) / sd(y), and the SWA fixtures are regenerated on the same data"),
+      raw = paste(
+        "no internal standardisation: the scaled fit is the image of the raw-unit prior fit;",
+        "both sides use the data as committed"),
+      "(undecided)"),
+    evidence = sprintf(paste(
+      "S (series 1 x 100, prior P) against (i) the equivariant image of B (same prior, base data):",
+      "max |z| %.2f; (ii) B unchanged: %.2f; (iii) the image of T (base data, raw-unit image of",
+      "P): %.2f; m = %d, bound %.2f; P: s.d. %g on the lag coefficients, %g on the intercepts,",
+      "cholesky_normal_sds = 1e6, SV defaults; 4 runs x %d draws per fit; call %s"),
+      c_eq$max_abs_z, c_un$max_abs_z, c_raw$max_abs_z, c_eq$m, c_eq$bound, sd_lag, sd_int,
+      draws, call),
+    layout = list(standardise = outcome %in% c("equivariant", "unchanged"), p6_outcome = outcome))
 }
 
 flatten_fields <- function(x, path = "") {
@@ -3878,11 +3970,17 @@ if ("bvars" %in% SECTIONS) {
   if (isTRUE(env$bayesianvars_available)) {
     suppressPackageStartupMessages(library(bayesianVARs))
     message("  bayesianVARs ", packageVersion("bayesianVARs"))
-    quiet_calls(run_bvars_p3(env))
+    res_bv <- quiet_calls(run_bvars_p3(env))
+    # P6 (review M11): pre-standardised data on both sides => the SWA fixtures are regenerated
+    # on the same standardised data, so the three-way check of R1-R2 survives
+    if (isTRUE(res_bv$L$standardise)) {
+      SWA_TRANSFORM <- function(Y) bv_transform(Y, list(standardise = TRUE))
+      message("  P6: standardised data; the SWA fixtures are regenerated on them")
+    }
   } else {
     stage_probes(env)
   }
-  if (!NO_SWA) {
+  if (!NO_SWA || !is.null(SWA_TRANSFORM)) {
     sc <- swa_self_checks()
     z <- sv_single_step_check()
     message(sprintf("  stochvol single-step vs svsample: max |z| = %.2f", z))
@@ -4228,43 +4326,54 @@ PROBES_WB <- list(
     documented = "manual: sigma_t^2 'estimated and following (non-)centred stochastic volatility'; h is a T-vector of starting values",
     dataset = "data/probe_t2n5.csv (n = 5, p = 1, T = 2; chained draws) and data/qd3_growth.csv (scale experiment)",
     design = paste(
-      "(a) the length of h (T: no separate h_0 state); (b) data x 10 and S0 x 100 (the",
-      "starting V, from AR fits, rescales itself; V is not moved by the sampler, P12): A and Sigma/100",
-      "equivariant under the Phase 2 rule => the level of the volatility is carried by Sigma",
-      "and h has no free level (E h = 0); (c) the initial condition by the PIT test of every",
-      "rho draw against its full conditional given h (rho ~ U(-1, 1)) under h_0 = 0 or a",
-      "stationary h_1, for each update order (KS alpha = 1e-3): exactly one initial condition",
-      "passes => decided")),
+      "(a) the length of h (T: no separate h_0 state); (b) data x 10 and S0 x 100 (the starting",
+      "V, from AR fits, rescales itself; V is not moved by the sampler, P12), 4 runs x 10,000",
+      "draws per fit and volatility: A (intercept / 10) and Sigma / 100 equal to the base fit",
+      "under the Phase 2 rule => the volatility level is carried by Sigma and h has no free",
+      "level (E h = 0); (c) the PIT of every rho draw against its full conditional given the",
+      "same sweep's h and variance (rho ~ U(-1, 1); h_0 = 0 or a stationary h_1), KS alpha =",
+      "1e-3, no Metropolis repeats (repeat fraction <= 0.01): decided iff (b) passes and, for",
+      "each volatility, exactly one initial condition passes; maps onto CommonSV iff that",
+      "initial condition is the stationary one")),
   P14 = list(
     question = "What are the rho and omega / sigma_omega^2 priors, and does a setting fix sigma_omega^2?",
     documented = "manual: sv_a 'shape', sv_s 'scale' of the gamma prior in the hierarchical prior for the common SV; s_ and sigma2_omega are starting values",
     dataset = "data/probe_t2n5.csv (chained draws of P16)",
     design = paste(
-      "rho: the P13 PIT test (passes only if rho ~ U(-1, 1)); sigma_omega^2: PIT test against",
-      "the conditional of omega ~ N(0, sigma_omega^2), sigma_omega^2 ~ G(sv_a, scale or rate",
-      "s_); fixing: sv_a x 1e6 with sv_s x {1e-6, 1, 1e6}: a posterior CV of sigma_omega^2",
-      "(and sigma2v) <= 1e-3 fixes it; repeat fractions show Metropolis steps")),
+      "PIT tests (KS alpha = 1e-3, same-sweep states) of single updates: rho against its",
+      "conditional under rho ~ U(-1, 1) (P13 (c)); ncSV sigma_omega^2 against the GIG",
+      "conditional of omega ~ N(0, sigma_omega^2), sigma_omega^2 ~ G(sv_a, scale s_) or G(sv_a,",
+      "rate s_); cSV sigma2v against sigma2v ~ sigma_omega^2 chi2_1 and sigma_omega^2 against",
+      "G(sv_a, s_) with w^2 = omega^2 or sigma2v; fixing scan: sv_a x {1e6, 1e8} with sv_s",
+      "scaled, posterior CV of sigma_omega^2 (ncSV) or sigma2v (cSV) <= 1e-3 => fixed; decided",
+      "iff rho passes for both volatilities and one ncSV sigma_omega^2 candidate passes; maps",
+      "onto CommonSV for a volatility iff rho ~ U(-1, 1) (= Beta(1, 1)) and its variance prior",
+      "has the family and every parameter of an option (ncSV: sigma_omega^2 fixed => ScaledChi2;",
+      "cSV: a fixed inverse gamma => InvGamma, not established by these candidates)")),
   P15 = list(
     question = "Is Sigma a covariance or a scale, what is the prior mean (stationary), where is the intercept?",
     documented = "manual: e_t ~ N(0, sigma_t^2 lambda_t Sigma); stationary = FALSE sets a random-walk prior mean, TRUE white noise",
     dataset = "data/probe_corr.csv (n = 2, p = 1, T = 600, Sigma = [[1, 1.6], [1.6, 4]], intercepts 5, -3) and data/qd3_growth.csv",
     design = paste(
-      "homoskedastic normal fit: posterior mean of Sigma within 5% of the residual covariance",
-      "(OLS, df T - k) => covariance; prior A0 of stationary = FALSE / TRUE; the row of X",
-      "equal to 1 is the intercept; check: its A column has posterior mean (5, -3) +- 1.5,",
-      "every entry above 2 in absolute value, every other entry below 2")),
+      "homoskedastic normal fit on probe_corr: posterior mean of Sigma within 5% (max relative",
+      "difference) of the OLS residual covariance (df T - k) => covariance; A0 of",
+      "specify_prior_bvar with stationary = FALSE equals 1 on every own first lag and 0",
+      "elsewhere, with TRUE 0 everywhere; the row of X that equals the constant column of the",
+      "rai-bvar design (exact match < 1e-10) is the intercept, with the check that its A column",
+      "has posterior mean within 1.5 of (5, -3), every entry above 2 in absolute value and every",
+      "other entry below 2; decided iff all three hold")),
   P16 = list(
     question = "Is bvars' h sampler exact?",
     documented = "manual: the starting values include S, 'the auxiliary mixture component indicator' (an Omori-type mixture sampler)",
     dataset = "data/probe_t2n5.csv (n = 5, p = 1, T = 2)",
     design = paste(
       "chained estimate(., S = 1) calls (S = 2 where estimate() refuses S = 1) after a",
-      "10,000-draw burn-in, recording h, rho, omega",
-      "(and sigma2v, sigma2_omega, s_, S) after each, k = 4 seeded runs per volatility;",
-      "the extraction is checked against single estimate() runs (A and Sigma quantiles, Phase",
-      "2 rule); the oracle (4-D quadrature with the closed-form p(Y | h), N08 sec. A4; KS",
-      "alpha = 1e-3 on ESS-thinned draws) is WP38's"))
-)
+      "10,000-draw burn-in, recording h, rho, omega (and sigma2v, sigma2_omega, s_, S) after each,",
+      "k = 4 seeded runs per volatility; the extraction is checked against single estimate() runs",
+      "(A and Sigma quantiles, Phase 2 rule); the oracle (4-D quadrature with the closed-form",
+      "p(Y | h), N08 sec. A4; KS alpha = 1e-3 on ESS-thinned draws) is WP38's; a KS failure is",
+      "recorded as 'mapping or sampler, undetermined', never as 'approximate', and cannot move",
+      "predictive quantiles into the gate")))
 
 wb_probe_p11 <- function() {
   q <- wb_qd()
@@ -4446,7 +4555,7 @@ wb_probe_p16 <- function() {
 wb_fix_scan <- function() {
   d <- wb_read("probe_t2n5.csv", P2_DATA)
   out <- character()
-  cvs <- numeric()
+  cvs <- c(cSV = Inf, ncSV = Inf)
   for (vol in WB_VOLS) {
     pf <- wb_prior(wb_eval(wb_spec_code(vol, 1L, tiny = TRUE), list(data = d$Y), WB_SEED + 1399L)$env$spec)
     for (sc in list(c(1e6, 1e-6), c(1e6, 1), c(1e6, 1e6), c(1e8, 1), c(1e8, 1e-2))) {
@@ -4467,7 +4576,7 @@ wb_fix_scan <- function() {
           x <- as.numeric(state_matrix(s, f))
           if (!length(x)) NA_real_ else stats::sd(x) / abs(mean(x))
         }
-        cvs <- c(cvs, if (vol == "ncSV") cv("sigma2_omega") else cv("sigma2v"))
+        cvs[[vol]] <- min(cvs[[vol]], if (vol == "ncSV") cv("sigma2_omega") else cv("sigma2v"), na.rm = TRUE)
         sprintf("%s, sv_a x %g, sv_s x %g: CV(sigma2_omega) %.3g, CV(sigma2v) %.3g, CV(omega) %.3g, mean sigma2_omega %.4g",
                 vol, ma, ms, cv("sigma2_omega"), cv("sigma2v"), cv("omega"),
                 mean(as.numeric(state_matrix(s, "sigma2_omega")) %||% NA))
@@ -4475,7 +4584,7 @@ wb_fix_scan <- function() {
       out <- c(out, st)
     }
   }
-  list(text = out, fixed = any(is.finite(cvs) & cvs <= 1e-3))
+  list(text = out, fixed = is.finite(cvs) & cvs <= 1e-3)
 }
 
 # The scale experiment of P13 (b): A and Sigma/100 equivariant when the data are multiplied by 10.
@@ -4519,7 +4628,7 @@ run_wbvars_probes <- function() {
   pr$P12 <- attempt_probe("P12", wb_probe_p12())
   p16 <- tryCatch(wb_probe_p16(), error = function(e) e)
   scan <- tryCatch(wb_fix_scan(), error = function(e) list(text = paste("scan failed:", conditionMessage(e)),
-                                                           fixed = FALSE))
+                                                           fixed = c(cSV = FALSE, ncSV = FALSE)))
   rmq <- pr$P15$rmq
   scale <- if (!is.null(rmq)) tryCatch(wb_scale_experiment(rmq),
                                        error = function(e) list(text = paste("failed:", conditionMessage(e)), pass = NA))
@@ -4558,12 +4667,18 @@ run_wbvars_probes <- function() {
     "%s: rho PIT (U(-1, 1) prior) %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
     vol, fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
     pit[[vol]]$rep_h, pit[[vol]]$rep_s2v, pit[[vol]]$rep_s2o), character(1))
+  # P13 rule: decided iff the scale experiment passes (E h = 0, the level in Sigma) and, for each
+  # volatility, exactly one initial condition passes; it maps onto CommonSV (stationary h_0 at the
+  # first data row, E h = 0) for a volatility iff that initial condition is "stationary"
   p13_decided <- all(init %in% c("h_0 = 0", "stationary")) && isTRUE(scale$pass)
+  p13_maps <- vapply(WB_VOLS, function(vol) p13_decided && identical(init[[vol]], "stationary"), logical(1))
   pr$P13 <- list(
     status = if (p13_decided) "answered" else "unresolved",
+    maps = p13_maps,
     answer = if (p13_decided) sprintf(
-      "h has %d entries (t = 1..T, no h_0 state); the volatility level is carried by Sigma (E h = 0); initial condition: cSV %s, ncSV %s",
-      hlen, init[["cSV"]], init[["ncSV"]]) else sprintf(
+      "h has %d entries (t = 1..T, no h_0 state); the volatility level is carried by Sigma (E h = 0); initial condition: cSV %s, ncSV %s; maps onto CommonSV's stationary h_0: cSV %s, ncSV %s",
+      hlen, init[["cSV"]], init[["ncSV"]], if (p13_maps[["cSV"]]) "yes" else "no",
+      if (p13_maps[["ncSV"]]) "yes" else "no") else sprintf(
         "(undecided) h has %s entries; scale experiment pass = %s; initial condition: cSV %s, ncSV %s",
         hlen, scale$pass, init[["cSV"]], init[["ncSV"]]),
     evidence = paste(c(paste("scale experiment:", scale$text), pit_txt), collapse = " || "))
@@ -4579,25 +4694,35 @@ run_wbvars_probes <- function() {
     if (!length(v)) NA_character_ else if (any(is.finite(v) & v > 1e-3))
       paste(names(v)[is.finite(v) & v > 1e-3], collapse = " / ") else "no candidate passes"
   }, character(1))
-  ncsv_ok <- grepl("G(sv_a, scale s_)", s2o_pass[["ncSV"]] %||% "", fixed = TRUE) ||
-    grepl("G(sv_a, rate s_)", s2o_pass[["ncSV"]] %||% "", fixed = TRUE)
+  s2o_of <- function(vol) if (vol %in% names(s2o_pass)) s2o_pass[[vol]] else "not tested"
+  ncsv_ok <- grepl("G(sv_a, scale s_)", s2o_of("ncSV"), fixed = TRUE) ||
+    grepl("G(sv_a, rate s_)", s2o_of("ncSV"), fixed = TRUE)
+  # P14 maps onto a CommonSV option for a volatility iff rho ~ U(-1, 1) (= Beta(1, 1) on
+  # (rho + 1)/2) and the variance prior has the family and every parameter of an option: ncSV
+  # omega ~ N(0, sigma_omega^2) with sigma_omega^2 fixed by a setting (= ScaledChi2); cSV a fixed
+  # inverse-gamma sigma2v (= InvGamma), which no candidate here establishes
+  p14_maps <- c(cSV = FALSE, ncSV = rho_unif && ncsv_ok && isTRUE(scan$fixed[["ncSV"]]))
   pr$P14 <- list(
     status = if (rho_unif && ncsv_ok) "answered" else "unresolved",
+    maps = p14_maps,
     answer = if (rho_unif && ncsv_ok) sprintf(paste(
       "rho ~ U(-1, 1) for cSV and ncSV (its full conditional passes the PIT test); ncSV: omega ~",
       "N(0, sigma_omega^2), sigma_omega^2 | s_ ~ G(sv_a, scale s_) with s_ a sampled state",
       "(conditional passing: %s); cSV: %s; a setting that fixes sigma_omega^2 (or sigma2v): %s"),
-      s2o_pass[["ncSV"]], if (identical(s2o_pass[["cSV"]], "no candidate passes"))
+      s2o_of("ncSV"), if (identical(s2o_of("cSV"), "no candidate passes"))
         "the prior of sigma2v is not identified by the candidates tried (sigma2v ~ sigma_omega^2 chi2_1; G(sv_a, s_) on sigma_omega^2 with omega^2 or sigma2v)"
-        else paste("passing:", s2o_pass[["cSV"]]),
-      if (isTRUE(scan$fixed)) "found (see evidence)" else "none among those tried")
+        else paste("passing:", s2o_of("cSV")),
+      if (any(scan$fixed)) paste("found for", paste(names(scan$fixed)[scan$fixed], collapse = ", "),
+                                 "(see evidence)") else "none among those tried")
       else sprintf("(undecided) rho uniform consistent: %s; ncSV sigma_omega^2: %s", rho_unif,
-                   s2o_pass[["ncSV"]] %||% "not tested"),
+                   s2o_of("ncSV")),
     evidence = paste(c(pit_txt, paste("fixing scan:", paste(scan$text, collapse = "; "))), collapse = " || "))
   pr$P16 <- if (inherits(p16, "error")) list(status = "unresolved", answer = "(extraction failed)",
                                             evidence = conditionMessage(p16)) else list(
     status = "pending",
-    answer = "data committed (probe_wbvars_p16.nc), decision pending WP38 (quadrature oracle)",
+    answer = paste(
+      "data committed (probe_wbvars_p16.nc), decision pending WP38 (quadrature oracle); a KS",
+      "failure is recorded as 'mapping or sampler, undetermined', never as 'approximate'"),
     evidence = paste(vapply(WB_VOLS, function(vol) sprintf(
       "%s: %d runs x %d chained calls of estimate(post, S = %d)%s; extraction check max |z| %.2f over m = %d (bound %.2f, pass %s); %.4fs per call",
       vol, WB_RUNS_N, WB_P16_CALLS, p16[[vol]]$s, if (nzchar(p16[[vol]]$s_note)) paste0(" (", p16[[vol]]$s_note, ")") else "",
@@ -4608,20 +4733,26 @@ run_wbvars_probes <- function() {
   list(probes = pr, p16 = p16, init = init, scale = scale, pit = pit, scan = scan)
 }
 
+# The bvars gating comparison (DESIGN 9.8, review M6), per volatility: branch 1 iff P12 holds, P13
+# and P14 map bvars' SV prior exactly onto a CommonSV option and P15 is decided; otherwise branch
+# 2, the 1- and 4-step predictive comparison of two different posteriors, which review M6 / Q35
+# (owner) reads as evidence, not an equality gate.
 wb_gating <- function(res) {
   pr <- res$probes
   p12 <- isTRUE(pr$P12$holds)
-  maps <- identical(pr$P13$status, "answered") && identical(pr$P14$status, "answered") &&
-    all(res$init == "stationary") && grepl("fixes sigma_omega\\^2: found", pr$P14$answer)
-  if (p12 && maps) paste(
-    "option 1 (P12 holds and P13-P14 map the SV prior): posterior quantiles of B and Sigma under",
-    "the Phase 2 rule; h_t, rho, sigma_h gate only if P16 shows the sampler exact (pending WP38);",
-    "until then they are reported, not gating, and the 1- and 4-step predictive quantiles join",
-    "the gate") else paste(
-      "option 2: the 1- and 4-step predictive quantiles under the Phase 2 rule, same data and",
-      "draw counts, because", if (!p12) "V cannot be held fixed (P12)" else
-        "P13-P14 do not map bvars' SV prior onto a CommonSV option (initial condition and/or the",
-      if (p12) "hierarchical sigma_omega^2 prior; see P13, P14)" else "")
+  p15 <- identical(pr$P15$status, "answered")
+  out <- vapply(WB_VOLS, function(vol) {
+    m13 <- isTRUE(pr$P13$maps[[vol]])
+    m14 <- isTRUE(pr$P14$maps[[vol]])
+    if (p12 && m13 && m14 && p15) paste0(vol, ": branch 1 - quantiles of B and Sigma under the Phase ",
+      "2 rule; h_t, rho, sigma_h gate only if P16 passes (pending WP38), otherwise reported") else
+      paste0(vol, ": branch 2 (", paste(c(if (!p12) "P12 does not hold", if (!m13) "P13 does not map",
+                                       if (!m14) "P14 does not map", if (!p15) "P15 undecided"),
+                                     collapse = ", "),
+             ") - the 1- and 4-step predictive quantiles under the Phase 2 rule; per review M6 ",
+             "(Q35, owner) evidence, not an equality gate: exact CommonSV parity not met (D-59)")
+  }, character(1))
+  paste(out, collapse = "; ")
 }
 
 stage_wbvars_p16 <- function(res) {

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 import sys
 from functools import cache
 from pathlib import Path
@@ -557,3 +558,332 @@ def test_probe_fixture_records_the_derived_bayesianvars_calls():
         assert 'sv_keep = "all"' in call
     assert "cholesky_priorsigma2 = c(0.5, 0.5)" in calls[0]
     assert "cholesky_priorhomoscedastic = cbind(rep(3, M), rep(2, M))" in calls[1]
+
+
+# ------------------------------------------------------------------------------------------------
+# Phase 3 (docs/phase3/DESIGN.md §9.8, work package WP29): bayesianVARs 0.1.8 and bvars 1.1
+# ------------------------------------------------------------------------------------------------
+
+P3_R_VERSION = "R version 4.5.3"
+P3_SNAPSHOT = "2026-10-20"
+BV_RUNS = {  # name: (data file, lags, vol, run) — the frozen bvars_swa format (R1, R2)
+    "bvars_bayesianvars_n3p2_sv": ("var_sv_n3.csv", 2, "sv", "R1"),
+    "bvars_bayesianvars_n7p4_sv": ("var_sv_n7.csv", 4, "sv", "R1"),
+    "bvars_bayesianvars_n3p2_const": ("var_sv_n3.csv", 2, "constant", "R2"),
+}
+GL_RUNS = {  # name: (data file, lags, family, groups, run)
+    **{
+        f"bvars_gl_{run.lower()}_{fam.lower()}_global_n{n}p2": (f"var_sv_n{n}.csv", 2, fam, "global", run)
+        for run, fam in (("R3", "HS"), ("R4", "NG"), ("R5", "R2D2"), ("R6", "DL"), ("R7", "SSVS"))
+        for n in (3, 7)
+    },
+    "bvars_gl_r8_hs_olcl_n7p4": ("var_sv_n7.csv", 4, "HS", "olcl-lagwise", "R8"),
+    "bvars_gl_r9_nggrid_global_n7p2": ("var_sv_n7.csv", 2, "NG", "global", "R9"),
+}
+P8_FIXTURES = {  # name: family
+    "probe_bvars_p8_hs": "HS",
+    "probe_bvars_p8_ng_a0.1_b1_c4": "NG",
+    "probe_bvars_p8_ng_a0.1_b1_c1": "NG",
+    "probe_bvars_p8_r2d2_a0.1_b4": "R2D2",
+    "probe_bvars_p8_r2d2_a0.1_b0.5": "R2D2",
+    "probe_bvars_p8_dl_a1overK": "DL",
+    "probe_bvars_p8_dl_a0.5": "DL",
+}
+WB_RUNS = {"wbvars_csv": "cSV", "wbvars_ncsv": "ncSV"}
+PROBE_P3 = "probe_bayesianvars_p3"
+PROBE_WB = "probe_wbvars"
+PROBE_P16 = "probe_wbvars_p16"
+PROBE_IDS = {PROBE_P3: ("P6", "P7", "P8", "P9", "P10"),
+             PROBE_WB: ("P11", "P12", "P13", "P14", "P15", "P16")}  # fmt: skip
+PENDING = {"P8", "P16"}  # data committed, decision pending WP30 / WP38
+BV_SUMMARY_FIXTURES = [*BV_RUNS, *GL_RUNS, *P8_FIXTURES]
+P3_FIXTURES = [*BV_SUMMARY_FIXTURES, *WB_RUNS, PROBE_P3, PROBE_WB, PROBE_P16]
+COMPARED = ("Pi", "A", "sv", "h", "forecast", "lambda", "B", "Sigma")  # the gated summaries
+DOC = Path(__file__).parent / "SV_PARAMETRIZATION.md"
+
+
+def check_summary_block(ds, prefix: str) -> None:
+    q = ds[f"{prefix}_q"]
+    assert q.dims[-1] == "quantile"
+    for suffix in SUMMARY_SUFFIXES:
+        var = ds[f"{prefix}{suffix}"]
+        assert var.dims == (q.dims if suffix in SUMMARY_SUFFIXES[:4] else q.dims[:-1])
+        assert var.dtype == np.float64
+        assert np.all(np.isfinite(var.values)), f"{prefix}{suffix}"
+    assert np.all(np.diff(q.values, axis=-1) >= 0.0), f"{prefix}: quantiles not sorted"
+    for suffix in ("_mcse", "_mcse_vehtari", "_mcse_batch", "_sd", "_mcse_mean"):
+        assert np.all(ds[f"{prefix}{suffix}"].values > 0.0), f"{prefix}{suffix}"
+    np.testing.assert_array_equal(
+        ds[f"{prefix}_mcse"].values,
+        np.maximum(ds[f"{prefix}_mcse_vehtari"].values, ds[f"{prefix}_mcse_batch"].values),
+    )
+    mean = ds[f"{prefix}_mean"].values
+    assert np.all((q.values[..., 0] <= mean) & (mean <= q.values[..., -1]))
+
+
+def test_every_phase3_fixture_exists():
+    missing = [name for name in P3_FIXTURES if not (FIXTURES / f"{name}.nc").exists()]
+    assert not missing
+
+
+@pytest.mark.parametrize("name", P3_FIXTURES)
+def test_phase3_provenance(name):
+    """Every Phase 3 fixture names the R version, the package versions and the snapshot."""
+    a = fixture(name).attrs
+    for key in COMMON_ATTRS:
+        assert key in a, key
+    assert a["generator"] == "tools/make_r_fixtures.R"
+    assert a["packed_by"] == "tools/make_sv_parity_data.py pack"
+    assert int(a["quick"]) == 0, "--quick fixtures must not be committed"
+    assert a["design"].startswith("docs/phase3/DESIGN.md sec. 9.8")
+    assert a["r_version"].startswith(P3_R_VERSION)
+    assert a["ppm_snapshot"] == P3_SNAPSHOT
+    assert f"/{P3_SNAPSHOT}" in a["repos"] and "packagemanager.posit.co" in a["repos"]
+    packages = a["packages"]
+    for pkg in ("bayesianVARs 0.1.8", "bvars 1.1", "bsvars 4.0", "stochvol 3.2.9"):
+        assert pkg in packages, pkg
+    assert a["stochvol_version"] == "3.2.9"
+    if "data_file" in a:
+        path = FIXTURES / a["data_file"]
+        assert path.exists()
+        assert a["data_md5"] == md5(path), "fixture was not generated from the committed data"
+
+
+@pytest.mark.parametrize("name", [*BV_SUMMARY_FIXTURES, *WB_RUNS])
+def test_phase3_summary_blocks_are_well_formed(name):
+    ds = fixture(name)
+    np.testing.assert_array_equal(ds["quantile"].values, PROBS)
+    prefixes = summary_prefixes(ds)
+    assert prefixes
+    for prefix in prefixes:
+        check_summary_block(ds, prefix)
+
+
+@pytest.mark.parametrize("name", [*BV_RUNS, *GL_RUNS, *WB_RUNS])
+def test_phase3_parity_runs_are_converged(name):
+    """The gated summaries of the parity runs mix (split R-hat < 1.01, multi-chain ESS > 400)."""
+    ds = fixture(name)
+    for prefix in summary_prefixes(ds) & set(COMPARED):
+        assert float(ds[f"{prefix}_rhat"].max()) < MAX_RHAT, prefix
+        assert float(ds[f"{prefix}_ess"].min()) > MIN_ESS, prefix
+
+
+@pytest.mark.parametrize("name", [*BV_RUNS, *GL_RUNS, *P8_FIXTURES])
+def test_bayesianvars_runs_are_four_independent_runs(name):
+    a = fixture(name).attrs
+    assert (int(a["chains"]), int(a["draws"]), int(a["burnin"])) == (4, 50_000, 10_000)
+    seeds = np.asarray(a["chain_seeds"])
+    assert seeds.shape == (4,) and len(set(seeds.tolist())) == 4
+    call = a["call"]
+    assert call.startswith("bvar(data, lags = ")
+    assert "draws = 50000L, burnin = 10000L, thin = 1L" in call
+    assert 'sv_keep = "all"' in call and "prior_intercept = 10" in call
+    assert "PHI_tol = 0" in call and "cholesky_U_tol = 0" in call  # P10: every floor is 0
+    assert 'cholesky_U_prior = "normal", cholesky_normal_sds = 1' in call
+    assert "expert_sv_offset" not in call  # bayesianVARs' default offset 0 (DESIGN §9.8)
+    for tol in ("NG_tol", "R2D2_tol", "DL_tol"):
+        if tol in call:
+            assert f"{tol} = 0" in call
+    assert float(a["floor_fraction_phi"]) == 0.0 and float(a["floor_fraction_u"]) == 0.0
+    assert int(a["nonfinite_phi"]) == 0
+
+
+def _regressors(file: str, lags: int) -> tuple[list[str], list[str]]:
+    data = frame(file)
+    variables = [c for c in data.columns if c != "date"]
+    return variables, ["const"] + [f"{v}.L{lag}" for lag in range(1, lags + 1) for v in variables]
+
+
+@pytest.mark.parametrize("name", BV_RUNS)
+def test_bayesianvars_fixture_layout(name):
+    """R1/R2: the frozen bvars_swa layout, the P2 §9.9 parameter set and its derived call."""
+    file, lags, vol, run = BV_RUNS[name]
+    ds = fixture(name)
+    a = ds.attrs
+    variables, regressors = _regressors(file, lags)
+    n, T = len(variables), len(frame(file)) - lags
+    assert a["kind"] == "bvars_bayesianvars" and a["vol"] == vol and a["run"] == run
+    assert (int(a["n"]), int(a["lags"]), int(a["T"]), int(a["k"])) == (n, lags, T, 1 + n * lags)
+    assert list(ds["equation"].values) == variables and list(ds["regressor"].values) == regressors
+    free = [(i, j) for i in range(2, n + 1) for j in range(1, i)]
+    assert list(zip(ds["a_row"].values, ds["a_col"].values, strict=True)) == free
+    assert ds["Pi_q"].shape == (1 + n * lags, n, 5) and ds["A_q"].shape == (len(free), 5)
+    assert ds["forecast_q"].dims == ("horizon", "equation", "quantile")
+    if vol == "sv":
+        # bayesianVARs returns no h_0 (P4): t_sel starts at 1
+        np.testing.assert_array_equal(ds["t_sel"].values, [1, T // 4, T // 2, (3 * T) // 4, T])
+        assert ds["h_path_q"].shape == (T, n, 5)
+    else:
+        np.testing.assert_array_equal(ds["ig_shape"].values, 3.0)
+        np.testing.assert_array_equal(ds["ig_scale"].values, 2.0)
+        assert "cholesky_priorhomoscedastic = cbind(rep(3, M), rep(2, M))" in a["call"]  # P5
+    # the parameter set of P2 §9.9 (as test_swa_prior_arrays_are_the_documented_parameter_set)
+    mean, var = ds["prior_mean"].values, ds["prior_var"].values
+    expected_mean = np.zeros_like(mean)
+    expected_mean[1 : n + 1] = 0.5 * np.eye(n)
+    np.testing.assert_array_equal(mean, expected_mean)
+    assert np.all(var[0] == 100.0) and "prior_intercept = 10" in a["call"]
+    # P1 (s.d., column-major over the PHI lag rows) and P3 (lag rows in rai-bvar order)
+    np.testing.assert_allclose(ds["bv_normal_sds"].values, np.sqrt(var[1:]).ravel(order="F"),
+                               rtol=1e-15)  # fmt: skip
+    assert "normal_sds = bv_normal_sds, priormean = 0.5" in a["call"]
+
+
+@pytest.mark.parametrize("name", GL_RUNS)
+def test_gl_fixture_layout(name):
+    """R3–R9: the global-local runs, their hyperparameter draws and the compared extras."""
+    file, lags, family, groups, run = GL_RUNS[name]
+    ds = fixture(name)
+    a = ds.attrs
+    variables, regressors = _regressors(file, lags)
+    n, T = len(variables), len(frame(file)) - lags
+    assert a["kind"] == "bvars_gl" and a["run"] == run and a["family"] == family
+    assert a["groups"] == groups and a["vol"] == "sv"
+    assert f'prior = "{family}"' in a["call"] and f'global_grouping = "{groups}"' in a["call"]
+    assert "priormean = 0" in a["call"]
+    assert list(ds["regressor"].values) == regressors
+    np.testing.assert_array_equal(ds["prior_mean"].values, 0.0)
+    np.testing.assert_array_equal(ds["t_sel"].values, [1, T // 4, T // 2, (3 * T) // 4, T])
+    draws = ds["hyper_draws"]
+    assert draws.dims == ("chain", "hyper_draw", "hyper") and draws.shape[0] == 4
+    assert np.all(np.isfinite(draws.values))
+    names = list(ds["hyper"].values)
+    if family == "SSVS":
+        assert "SSVS_semiautomatic = FALSE" in a["call"]
+        p = ds["incl_prob"].values
+        assert len(p) == n * n * lags and np.all((p >= 0.0) & (p <= 1.0))
+        assert all(name.startswith("gamma: ") for name in ds["incl"].values)
+    if family == "HS":
+        groups_n = {"global": 1, "olcl-lagwise": 2 * lags}[groups]
+        assert [h for h in names if h.startswith("zeta")] == [f"zeta{g}" for g in range(1, groups_n + 1)]
+        assert set(ds["hyper_sel"].values) == {f"zeta{g}" for g in range(1, groups_n + 1)}
+    if "groups_matrix" in ds:
+        G = ds["groups_matrix"].values
+        assert G.shape == (n * lags, n) and len(np.unique(G)) == (1 if groups == "global" else 2 * lags)
+    if run == "R9":
+        support, weight = ds["ng_grid_support"].values, ds["ng_grid_weight"].values
+        assert "NG_a = ng_grid" in a["call"] and np.isclose(weight.sum(), 1.0)
+        np.testing.assert_array_equal(ds["grid_support"].values, support)
+        prob = ds["grid_prob"].values
+        assert prob.shape == (1, len(support)) and np.isclose(prob.sum(), 1.0)
+        assert list(ds["grid_param"].values) == ["a1"]
+
+
+@pytest.mark.parametrize("name", P8_FIXTURES)
+def test_p8_fixture_layout(name):
+    """The bayesianVARs side of P8: constant variances, all hyperparameter and V_prior draws."""
+    ds = fixture(name)
+    a = ds.attrs
+    assert a["kind"] == "probe_p8" and a["family"] == P8_FIXTURES[name] and a["vol"] == "constant"
+    assert a["data_file"] == "data/probe_gl.csv" and int(a["T"]) == 8 and int(a["lags"]) == 2
+    assert "cholesky_priorhomoscedastic = cbind(rep(3, M), rep(2, M))" in a["call"]
+    assert ds["lambda_q"].shape == (3, 5) and "forecast_q" not in ds
+    for var in ("hyper_draws", "vprior_draws"):
+        assert ds[var].dims[:2] == ("chain", "hyper_draw") and np.all(np.isfinite(ds[var].values))
+
+
+def _probe_records(name):
+    ds = fixture(name)
+    a = ds.attrs
+    ids = PROBE_IDS[name]
+    assert list(ds["probe"].values) == list(ids)
+    flags = ds["answered"].values
+    out = {}
+    for probe, flag in zip(ids, flags, strict=True):
+        for field in ("question", "documented", "dataset", "design", "status", "answer"):
+            assert str(a[f"{probe}_{field}"]).strip(), f"{probe}_{field}"
+        status = a[f"{probe}_status"]
+        assert status in ("answered", "unresolved", "pending")
+        assert bool(flag) == (status == "answered")
+        assert (status == "pending") == (probe in PENDING), (probe, status)
+        if status == "unresolved":
+            assert str(a[f"{probe}_evidence"]).strip(), f"{probe}: undecided without evidence"
+        out[probe] = status
+    return out
+
+
+@pytest.mark.parametrize("name", [PROBE_P3, PROBE_WB])
+def test_phase3_probes_are_decided_or_recorded(name):
+    """D-59: every probe is answered, recorded as undecided with its evidence, or (P8, P16)
+    pending with its data committed; SV_PARAMETRIZATION.md records the same status."""
+    statuses = _probe_records(name)
+    text = DOC.read_text(encoding="utf-8")
+    for probe, status in statuses.items():
+        assert re.search(rf"\| {probe} \|[^\n]*\| {status} \|", text), (probe, status)
+
+
+def test_p7_grouping_matrices_are_recorded():
+    ds = fixture(PROBE_P3)
+    assert list(ds["grouping"].values) == ["global", "equation-wise", "covariate-wise", "olcl-lagwise"]
+    G = ds["p7_groups"].values
+    assert G.shape == (4, 6, 3) and np.all(G >= 0)
+    np.testing.assert_array_equal(ds["p7_equals_d38"].values.shape, (4,))
+
+
+def test_wbvars_probe_fields_are_data():
+    """P11: the bvars defaults are stored as arrays (homoskedastic, cSV, ncSV)."""
+    ds = fixture(PROBE_WB)
+    for vol in ("homoskedastic", "cSV", "ncSV"):
+        for field in ("A", "S", "nu", "Psi", "Gamma", "lambda"):
+            assert f"p11_{vol}_prior_{field}" in ds, (vol, field)
+        for field in ("A", "Sigma", "V", "h", "rho", "omega", "sigma2v", "sigma2_omega", "s_"):
+            assert f"p11_{vol}_start_{field}" in ds, (vol, field)
+    assert ds["p11_cSV_prior_A"].shape == (3, 13) and ds["p11_cSV_start_V"].shape == (13, 13)
+    assert ds.attrs["gating_comparison"].startswith("option ")
+
+
+def test_wbvars_p16_draws():
+    """P16 data: the chained draws of h (T = 2), rho, omega, ... for k = 4 runs per volatility."""
+    ds = fixture(PROBE_P16)
+    a = ds.attrs
+    assert a["data_file"] == "data/probe_t2n5.csv" and int(a["lags"]) == 1
+    calls = ds.sizes["iter"]
+    for vol in ("cSV", "ncSV"):
+        h = ds[f"p16_{vol}_h"]
+        assert h.dims == ("run", "iter", "n2") and h.shape == (4, calls, 2)
+        for field in ("h", "rho", "omega", "sigma2_omega", "s_"):
+            assert np.all(np.isfinite(ds[f"p16_{vol}_{field}"].values)), (vol, field)
+        rho = ds[f"p16_{vol}_rho"].values
+        assert np.all(np.abs(rho) < 1.0)
+        assert int(a[f"{vol}_extraction_pass"]) == 1, "chained draws differ from single runs"
+        assert np.asarray(a[f"{vol}_seeds"]).shape == (4,)
+
+
+@pytest.mark.parametrize("name", WB_RUNS)
+def test_wbvars_fixture_layout(name):
+    ds = fixture(name)
+    a = ds.attrs
+    variables, regressors = _regressors("qd3_growth.csv", 4)
+    assert a["kind"] == "wbvars" and a["vol"] == WB_RUNS[name]
+    assert a["data_file"] == "data/qd3_growth.csv" and int(a["lags"]) == 4
+    assert (int(a["chains"]), int(a["draws"]), int(a["burnin"])) == (4, 50_000, 10_000)
+    assert a["call"].startswith("spec <- specify_bvar$new(data = data, p = 4L")
+    assert "burn <- estimate(spec, S = 10000L" in a["call"]
+    assert "post <- estimate(burn, S = 50000L" in a["call"]
+    assert list(ds["regressor"].values) == regressors and list(ds["equation"].values) == variables
+    assert ds["B_q"].shape == (13, 3, 5) and ds["Sigma_q"].shape == (6, 5)
+    assert ds["forecast_q"].shape == (4, 3, 5)
+    np.testing.assert_array_equal(ds["V_sd"].values, 0.0)  # P12: bvars 1.1 does not move V
+    assert int(a["extraction_pass"]) == 1, "chained state runs differ from the main runs"
+
+
+def test_qd3_growth_is_the_transform_of_the_fred_qd_small_set():
+    data = frame("qd3_growth.csv")
+    fresh = generator().generate("qd3_growth")  # deterministic: no random numbers involved
+    assert list(data.columns) == ["date", "dGDPC1", "dGDPCTPI", "FEDFUNDS"]
+    assert list(fresh["date"]) == list(data["date"]) and data["date"].iloc[0] == "1960Q2"
+    np.testing.assert_allclose(
+        fresh.drop(columns="date").to_numpy(), data.drop(columns="date").to_numpy(), rtol=0, atol=1e-12
+    )
+
+
+def test_stochvol_t5_regenerated_with_a_fixed_stochvol():
+    """P2 §2.10 Stage 4 amendment 1: the SV-t fixture comes from stochvol >= 3.2.5 and carries
+    stochvol's answer on the four-observation SV-t problem of SV_PARAMETRIZATION.md §3.2."""
+    a = fixture("stochvol_v_t5").attrs
+    assert tuple(int(x) for x in a["stochvol_version"].split(".")) >= (3, 2, 5)
+    for part in ("mu", "h2", "tau2"):
+        q = np.asarray(a[f"check_4obs_{part}_q"])
+        exact = np.asarray(a[f"check_4obs_exact_{part}_q"])
+        assert q.shape == exact.shape == (5,) and np.all(np.diff(q) > 0)
+    assert "check_4obs_error" not in a

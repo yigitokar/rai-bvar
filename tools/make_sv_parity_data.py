@@ -26,7 +26,9 @@ R side only reads committed numbers (N02 §13.6, N03 §7.4):
 * Phase 3 (docs/phase3/DESIGN.md §9.8, work package WP29): ``probe_gl`` (P8, iid normal,
   ``n = 3``, ``T_eff = 8`` at ``p = 2``), ``probe_t2n5`` (P16, iid normal, ``n = 5``, ``T = 2`` at
   ``p = 1``) and ``qd3_growth``, the FRED-QD small set (``qd_small_levels.csv``) as annualised
-  growth of GDPC1 and GDPCTPI (``4 Δ`` of the 100 × log levels) and FEDFUNDS, for the bvars runs.
+  growth of GDPC1 and GDPCTPI (``4 Δ`` of the 100 × log levels) and FEDFUNDS, for the bvars runs;
+  ``probe_corr3`` (P2 at ``n = 3``: a known unit lower-triangular ``A`` whose ``A``, ``2I − A`` and
+  ``A⁻¹`` differ in the ``(3, 1)`` entry).
 
 Every CSV has a ``date`` column (quarterly periods ending before 2020, so no COVID-sample warning
 fires) and float columns written with ``%.17g`` (R's ``read.csv`` and
@@ -215,6 +217,23 @@ DATASETS: dict[str, Dataset] = {
             "GDP growth, GDP-deflator inflation and the federal funds rate, 1960Q2-2019Q4",
         ),
         Dataset(
+            "probe_corr3",
+            "probe",
+            "1860Q1",
+            20261033,
+            {
+                "n": 3,
+                "T_raw": 601,
+                "intercept": [2.0, -1.0, 1.0],
+                "own_lag": 0.3,
+                "A": [[1.0, 0.0, 0.0], [-0.6, 1.0, 0.0], [0.5, -0.7, 1.0]],
+                "d": [1.0, 0.5, 2.0],
+            },
+            "bayesianVARs probe P2 at n = 3 (Phase 3 DESIGN sec. 9.8, review M10): VAR(1), "
+            "A u_t = e_t with A unit lower triangular, e_t ~ N(0, diag d), T = 600; the (3, 1) "
+            "entries of A, 2I - A and A^-1 differ (0.5, -0.5, -0.08)",
+        ),
+        Dataset(
             "probe_gl",
             "probe",
             "1990Q1",
@@ -353,6 +372,14 @@ def _probe_frame(ds: Dataset) -> pd.DataFrame:
     n, T_raw = g["n"], g["T_raw"]
     if ds.name in ("probe_tiny", "probe_gl", "probe_t2n5"):
         y = rng.standard_normal((T_raw, n))
+    elif ds.name == "probe_corr3":
+        A, d, c = np.asarray(g["A"]), np.asarray(g["d"]), np.asarray(g["intercept"])
+        y = np.zeros((T_raw + 200, n))
+        y[0] = c / (1.0 - g["own_lag"])
+        for t in range(1, y.shape[0]):
+            u = np.linalg.solve(A, np.sqrt(d) * rng.standard_normal(n))  # A u_t = e_t
+            y[t] = c + g["own_lag"] * y[t - 1] + u
+        y = y[-T_raw:]
     elif ds.name == "probe_corr":
         sd, corr = np.asarray(g["sd"]), g["corr"]
         cov = np.outer(sd, sd) * np.array([[1.0, corr], [corr, 1.0]])
