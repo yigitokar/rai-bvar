@@ -15,8 +15,9 @@ read (SPEC §2.1).
 idle.** Another session's DGP-study pilot (12 worker processes near 100% CPU each) and this spike's
 own validation jobs kept the 1-minute load average at 120–195 for every run. Each record and each
 timing row carries `os.getloadavg()`. Wall times are therefore upper bounds. The cost table (§4)
-compares the two samplers by process CPU time, measured the same way for both. CPU time is less
-sensitive to the load than wall time, but cache and memory-bandwidth contention still affect it.
+compares the two samplers with both arms timed the same way, by minimum wall time and by process
+CPU time. Neither measure is load-invariant: at lower load XLA uses more threads, so the CPU time
+rises while the wall time falls (§4).
 
 ---
 
@@ -61,7 +62,7 @@ None of these blocks Phase 4.
 | 1. Swap the residual target and `1/λ_{i,t}` into `State` each sweep, in a jitted loop, correctly across releases? Public setter? | **Yes, with a caveat on churn.** `set_data` rewrites 13 fields and rebuilds the incremental per-leaf precision cache. It is bitwise equal to `init` (all written fields, and one `step` afterwards), and it reproduces bartz's own caches on grown forests. It is unchanged and exact on 0.12.0, 0.12.1, 0.13.0 and `main`. There is no public setter; `main` adds a private `rebuild_derived` that covers most of it | §Q1 |
 | 2. Does the float32 leaf step pass Geweke and SBC at realistic T and volatility ranges? | **Yes, but only with bartz traced under x64 off** (or with a 2-line patch; both pass). Geweke G-small passes for every row at T = 50–400 (n = 1–3, p = 1–2), including a wide-volatility prior and path (b), and G-full passes at T = 200; two mutants are caught. **SBC still running** when the PR opened (§Q2.3) | §Q2 |
 | 3. Is a fixed error precision (`Wishart(value=...)`) the right hook to leave volatility to the SV block? | **Yes.** `step` skips the σ update exactly when `error_cov_inv.nu is None`, and the per-observation weights are then the exact leaf-likelihood precisions (verified against the exact conditional). But `init` refuses that `Wishart` for continuous outcomes, so the adapter swaps it in after `init` | §Q3 |
-| Cost per sweep at n = 3–7, T = 200–400, 200 trees | 12–36 ms CPU per sweep (one chain), 15–19× `Linear × SV` in CPU time; the bartz tree loop dominates, `set_data` adds 6–10%. Measured under a load average of 130–150; a quiet re-run is open (§5.1a) | §4 |
+| Cost per sweep at n = 3–7, T = 200–400, 200 trees | 6.5–19 ms per sweep on one chain (minimum wall time, load 37–49), **13–17× `Linear × SV`** timed the same way (14–29× across the other measures and loads). The bartz tree loop dominates; `set_data` adds 3–10%; `vmap` gives no CPU parallelism. An idle-machine re-run is open (§5.1a) | §4 |
 
 ---
 
@@ -358,10 +359,24 @@ the residual storage. Two consequences follow:
 `benchmarks/phase4_bart_spike_cost.py`. Setup: 200 trees of depth ≤ 6, p = 4 (so `n·p` = 12–28
 covariates), 31 cutpoints, path (a), one chain. Each figure is the production sweep timed after
 50 warm-up sweeps, as the median of 7 timings of a jitted 20-sweep `lax.scan`. `Linear × SV` is
-the production `structural_sv` sweep at the same `n`, `p` and `T`. **Measured under a load
-average of 130–150** (see the machine note), so compare like with like:
-- CPU against CPU (process time, the load-robust measure);
-- minimum wall time against minimum wall time.
+the production `structural_sv` sweep at the same `n`, `p` and `T`. Both arms are timed the same
+way in every row. Compare like with like: minimum wall time against minimum wall time, and CPU
+time against CPU time.
+
+**Table A: lower load** (load average 37–49, during a gap between the DGP pilot and the full DGP
+study; still not idle):
+
+| n | T | BART × SV wall ms (min) | BART × SV wall ms (median) | BART × SV CPU ms | Linear × SV wall ms (min) | Linear × SV wall ms (median) | Linear × SV CPU ms | ratio wall (min) | ratio CPU | bartz step, one equation, wall ms (min) | `set_data`, one equation, wall ms (min) | load |
+| -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: |
+| 3 | 200 | 6.5 | 8.1 | 15.0 | 0.43 | 0.58 | 0.76 | 15× | 20× | 2.07 | 0.09 | 45 |
+| 3 | 400 | 10.3 | 11.0 | 23.2 | 0.62 | 0.71 | 1.04 | 17× | 22× | 2.95 | 0.11 | 43 |
+| 5 | 200 | 9.7 | 10.5 | 20.5 | 0.61 | 0.84 | 0.91 | 16× | 23× | 1.96 | 0.08 | 49 |
+| 5 | 400 | 13.4 | 14.2 | 33.7 | 0.98 | 1.11 | 1.81 | 14× | 19× | 2.69 | 0.10 | 41 |
+| 7 | 200 | 11.9 | 13.6 | 28.1 | 0.90 | 0.97 | 1.51 | 13× | 19× | 2.27 | 0.08 | 40 |
+| 7 | 400 | 19.3 | 25.3 | 45.2 | 1.42 | 1.90 | 2.48 | 14× | 18× | 3.23 | 0.22 | 43 |
+
+**Table B: heavy load** (load average 130–150, the DGP pilot running), with the path-(b) and
+4-chain columns:
 
 | n | T | BART × SV CPU ms | BART × SV wall ms (min) | Linear × SV CPU ms | Linear × SV wall ms (min) | ratio CPU | ratio wall (min) | bartz step, one equation, CPU ms | `set_data`, one equation, CPU ms | path (b) BART × SV CPU ms | 4 chains BART × SV CPU ms | 4 chains Linear × SV CPU ms | compile s | load |
 | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: | -: |
@@ -372,24 +387,26 @@ average of 130–150** (see the machine note), so compare like with like:
 | 7 | 200 | 23.7 | 16.8 | 1.48 | 0.92 | 16× | 18× | 3.9 | 0.30 | 22.0 | 93 | 3.9 | 7 | 136 |
 | 7 | 400 | 36.2 | 25.3 | 2.52 | 1.32 | 14× | 19× | 5.5 | 0.31 | 33.9 | 160 | 6.4 | 6 | 139 |
 
-What the table says:
+What the tables say:
 
-- **BART × SV costs 15–19× `Linear × SV` per sweep** in CPU time at these sizes: 12–36 ms against
-  0.8–2.5 ms. The cost is almost all bartz's step. Its accept/reject stage is a `lax.scan` over the
-  200 trees that cannot be parallelised across trees, so the cost per equation depends only weakly
-  on `T` (2–3 ms wall, 4–6.5 ms CPU for one equation alone: bartz's step uses about two threads).
-- **The adapter is cheap**: `set_data` is 0.3–0.4 ms CPU per equation, 6–10% of the step,
-  including the re-traversal that production could skip when `X` is unchanged.
+- **BART × SV costs 13–17× `Linear × SV` per sweep on minimum wall time** at lower load: 6.5–19 ms
+  against 0.4–1.4 ms. Under heavy load it is 16–29×, and on CPU time 14–23× under either load.
+- **The cost is almost all bartz's step.** Its accept/reject stage is a `lax.scan` over the 200
+  trees that cannot be parallelised across trees. So the cost per equation depends only weakly on
+  `T`: about 2–3 ms of wall time for one equation alone.
+- **The adapter is cheap**: `set_data` is 0.08–0.2 ms wall (0.2–0.4 ms CPU) per equation, 3–10%
+  of the step, including the re-traversal that production could skip when `X` is unchanged.
 - **Path (b) costs the same as path (a)**: within 10%, inside the noise.
 - **`vmap` does not parallelise on the CPU.** Under `vmap` the sweep's CPU time is about `n` × the
   per-equation step. Four chains under `vmap` cost 3.3–4.4× one chain. More cores need more XLA CPU
   devices (one chain per device, `rai_bvar.set_cpu_devices`), which BENCH-P2 already supports for
   chains.
 
-**What a fit costs**, from the CPU column. At n = 7, T = 400, 4 chains × (1,000 burn-in + 10,000
-kept) sweeps is about 4 × 11,000 × 36 ms ≈ 26 min of single-core CPU: about 7 min of wall time on
-4 CPU devices if the per-device cost holds. `Linear × SV` at the same size takes about 2 min of CPU.
-A backtest of 100 origins at that budget is therefore of the order of 10–40 h on this laptop. That
+**What a fit costs**, from Table A. At n = 7, T = 400, 4 chains × (1,000 burn-in + 10,000 kept)
+sweeps is about 4 × 11,000 × 19 ms ≈ 14 min of wall time on one device (`vmap` gives no saving).
+That is about 3.5 min on 4 CPU devices if the per-device cost holds, against about 1 min for
+`Linear × SV` on one device. A backtest of 100 origins at that budget is of the order of 6–24 h
+on this laptop. That
 argues for a smaller kept-draw budget in BART backtests than the SV default of D-35, and for GPU
 runs, which bartz is built for. It is a scheduling cost, not a reason against bartz: an
 in-house BART would have the same sequential tree loop.
@@ -437,10 +454,10 @@ is not needed). Neither gives parallelism across equations on one XLA CPU device
 
 ### 5.1a Open items of the spike itself
 
-- **Re-run the single-chain cost table on a quiet machine**, after the DGP study (12 workers,
+- **Re-run the single-chain cost table on an idle machine**, after the DGP study (12 workers,
   about 10 h) ends, with both arms timed the same way:
-  `uv run python benchmarks/phase4_bart_spike_cost.py --chains 1 --out <file>`. The table in §4 was
-  measured under a load average of 130–150 and is labelled as such.
+  `uv run python benchmarks/phase4_bart_spike_cost.py --chains 1 --out <file>`. §4 has the table at
+  load averages of 37–49 (Table A) and 130–150 (Table B), each labelled.
 
 ### 5.2 Upstream requests (drafts; not filed, since filing is the owner's call)
 
