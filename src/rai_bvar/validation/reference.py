@@ -37,6 +37,30 @@ Conventions
   :class:`PriorTails` summarises (:func:`prior_tails`, host side). No test function reads a padded
   state: the kernel's padded states are decoupled dummies whose law differs from these ``N(0, 1)``
   ones (DESIGN §3.7.4: ``h′ = μ + σx̃′``, then moved by the C and NC steps).
+
+Phase 3 (``docs/phase3/DESIGN.md`` §9.1, WP30; written from that document only, by an author who
+wrote no Phase 3 kernel)
+----------------------------------------------------------------------------------------------
+* **Global-local and SSVS priors** (P3 §3.1–§3.2, D-36…D-39, D-44): kinds ``horseshoe``,
+  ``normal_gamma``, ``r2d2``, ``dirichlet_laplace``, ``ssvs``. They govern the **deviations**
+  ``d_j = coefficient − m_j`` of the lag slots (``CoefPriorArrays.gl.mask``), ``d_j | v_j ~
+  N(0, r_j v_j)`` (SSVS: ``N(0, τ²_{γ_j, j})``); deterministic slots keep ``N(m, 1/prec0)``.
+  Samplers draw every scale in log space (``log x = LG(α) − log β`` for a gamma with rate ``β``,
+  ``log β − LG(α)`` for an inverse gamma with scale ``β``) and the deviations as
+  ``log|d| = ½ log(r v) + log|z|``. Densities are those of the **prior definitions** of P3 §3.2
+  (never the full conditionals), w.r.t. Lebesgue measure on the natural scales (HS ``ϑ, ν, ζ, τ``;
+  NG ``ϖ, ξ``; R2D2 ``ϱ, ϖ, ξ``; DL ``θ̃, ϱ``; SSVS ``p``; the state stores their logs) and on
+  the coefficients, with counting measure on the grid index ``a_idx`` and on ``γ``. The deviation
+  density is evaluated from ``ℓ = dev_log`` (P3 §3.1: ``d²/(r v) = exp(2ℓ − log r − log v)``).
+  Their per-equation ``Reference`` methods raise: the scales couple equations through the groups,
+  so :mod:`validation.simulate` and :mod:`validation.log_joint` call the family API of
+  :class:`GLReference` on the whole state.
+* **CommonSV** (P3 §5.1, D-46): ``constant_common`` (Constant cores whose log variance gains the
+  common ``h_t``; the ``λ_i`` prior is the Constant one, Mode I or coupled) and ``common_sv``
+  (``glob.vol``: ``h_0 ~ N(0, σ_h²/(1 − ρ²))`` at the first data row, ``h_t = ρh_{t−1} + σ_hη_t``
+  for ``1 ≤ t < T_eff``, ``h_t = 0`` for ``t ≥ T_eff``; ``ρ ~ N(ρ₀, V_ρ)·1(|ρ| < 1)`` or
+  ``(ρ+1)/2 ~ Beta(a, b)``; ``σ_h² ~ IG(c₀, C₀)`` or ``B·χ²₁``). Its density is w.r.t. ``h``, ``ρ``
+  and ``σ_h > 0`` (the state stores ``log σ_h``; the prior is stated on ``σ_h²``, as for SV's σ).
 """
 
 from __future__ import annotations
@@ -50,20 +74,35 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import random
-from jax.scipy.special import gammaln, logsumexp
+from jax.scipy.special import gammaln, logsumexp, ndtr
 
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (float64 before any computation)
 from rai_bvar.engines.mcmc.config import StaticConfig
 from rai_bvar.engines.mcmc.state import (
     CCCMGlobal,
+    CoefPriorArrays,
+    CommonSVGlobal,
+    CommonSVPrior,
     ConstantEq,
+    DLEq,
+    DLGlobal,
     Empty,
     EqPrior,
+    GLArrays,
+    GLShared,
+    HSEq,
+    HSGlobal,
     LinearEq,
+    NGEq,
+    NGGlobal,
     OutlierEq,
     OutlierTEq,
     PriorArrays,
+    R2D2Eq,
+    R2D2Global,
     RecursiveEq,
+    SSVSEq,
+    SSVSGlobal,
     SVEq,
     SVRWEq,
     TEq,
@@ -267,11 +306,17 @@ class PriorTails:
     ``E[(σ²)^k] < ∞`` iff ``k < sigma2`` (``c₀`` under ``inv_gamma``, ``∞`` under scaled χ²);
     ``E[h_t^{2k}] < ∞`` iff ``k < h2``. A λ-scaled coefficient ``x = m + √λ·s·z`` has
     ``E[x^{2k}] < ∞`` iff ``k < lam``. The default (all 0) assumes nothing: every prior-dependent
-    function is then flagged infinite."""
+    function is then flagged infinite.
+
+    Phase 3: ``coef`` is the tail index of the deviations of a varying (global-local or SSVS)
+    coefficient prior, ``E|d_j|^k < ∞`` iff ``k < coef`` (HS 1; NG and R2D2 ``2b``; DL and SSVS
+    ``∞``); it is 0 and never read for a fixed prior. Under CommonSV ``sigma2`` and ``h2`` describe
+    ``σ_h²`` and the common ``h``."""
 
     lam: float = 0.0
     sigma2: float = 0.0
     h2: float = 0.0
+    coef: float = 0.0
 
 
 _NO_TAILS = PriorTails()
@@ -293,16 +338,72 @@ def prior_tails(static: StaticConfig, prior: PriorArrays) -> PriorTails:
     (``inv_gamma``) or ``∞``; stationary ``h_t | θ ~ N(μ, σ²/(1 − φ²))`` and
     ``E[(1 − φ²)^{−k}] = E[(4u(1 − u))^{−k}] < ∞`` iff ``k < min(a_φ, b_φ)``, so
     ``h2 = min(sigma2, a_φ, b_φ)``; fixed ``B₀`` and random walk: ``Var(h_t | θ) ≤ σ²(B₀ + t)``
-    (or ``V₀ + tσ²``), so ``h2 = sigma2``."""
+    (or ``V₀ + tσ²``), so ``h2 = sigma2``.
+
+    Phase 3. CommonSV: ``sigma2`` from the ``σ_h²`` prior; the stationary ``h_t | ρ, σ_h ~
+    N(0, σ_h²/(1 − ρ²))`` has ``E h^{2k} < ∞`` iff ``k < sigma2`` and ``E[(1 − ρ²)^{−k}] < ∞``: under
+    ``(ρ+1)/2 ~ Beta(a, b)`` iff ``k < min(a, b)``; under the truncated normal, whose density is
+    positive at ``ρ = ±1``, iff ``k < 1``. Varying coefficient priors: ``coef`` (class docstring)."""
     core, vol = prior.eq.vol_core, static.vol
+    coef = _coef_tail(static, prior)
     if vol.persistent == "constant":
-        return PriorTails(lam=_host_min(core.shape, "shape"), sigma2=math.inf, h2=math.inf)
+        lam = _host_min(core.shape, "shape")
+        if vol.common:
+            sigma2, h2 = _common_tails(static, prior.shared.csv)
+            return PriorTails(lam=lam, sigma2=sigma2, h2=h2, coef=coef)
+        return PriorTails(lam=lam, sigma2=math.inf, h2=math.inf, coef=coef)
     sigma2 = math.inf if vol.sigma2_prior == "scaled_chi2" else _host_min(core.c0, "c0")
     if vol.rw or vol.h0 == "fixed_b0":
         h2 = sigma2
     else:
         h2 = min(sigma2, _host_min(core.a_phi, "a_phi"), _host_min(core.b_phi, "b_phi"))
-    return PriorTails(lam=math.inf, sigma2=sigma2, h2=h2)
+    return PriorTails(lam=math.inf, sigma2=sigma2, h2=h2, coef=coef)
+
+
+def _coef_tail(static: StaticConfig, prior: PriorArrays) -> float:
+    """Tail index of the GL deviations (``PriorTails.coef``; 0 for a fixed prior). HS: ``√ϑ`` and
+    ``√ζ`` are half-Cauchy, so ``E|d|^k < ∞`` iff ``k < 1``. NG: ``v = ϑζ`` with ``ζ⁻¹ ~ G(b, c)``;
+    R2D2: ``v = ϱϖ/2`` with ``ϖ | ξ ~ G(a, ξ)``, ``ξ ~ G(b, 1)``; in both ``E v^m < ∞`` iff
+    ``m < b``, so ``k < 2b``. DL (gamma and exponential mixing) and SSVS (two normals): every moment."""
+    kind = static.coef.kind
+    if not static.coef.varies:
+        return 0.0
+    if kind == "horseshoe":
+        return 1.0
+    if kind in ("normal_gamma", "r2d2"):
+        return 2.0 * _host_min(prior.shared.gl.b, "b")
+    return math.inf
+
+
+def _common_tails(static: StaticConfig, csv: CommonSVPrior) -> tuple[float, float]:
+    """``(sigma2, h2)`` of the CommonSV prior (:func:`prior_tails`)."""
+    vol = static.vol
+    if vol.csv_sigma2_prior == "scaled_chi2":
+        sigma2 = math.inf
+    else:
+        sigma2 = _host_min(csv.s2_shape, "s2_shape")
+    if vol.csv_rho_prior == "beta":
+        rho = min(_host_min(csv.rho_a, "rho_a"), _host_min(csv.rho_b, "rho_b"))
+    else:
+        rho = 1.0
+    return sigma2, min(sigma2, rho)
+
+
+def _ok(heavy: bool, tails: PriorTails, k: float) -> bool:
+    """Finite-variance flag of a test function whose variance needs ``E|d|^k < ∞`` when it reads
+    a GL deviation (``heavy``); ``True`` otherwise (P3)."""
+    return (not heavy) or tails.coef > k
+
+
+def _fixed_prior_only(static: StaticConfig, kind: str) -> None:
+    """The Phase 2 mean references draw and score the coefficients from the fixed moments; under
+    a varying (GL) prior the coefficients belong to :class:`GLReference` (P3 §3.1)."""
+    if static.coef.varies:
+        raise ValueError(
+            f"the {kind!r} reference uses the fixed coefficient moments; under the varying "
+            f"{static.coef.kind!r} prior use validation.simulate.prior_sample / "
+            "validation.log_joint.log_prior (GLReference)"
+        )
 
 
 def _t_eff(tmask: Array) -> Array:
@@ -500,21 +601,38 @@ class LinearStructuralRef(_Base):
         return var * jnp.exp(log_scale) if static.mean.coef_scaling == "lambda" else var
 
     def prior_sample_eq(self, key, i, prior_i, static, tmask, T_eff, *, log_scale=0.0):
+        _fixed_prior_only(static, "linear_structural")
         cp = prior_i.coef
         z = _normal(key, cp.mean0.shape)
         return LinearEq(delta=cp.mean0 + jnp.sqrt(self._var(prior_i, static, log_scale)) * z)
 
     def log_prior_eq(self, part, prior_i, static, tmask, *, log_scale=0.0):
+        _fixed_prior_only(static, "linear_structural")
         var = self._var(prior_i, static, log_scale)
         return jnp.sum(log_normal(part.delta, prior_i.coef.mean0, var))
 
     def test_functions_eq(self, part, tmask, *, i=None, tails=_NO_TAILS):
         scaled = self._scaled("coef")  # Mode II: δ − m = √λ·s·z
+        gl = self._gl_lags()  # P3: lag slots carry the GL deviations' tails
         out: TestFns = {}
         for r in range(part.delta.shape[-1]):
-            out[f"delta{r}"] = (part.delta[r], not scaled or tails.lam > 1.0)
-            out[f"delta{r}^2"] = (part.delta[r] ** 2, not scaled or tails.lam > 2.0)
+            heavy = r >= gl
+            out[f"delta{r}"] = (
+                part.delta[r],
+                (not scaled or tails.lam > 1.0) and _ok(heavy, tails, 2),
+            )
+            out[f"delta{r}^2"] = (
+                part.delta[r] ** 2,
+                (not scaled or tails.lam > 2.0) and _ok(heavy, tails, 4),
+            )
         return out
+
+    def _gl_lags(self) -> int:
+        """First GL slot (``n_det``) under a varying coefficient prior, else past every slot."""
+        st = self._static
+        if st is None or not st.coef.varies:
+            return 1 << 30
+        return st.shapes.n_det
 
 
 @register_reference("linear_reduced")
@@ -524,6 +642,7 @@ class LinearReducedRef(_Base):
     each ``π_j`` is conditioned on its rows (``validation.dummies``)."""
 
     def prior_sample_global(self, key, prior, static):
+        _fixed_prior_only(static, "linear_reduced")
         if static.mean.n_dummy:  # π_j conditioned on the SOC/SUR rows (WP25; N04 §3.1)
             return reduced_dummy_prior_sample(key, prior)
         cp = prior.eq.coef
@@ -531,6 +650,7 @@ class LinearReducedRef(_Base):
         return CCCMGlobal(Pi=(cp.mean0 + jnp.sqrt(1.0 / cp.prec0) * z).T)
 
     def log_prior_global(self, part, prior, static):
+        _fixed_prior_only(static, "linear_reduced")
         cp = prior.eq.coef
         out = jnp.sum(log_normal(part.Pi.T, cp.mean0, 1.0 / cp.prec0))
         if static.mean.n_dummy:  # + log p(d | Π) − log p(d) (Bayes' rule; WP25)
@@ -540,15 +660,19 @@ class LinearReducedRef(_Base):
     def test_functions_global(self, part, *, tails=_NO_TAILS):
         Pi = part.Pi  # Gaussian prior, never λ-scaled (CCCM 2022): every moment finite
         k, n = Pi.shape
+        st = self._static  # P3: lag rows of Π carry the GL deviations' tails
+        gl = st.shapes.n_det if st is not None and st.coef.varies else k
         out: TestFns = {}
         for j in range(n):
             for r in range(k):
-                out[f"Pi[{r},{j}]"] = (Pi[r, j], True)
-                out[f"Pi[{r},{j}]^2"] = (Pi[r, j] ** 2, True)
+                out[f"Pi[{r},{j}]"] = (Pi[r, j], _ok(r >= gl, tails, 2))
+                out[f"Pi[{r},{j}]^2"] = (Pi[r, j] ** 2, _ok(r >= gl, tails, 4))
         for j1 in range(n):  # cross-equation products π_{l,j1}·π_{l,j2} (DESIGN §9.5)
             for j2 in range(j1 + 1, n):
                 for r in range(k):
-                    out[f"Pi[{r},{j1}]*Pi[{r},{j2}]"] = (Pi[r, j1] * Pi[r, j2], True)
+                    # GL: the two share group scales, so E[π₁²π₂²] needs E v² < ∞ (coef > 4)
+                    fin = _ok(r >= gl, tails, 4)
+                    out[f"Pi[{r},{j1}]*Pi[{r},{j2}]"] = (Pi[r, j1] * Pi[r, j2], fin)
         return out
 
 
@@ -837,6 +961,753 @@ class OutlierTRef(_Base):
         return out
 
 
+# --------------------------------------------------------------------------- P3: GL priors
+
+LOG_2 = math.log(2.0)
+
+
+def log_gamma_from_logs(log_x: Array, shape: Array, log_rate: Array) -> Array:
+    """``log G(x; shape, rate)`` at ``x = exp(log_x)`` (density of ``x``), rate given in logs."""
+    return shape * log_rate - gammaln(shape) + (shape - 1.0) * log_x - jnp.exp(log_rate + log_x)
+
+
+def log_inv_gamma_from_logs(log_x: Array, shape: Array, log_scale: Array) -> Array:
+    """``log IG(x; shape, scale)`` at ``x = exp(log_x)`` (density of ``x``), scale given in logs."""
+    return shape * log_scale - gammaln(shape) - (shape + 1.0) * log_x - jnp.exp(log_scale - log_x)
+
+
+def _on(mask: Array, x: Array) -> Array:
+    """``x`` on the GL slots, exactly 0 elsewhere (P3 §2.2 invariant)."""
+    return jnp.where(mask > 0, x, jnp.zeros_like(x))
+
+
+def _full(shape: tuple[int, ...], value: float) -> Array:
+    return jnp.full(shape, value, _F64)
+
+
+def a_values(a_idx: Array, gl: GLShared, static: StaticConfig) -> Array:
+    """``a_g`` per group: the grid point ``a_support[a_idx]`` (``CoefPriorStatic.a_grid > 0``) or
+    the fixed ``exp(log_a_fixed)``."""
+    if static.coef.a_grid:
+        return gl.a_support[a_idx]
+    return jnp.broadcast_to(jnp.exp(gl.log_a_fixed), a_idx.shape)
+
+
+def _a_log_prior(a_idx: Array, gl: GLShared, static: StaticConfig) -> Array:
+    """``Σ_g log π(a_g)`` of the discrete grid hyperprior (normalised log weights); 0 for a fixed
+    ``a``. Counting measure on the index."""
+    if not static.coef.a_grid:
+        return jnp.zeros((), _F64)
+    return jnp.sum(gl.a_logw[a_idx] - logsumexp(gl.a_logw))
+
+
+def _sample_a_idx(key: Array, gl: GLShared, static: StaticConfig) -> Array:
+    G = static.coef.n_groups
+    if not static.coef.a_grid:
+        return jnp.zeros((G,), jnp.int32)
+    return random.categorical(key, gl.a_logw, shape=(G,)).astype(jnp.int32)
+
+
+def _segment_sum(x: Array, arr: GLArrays, G: int) -> Array:
+    """``Σ_{j ∈ g} x_j`` over the GL slots of every equation (``x`` of shape ``(n, k)``)."""
+    vals = jnp.where(arr.mask > 0, x, 0.0).reshape(-1)
+    return jax.ops.segment_sum(vals, arr.group.reshape(-1), num_segments=G)
+
+
+class GLReference(_Base):
+    """Base of the global-local and SSVS references (P3 §3.2; module docstring).
+
+    Family API, written elementwise so that it serves one equation (leaves of shape ``(k,)``,
+    under ``vmap``) or every equation (``(n, k)``); ``arr`` is ``CoefPriorArrays.gl`` (or its
+    equation slice), ``gl`` is ``SharedPrior.gl`` and ``glob`` the ``GlobalState.coef`` part:
+
+    * :meth:`sample_global` / :meth:`sample_local`: the group-level and local scales;
+    * :meth:`log_kernel_var`: ``log(r_j v_j)`` (SSVS ``2 log τ_{γ_j, j}``), 0 off the GL slots;
+    * :meth:`local_log_density` (elementwise, 0 off the GL slots) and :meth:`global_log_density`;
+    * :meth:`local_logs` (the local log scales for the test functions) and
+      :meth:`group_functions` (group-level test functions, all finite: logs of gamma or inverse
+      gamma variables, bounded indices and counts).
+    """
+
+    local_names: ClassVar[tuple[str, ...]] = ()
+
+    # ---- Reference protocol: the per-equation methods cannot see the group scales
+    def prior_sample_eq(self, key, i, prior_i, static, tmask, T_eff, *, log_scale=0.0):
+        raise TypeError(
+            f"the {self.kind!r} reference draws local scales given the group scales: use "
+            "sample_local (validation.simulate.prior_sample composes it)"
+        )
+
+    def log_prior_eq(self, part, prior_i, static, tmask, *, log_scale=0.0):
+        raise TypeError(
+            f"the {self.kind!r} reference scores the scales jointly: use local_log_density / "
+            "global_log_density (validation.log_joint.log_prior composes them)"
+        )
+
+    def prior_sample_global(self, key, prior, static):
+        return self.sample_global(key, prior.shared.gl, static)
+
+    def log_prior_global(self, part, prior, static):
+        return self.global_log_density(part, prior.shared.gl, static)
+
+    # ---- family API (overridden)
+    def sample_global(self, key: Array, gl: GLShared, static: StaticConfig) -> PyTree:
+        raise NotImplementedError
+
+    def sample_local(
+        self, key: Array, arr: GLArrays, glob: PyTree, gl: GLShared, static: StaticConfig
+    ) -> PyTree:
+        raise NotImplementedError
+
+    def log_kernel_var(
+        self, part: PyTree, arr: GLArrays, glob: PyTree, gl: GLShared, static: StaticConfig
+    ) -> Array:
+        raise NotImplementedError
+
+    def local_log_density(
+        self, part: PyTree, arr: GLArrays, glob: PyTree, gl: GLShared, static: StaticConfig
+    ) -> Array:
+        raise NotImplementedError
+
+    def global_log_density(self, glob: PyTree, gl: GLShared, static: StaticConfig) -> Array:
+        raise NotImplementedError
+
+    def local_logs(self, part: PyTree) -> dict[str, Array]:
+        return {name: getattr(part, name) for name in self.local_names}
+
+    def group_functions(
+        self, part: PyTree, glob: PyTree, arr: GLArrays, gl: GLShared, static: StaticConfig
+    ) -> TestFns:
+        return {}
+
+    def _mean_log_v(self, part, glob, arr, gl, static) -> TestFns:
+        """``mean_{j∈g} log v_j`` (``v`` without ``r``): a group summary of every local scale."""
+        G = static.coef.n_groups
+        log_v = self.log_kernel_var(part, arr, glob, gl, static) - arr.log_r
+        tot = _segment_sum(log_v, arr, G) / _segment_sum(jnp.ones_like(log_v), arr, G)
+        return {f"mean_log_v[{g}]": (tot[g], True) for g in range(G)}
+
+
+@register_reference("horseshoe")
+class HorseshoeRef(GLReference):
+    """Horseshoe (Carvalho, Polson & Scott 2010) in the auxiliary form of Makalic & Schmidt (2016),
+    P3 §3.2: ``v_j = ϑ_j ζ_g``, ``ϑ_j | ν_j ~ IG(½, 1/ν_j)``, ``ν_j ~ IG(½, 1)``,
+    ``ζ_g | τ_g ~ IG(½, 1/τ_g)``, ``τ_g ~ IG(½, 1/s²)`` (``s = global_scale``), i.e.
+    ``√ϑ_j ~ C⁺(0, 1)`` and ``√ζ_g ~ C⁺(0, s)``."""
+
+    local_names = ("log_theta", "log_nu")
+
+    def sample_global(self, key, gl, static):
+        G = static.coef.n_groups
+        log_tau = -2.0 * jnp.log(gl.global_scale) - _log_gamma(
+            random.fold_in(key, 0), _full((G,), 0.5)
+        )
+        log_zeta = -log_tau - _log_gamma(random.fold_in(key, 1), _full((G,), 0.5))
+        return HSGlobal(log_zeta=log_zeta, log_tau=log_tau)
+
+    def sample_local(self, key, arr, glob, gl, static):
+        shape = arr.mask.shape
+        log_nu = -_log_gamma(random.fold_in(key, 0), _full(shape, 0.5))
+        log_theta = -log_nu - _log_gamma(random.fold_in(key, 1), _full(shape, 0.5))
+        return HSEq(log_theta=_on(arr.mask, log_theta), log_nu=_on(arr.mask, log_nu))
+
+    def log_kernel_var(self, part, arr, glob, gl, static):
+        return _on(arr.mask, arr.log_r + part.log_theta + glob.log_zeta[arr.group])
+
+    def local_log_density(self, part, arr, glob, gl, static):
+        lp = log_inv_gamma_from_logs(part.log_nu, 0.5, 0.0) + log_inv_gamma_from_logs(
+            part.log_theta, 0.5, -part.log_nu
+        )
+        return _on(arr.mask, lp)
+
+    def global_log_density(self, glob, gl, static):
+        lp = log_inv_gamma_from_logs(glob.log_zeta, 0.5, -glob.log_tau)
+        lp = lp + log_inv_gamma_from_logs(glob.log_tau, 0.5, -2.0 * jnp.log(gl.global_scale))
+        return jnp.sum(lp)
+
+    def group_functions(self, part, glob, arr, gl, static):
+        G = static.coef.n_groups
+        out: TestFns = {}
+        for g in range(G):
+            out[f"log_zeta[{g}]"] = (glob.log_zeta[g], True)
+            out[f"log_tau[{g}]"] = (glob.log_tau[g], True)
+        out.update(self._mean_log_v(part, glob, arr, gl, static))
+        return out
+
+
+def _ng_log_rate(a: Array, gl: GLShared) -> Array:
+    """``log(2c/a)``, the log rate of ``ξ_g ~ G(b, 2c/a_g)``; 0 when ``c`` is tied to ``a/2``
+    (encoded ``c < 0``, ``GLShared`` docstring)."""
+    tied = gl.c < 0
+    log_c = jnp.log(jnp.where(tied, 1.0, gl.c))
+    return jnp.where(tied, 0.0, LOG_2 + log_c - jnp.log(a))
+
+
+@register_reference("normal_gamma")
+class NormalGammaRef(GLReference):
+    """Normal-Gamma (Griffin & Brown 2010; GK's parametrisation), P3 §3.2: ``ϑ_j ~ G(a_g, a_g/2)``,
+    ``ζ_g⁻¹ ~ G(b, c)``, ``v_j = ϑ_j ζ_g``, written as ``ϖ_j = v_j | ξ_g ~ G(a_g, ξ_g)`` with the
+    rate ``ξ_g = a_g/(2ζ_g) ~ G(b, 2c/a_g)``; ``a_g`` fixed or on the discrete grid."""
+
+    local_names = ("log_w",)
+
+    def sample_global(self, key, gl, static):
+        a_idx = _sample_a_idx(random.fold_in(key, 0), gl, static)
+        a = a_values(a_idx, gl, static)
+        lg = _log_gamma(random.fold_in(key, 1), jnp.broadcast_to(gl.b, a.shape))
+        return NGGlobal(log_xi=lg - _ng_log_rate(a, gl), a_idx=a_idx)
+
+    def sample_local(self, key, arr, glob, gl, static):
+        a = a_values(glob.a_idx, gl, static)[arr.group]
+        log_w = _log_gamma(key, a) - glob.log_xi[arr.group]
+        return NGEq(log_w=_on(arr.mask, log_w))
+
+    def log_kernel_var(self, part, arr, glob, gl, static):
+        return _on(arr.mask, arr.log_r + part.log_w)
+
+    def local_log_density(self, part, arr, glob, gl, static):
+        a = a_values(glob.a_idx, gl, static)[arr.group]
+        return _on(arr.mask, log_gamma_from_logs(part.log_w, a, glob.log_xi[arr.group]))
+
+    def global_log_density(self, glob, gl, static):
+        a = a_values(glob.a_idx, gl, static)
+        lp = log_gamma_from_logs(glob.log_xi, gl.b, _ng_log_rate(a, gl))
+        return jnp.sum(lp) + _a_log_prior(glob.a_idx, gl, static)
+
+    def group_functions(self, part, glob, arr, gl, static):
+        return _xi_group_functions(self, part, glob, arr, gl, static)
+
+
+def _xi_group_functions(ref, part, glob, arr, gl, static) -> TestFns:
+    """NG and R2D2: ``log ξ_g``; with a grid also ``a_idx_g`` and the joint ``a_g·log ξ_g`` (M35)."""
+    G = static.coef.n_groups
+    out: TestFns = {}
+    a = a_values(glob.a_idx, gl, static)
+    for g in range(G):
+        out[f"log_xi[{g}]"] = (glob.log_xi[g], True)
+        if static.coef.a_grid:
+            out[f"a_idx[{g}]"] = (glob.a_idx[g].astype(_F64), True)
+            out[f"a*log_xi[{g}]"] = (a[g] * glob.log_xi[g], True)
+    out.update(ref._mean_log_v(part, glob, arr, gl, static))
+    return out
+
+
+@register_reference("r2d2")
+class R2D2Ref(GLReference):
+    """R2D2 (Zhang, Naughton, Bondell & Reich 2022; GK's gamma form), P3 §3.2:
+    ``v_j = ϱ_j ϖ_j/2``, ``ϱ_j ~ Exp(½)``, ``ϖ_j | ξ_g ~ G(a_g, ξ_g)``, ``ξ_g ~ G(b, 1)``."""
+
+    local_names = ("log_varrho", "log_w")
+
+    def sample_global(self, key, gl, static):
+        a_idx = _sample_a_idx(random.fold_in(key, 0), gl, static)
+        G = static.coef.n_groups
+        log_xi = _log_gamma(random.fold_in(key, 1), jnp.broadcast_to(gl.b, (G,)))
+        return R2D2Global(log_xi=log_xi, a_idx=a_idx)
+
+    def sample_local(self, key, arr, glob, gl, static):
+        shape = arr.mask.shape
+        a = a_values(glob.a_idx, gl, static)[arr.group]
+        log_w = _log_gamma(random.fold_in(key, 0), a) - glob.log_xi[arr.group]
+        log_varrho = _log_gamma(random.fold_in(key, 1), _full(shape, 1.0)) + LOG_2  # rate ½
+        return R2D2Eq(log_varrho=_on(arr.mask, log_varrho), log_w=_on(arr.mask, log_w))
+
+    def log_kernel_var(self, part, arr, glob, gl, static):
+        return _on(arr.mask, arr.log_r + part.log_varrho + part.log_w - LOG_2)
+
+    def local_log_density(self, part, arr, glob, gl, static):
+        a = a_values(glob.a_idx, gl, static)[arr.group]
+        lp = log_gamma_from_logs(part.log_varrho, 1.0, -LOG_2)
+        lp = lp + log_gamma_from_logs(part.log_w, a, glob.log_xi[arr.group])
+        return _on(arr.mask, lp)
+
+    def global_log_density(self, glob, gl, static):
+        lp = log_gamma_from_logs(glob.log_xi, gl.b, 0.0)
+        return jnp.sum(lp) + _a_log_prior(glob.a_idx, gl, static)
+
+    def group_functions(self, part, glob, arr, gl, static):
+        return _xi_group_functions(self, part, glob, arr, gl, static)
+
+
+@register_reference("dirichlet_laplace")
+class DirichletLaplaceRef(GLReference):
+    """Dirichlet–Laplace (Bhattacharya, Pati, Pillai & Dunson 2015; gamma form), P3 §3.2:
+    ``d_j | ϱ_j, θ̃_j ~ N(0, r_j ϱ_j θ̃_j²)``, ``ϱ_j ~ Exp(½)``, ``θ̃_j ~ G(a_g, ½)``; no global
+    parameter besides ``a_g``."""
+
+    local_names = ("log_theta", "log_varrho")
+
+    def sample_global(self, key, gl, static):
+        return DLGlobal(a_idx=_sample_a_idx(random.fold_in(key, 0), gl, static))
+
+    def sample_local(self, key, arr, glob, gl, static):
+        shape = arr.mask.shape
+        a = a_values(glob.a_idx, gl, static)[arr.group]
+        log_theta = _log_gamma(random.fold_in(key, 0), a) + LOG_2  # rate ½
+        log_varrho = _log_gamma(random.fold_in(key, 1), _full(shape, 1.0)) + LOG_2
+        return DLEq(log_theta=_on(arr.mask, log_theta), log_varrho=_on(arr.mask, log_varrho))
+
+    def log_kernel_var(self, part, arr, glob, gl, static):
+        return _on(arr.mask, arr.log_r + part.log_varrho + 2.0 * part.log_theta)
+
+    def local_log_density(self, part, arr, glob, gl, static):
+        a = a_values(glob.a_idx, gl, static)[arr.group]
+        lp = log_gamma_from_logs(part.log_theta, a, -LOG_2)
+        lp = lp + log_gamma_from_logs(part.log_varrho, 1.0, -LOG_2)
+        return _on(arr.mask, lp)
+
+    def global_log_density(self, glob, gl, static):
+        return _a_log_prior(glob.a_idx, gl, static)
+
+    def group_functions(self, part, glob, arr, gl, static):
+        out: TestFns = {}
+        if static.coef.a_grid:
+            for g in range(static.coef.n_groups):
+                out[f"a_idx[{g}]"] = (glob.a_idx[g].astype(_F64), True)
+        out.update(self._mean_log_v(part, glob, arr, gl, static))
+        return out
+
+
+def _ssvs_log_p(glob: SSVSGlobal, gl: GLShared, static: StaticConfig) -> tuple[Array, Array]:
+    """``(log p_g, log(1 − p_g))``: the state's under a Beta hyperprior, else the fixed ``p``."""
+    if static.coef.p_beta:
+        return glob.log_p, glob.log1m_p
+    G = static.coef.n_groups
+    return (
+        jnp.broadcast_to(jnp.log(gl.p_fixed), (G,)),
+        jnp.broadcast_to(jnp.log1p(-gl.p_fixed), (G,)),
+    )
+
+
+@register_reference("ssvs")
+class SSVSRef(GLReference):
+    """SSVS (George & McCulloch 1993; George, Sun & Ni 2008), P3 §3.2: ``d_j | γ_j ~
+    N(0, τ²_{γ_j, j})`` with ``log τ_{0,j}, log τ_{1,j}`` from ``GLArrays.ssvs``, ``γ_j | p_g ~
+    Bernoulli(p_g)``, ``p_g`` fixed (``GLShared.p_fixed``; the state then holds ``log p_fixed``) or
+    ``~ Beta(s₁, s₂)`` (density w.r.t. ``p``)."""
+
+    local_names = ("gamma",)
+
+    def sample_global(self, key, gl, static):
+        G = static.coef.n_groups
+        if static.coef.p_beta:
+            log_p, log1m_p = _log_beta_pair(
+                key, jnp.broadcast_to(gl.s1, (G,)), jnp.broadcast_to(gl.s2, (G,))
+            )
+            return SSVSGlobal(log_p=log_p, log1m_p=log1m_p)
+        return SSVSGlobal(
+            log_p=jnp.broadcast_to(jnp.log(gl.p_fixed), (G,)),
+            log1m_p=jnp.broadcast_to(jnp.log1p(-gl.p_fixed), (G,)),
+        )
+
+    def sample_local(self, key, arr, glob, gl, static):
+        log_p, _ = _ssvs_log_p(glob, gl, static)
+        u = random.uniform(key, arr.mask.shape, dtype=_F64)
+        gamma = (jnp.log(u) < log_p[arr.group]).astype(jnp.int32)
+        return SSVSEq(gamma=_on(arr.mask, gamma), rb_incl=jnp.zeros(arr.mask.shape, _F64))
+
+    def log_kernel_var(self, part, arr, glob, gl, static):
+        s = arr.ssvs
+        return _on(arr.mask, 2.0 * jnp.where(part.gamma == 1, s.log_tau1, s.log_tau0))
+
+    def local_log_density(self, part, arr, glob, gl, static):
+        log_p, log1m_p = _ssvs_log_p(glob, gl, static)
+        lp = jnp.where(part.gamma == 1, log_p[arr.group], log1m_p[arr.group])
+        return _on(arr.mask, lp)
+
+    def global_log_density(self, glob, gl, static):
+        if not static.coef.p_beta:
+            return jnp.zeros((), _F64)
+        return jnp.sum(log_beta_from_logs(glob.log_p, glob.log1m_p, gl.s1, gl.s2))
+
+    def local_logs(self, part):
+        return {"gamma": part.gamma.astype(_F64)}
+
+    def group_functions(self, part, glob, arr, gl, static):
+        G = static.coef.n_groups
+        n1 = _segment_sum(part.gamma.astype(_F64), arr, G)
+        out: TestFns = {f"N1[{g}]": (n1[g], True) for g in range(G)}
+        if static.coef.p_beta:
+            out.update({f"log_p[{g}]": (glob.log_p[g], True) for g in range(G)})
+        return out
+
+
+def gl_deviation_draw(key: Array, cp: CoefPriorArrays, log_kv: Array) -> tuple[Array, Array]:
+    """One equation's coefficients from ``p(coefficients | scales)`` (P3 §3.1): on GL slots
+    ``d_j = exp(½ log(r_j v_j))·z_j``, elsewhere ``N(m, 1/prec0)``. Returns
+    ``(m + d, log|d|)`` with ``log|d| = log sd + log|z|`` exact (never ``log|m + d − m|``)."""
+    z = _normal(key, cp.mean0.shape)
+    mask = cp.gl.mask
+    log_sd = jnp.where(mask > 0, 0.5 * log_kv, -0.5 * jnp.log(cp.prec0))
+    return cp.mean0 + jnp.exp(log_sd) * z, log_sd + jnp.log(jnp.abs(z))
+
+
+def gl_coefficient_log_density(
+    coef: Array, dev_log: Array, cp: CoefPriorArrays, log_kv: Array
+) -> Array:
+    """Elementwise ``log p(coefficient | scales)``: ``log N(d; 0, r v)`` from ``ℓ = dev_log`` on GL
+    slots (``d²/(r v) = exp(2ℓ − log r v)``, P3 §3.1), ``log N(coef; m, 1/prec0)`` elsewhere."""
+    mask = cp.gl.mask
+    lkv = jnp.where(mask > 0, log_kv, 0.0)
+    gl = -0.5 * (LOG_2PI + lkv + jnp.exp(2.0 * dev_log - lkv))
+    fixed = log_normal(coef, cp.mean0, 1.0 / cp.prec0)
+    return jnp.where(mask > 0, gl, fixed)
+
+
+# --------------------------------------------------------------------------- P3: CommonSV
+
+
+class _SigmaPrior(NamedTuple):
+    """The ``σ²``-prior fields under the Phase 2 names (``_log_sigma_prior``)."""
+
+    B_sigma: Array
+    c0: Array
+    C0: Array
+
+
+def _csv_sigma_prior(csv: CommonSVPrior) -> _SigmaPrior:
+    return _SigmaPrior(B_sigma=csv.s2_B, c0=csv.s2_shape, C0=csv.s2_scale)
+
+
+def _log_rho_prior(rho: Array, csv: CommonSVPrior, kind: str) -> Array:
+    """``ρ ~ N(ρ₀, V_ρ)·1(|ρ| < 1)`` (normalised by ``Φ(b) − Φ(a)``) or ``(ρ+1)/2 ~ Beta(a, b)``
+    (density of ρ); ``−∞`` for ``|ρ| ≥ 1``."""
+    if kind == "beta":
+        return _log_phi_prior(rho, csv.rho_a, csv.rho_b)
+    sd = jnp.sqrt(csv.rho_var)
+    lo, hi = (-1.0 - csv.rho_mean) / sd, (1.0 - csv.rho_mean) / sd
+    lp = log_normal(rho, csv.rho_mean, csv.rho_var) - jnp.log(ndtr(hi) - ndtr(lo))
+    return jnp.where(jnp.abs(rho) < 1.0, lp, -jnp.inf)
+
+
+def _draw_rho(key: Array, csv: CommonSVPrior, kind: str) -> Array:
+    if kind == "beta":
+        log_u, log1m_u = _log_beta_pair(key, csv.rho_a, csv.rho_b)
+        return jnp.exp(log_u) - jnp.exp(log1m_u)  # 2u − 1
+    sd = jnp.sqrt(csv.rho_var)
+    lo, hi = (-1.0 - csv.rho_mean) / sd, (1.0 - csv.rho_mean) / sd
+    z = random.truncated_normal(key, lo, hi, dtype=_F64)  # inverse CDF on [Φ(lo), Φ(hi)]
+    inner = jnp.nextafter(jnp.asarray(1.0, _F64), 0.0)
+    return jnp.clip(csv.rho_mean + sd * z, -inner, inner)
+
+
+def _draw_log_sigma_h(key: Array, csv: CommonSVPrior, kind: str) -> Array:
+    """``log σ_h``: ``σ_h² ~ IG(c₀, C₀)`` (``½(log C₀ − LG(c₀))``) or ``B·χ²₁`` (``σ_h = √B|z|``)."""
+    if kind == "scaled_chi2":
+        return 0.5 * jnp.log(csv.s2_B) + jnp.log(jnp.abs(_normal(key)))
+    return 0.5 * (jnp.log(csv.s2_scale) - _log_gamma(key, csv.s2_shape))
+
+
+@register_reference("constant_common")
+class ConstantCommonRef(ConstantRef):
+    """Constant cores under CommonSV (P3 §5.1–§5.2): ``λ_{i,t} = λ_i e^{h_t}`` with the Constant
+    ``λ_i ~ IG(shape, scale)`` (Mode I, or coupled in Mode II: the λ-scaled blocks read ``log λ_i``
+    as before). :meth:`latent_log_var_eq` is ``log λ_i``; :func:`effective_log_var` adds ``h_t``."""
+
+
+@register_reference("common_sv")
+class CommonSVRef(_Base):
+    """The common log volatility ``glob.vol`` (P3 §5.1, D-46; 0-based dates, ``h_t`` belongs to
+    data row ``t``): stationary AR(1) without intercept, ``h_0 ~ N(0, σ_h²/(1 − ρ²))``,
+    ``h_t = ρ h_{t−1} + σ_h η_t`` for ``1 ≤ t < T_eff``, padded states exactly 0 and carrying no
+    density. ``prior_sample_global``, ``log_prior_global`` and ``test_functions_global`` need the
+    data mask (keyword ``tmask``)."""
+
+    def prior_sample_global(self, key, prior, static, *, tmask=None):
+        if tmask is None:
+            raise ValueError("the common_sv reference needs tmask= (h is 0 on padded rows)")
+        csv, vol = prior.shared.csv, static.vol
+        T_pad = static.shapes.T_pad
+        k = [random.fold_in(key, j) for j in range(4)]
+        rho = _draw_rho(k[0], csv, vol.csv_rho_prior)
+        log_sigma = _draw_log_sigma_h(k[1], csv, vol.csv_sigma2_prior)
+        sigma = jnp.exp(log_sigma)
+        h0 = sigma / jnp.sqrt((1.0 - rho) * (1.0 + rho)) * _normal(k[2])
+        eta = _normal(k[3], (T_pad,))
+
+        def body(h_prev: Array, inp: tuple[Array, Array]) -> tuple[Array, Array]:
+            e, m = inp
+            h = jnp.where(m > 0, rho * h_prev + sigma * e, 0.0)
+            return h, h
+
+        _, rest = jax.lax.scan(body, h0, (eta[1:], tmask[1:]))
+        h = jnp.where(tmask > 0, jnp.concatenate([h0[None], rest]), 0.0)
+        z, zt = jnp.zeros((), _F64), jnp.zeros((T_pad,), _F64)
+        return CommonSVGlobal(
+            h=h, rho=rho, log_sigma=log_sigma, acc_h=z, acc_rho=z, acc_newton=z, rb_ch_sum=zt,
+            rb_ch_sq=zt,
+        )  # fmt: skip
+
+    def log_prior_global(self, part, prior, static, *, tmask=None):
+        if tmask is None:
+            raise ValueError("the common_sv reference needs tmask=")
+        csv, vol = prior.shared.csv, static.vol
+        rho, h = part.rho, part.h
+        sigma = jnp.exp(part.log_sigma)
+        lp = _log_rho_prior(rho, csv, vol.csv_rho_prior)
+        lp = lp + _log_sigma_prior(sigma, _csv_sigma_prior(csv), vol.csv_sigma2_prior)
+        inside = jnp.abs(rho) < 1.0
+        rho_s = jnp.where(inside, rho, 0.0)
+        lp = lp + log_normal(h[0], 0.0, sigma**2 / ((1.0 - rho_s) * (1.0 + rho_s)))
+        trans = log_normal(h[1:], rho_s * h[:-1], sigma**2)
+        return lp + jnp.sum(jnp.where(tmask[1:] > 0, trans, 0.0))
+
+    def test_functions_global(self, part, *, tails=_NO_TAILS, tmask=None):
+        if tmask is None:
+            raise ValueError("the common_sv reference needs tmask=")
+        T = _t_eff(tmask)
+        h, rho, log_sigma = part.h, part.rho, part.log_sigma
+        sigma = jnp.exp(log_sigma)
+        dates = {
+            "h0": h[0],
+            "hmid": jnp.take(h, T // 2),
+            "hT": jnp.take(h, T - 1),
+            "mean_h": _masked_mean(h, tmask),
+        }
+        h_ok = tails.h2 > 1.0  # Var(h_t) = E σ² · E (1 − ρ²)⁻¹ (infinite under the TN ρ prior)
+        out: TestFns = {name: (v, h_ok) for name, v in dates.items()}
+        out["mean_abs_h"] = (_masked_mean(jnp.abs(h), tmask), h_ok)
+        # bounded transforms (WP30): the h path stays testable when Var(h) = ∞
+        out.update({f"atan_{name}": (jnp.arctan(v), True) for name, v in dates.items()})
+        s1, s2 = tails.sigma2 > 1.0, tails.sigma2 > 2.0
+        out.update({
+            "rho": (rho, True), "rho^2": (rho**2, True), "sigma": (sigma, s1),
+            "sigma^2": (sigma**2, s2), "log_sigma": (log_sigma, True),
+            "rho*log_sigma": (rho * log_sigma, True),
+        })  # fmt: skip
+        return out
+
+
+# --------------------------------------------------------------------------- P3: review references
+# NumPy only, from docs/phase3/DESIGN.md (review items M12, M12(b), m25 of the design review): the
+# value references WP31 (GL builders) and WP34 (conditional forecasts, A10) are tested against.
+
+
+def gl_log_r_reference(
+    psi: Any,
+    n: int,
+    lags: int,
+    n_det: int,
+    form: Literal["structural", "reduced", "linear_structural", "linear_reduced"],
+    scale: Literal["psi", "none"] = "psi",
+) -> np.ndarray:
+    """``log r_j`` of the GL kernel ``d_j | v_j ~ N(0, r_j v_j)`` (P3 D-37, §3.1), shape ``(n, k)``,
+    row ``i`` = equation ``i`` in both forms, column ``r`` = regressor of the ``data/design.py``
+    layout; 0 on the deterministic slots ``r < n_det`` and everywhere under ``scale="none"``.
+
+    Lag slot ``r ∈ {n_det, …, k−1}`` has lag ``l(r) = 1 + ⌊(r − n_det)/n⌋`` and variable
+    ``m(r) = (r − n_det) mod n`` (§3.1); equation ``i`` (0-based) has ``ι = i + 1``, the index
+    convention of the Phase 2 Mode I prior (P2 §6.1: ``a_ij ~ N(0, κ_a ψ[i]/(ι ψ[j]))``, cross lag
+    ``κ²κ_c²ψ[i]/(ι l^α ψ[m])``; ``priors/structural.py``). Structural: ``log ψ_i − log ι −
+    log ψ_m``; reduced (``priors/reduced.py``: row ``j`` of the arrays is equation ``j``, lag ``l``
+    of variable ``m`` has variance ``κ²κ_c²ψ_j/(l^α ψ_m)``): ``log ψ_i − log ψ_m``. So ``r_j`` is the
+    Mode I (structural) or reduced Minnesota variance at ``κ = 1``, ``κ_c = 1`` without lag decay;
+    there is no ``l`` term (D-37)."""
+    psi = np.asarray(psi, dtype=np.float64)
+    if psi.shape != (n,) or not np.all(np.isfinite(psi) & (psi > 0)):
+        raise ValueError(f"psi must be {n} positive finite values, got {psi}")
+    if form not in ("structural", "reduced", "linear_structural", "linear_reduced"):
+        raise ValueError(f"form must be 'structural' or 'reduced', got {form!r}")
+    if scale not in ("psi", "none"):
+        raise ValueError(f"scale must be 'psi' or 'none', got {scale!r}")
+    k = n_det + n * lags
+    out = np.zeros((n, k))
+    if scale == "none":
+        return out
+    structural = form in ("structural", "linear_structural")
+    for i in range(n):
+        for r in range(n_det, k):
+            m = (r - n_det) % n
+            out[i, r] = math.log(psi[i]) - math.log(psi[m])
+            if structural:
+                out[i, r] -= math.log(i + 1.0)
+    return out
+
+
+def ssvs_shat_reference(
+    Y: Any,
+    X: Any,
+    form: Literal["structural", "reduced", "linear_structural", "linear_reduced"],
+    *,
+    Mc: Any = None,
+) -> np.ndarray:
+    """Semi-automatic SSVS scales ``ŝ_j`` (P3 D-44, §3.6), shape ``(n, k)`` (row = equation, column
+    = regressor), by a dense oracle (``np.linalg.inv``) on the real rows ``Y`` (``T_eff × n``) and
+    ``X`` (``T_eff × k``).
+
+    Structural, equation ``i``: the flat-prior NIG posterior variance of ``δ_i`` in the regression
+    of ``y_i`` on ``F_i = [X | X M_c[:, :i] − Y_{:, :i}]`` (the active block of the Phase 2 δ-design
+    ``F = [X | X M_c − Y_{:, :n−1}]``, ``q_i = k + i`` columns; ``Mc`` the D3 centring columns,
+    ``SharedPrior.Mc``): ``ŝ²_j = RSS_i/(T_eff − q_i − 2)·[(F_iᵀF_i)⁻¹]_jj`` for the ``k`` δ columns.
+    Reduced: ``ŝ²_{rj} = Ŝ_jj/(T_eff − k − n − 1)·[(XᵀX)⁻¹]_rr`` with ``Ŝ`` the OLS residual
+    sum-of-squares matrix (flat-prior normal–Wishart). ``ValueError`` when a divisor is ≤ 0."""
+    Y = np.asarray(Y, dtype=np.float64)
+    X = np.asarray(X, dtype=np.float64)
+    if Y.ndim != 2 or X.ndim != 2 or X.shape[0] != Y.shape[0]:
+        raise ValueError(f"Y (T, n) and X (T, k) must share T, got {Y.shape} and {X.shape}")
+    T, n = Y.shape
+    k = X.shape[1]
+    out = np.empty((n, k))
+    if form in ("reduced", "linear_reduced"):
+        dof = T - k - n - 1
+        if dof <= 0:
+            raise ValueError(
+                f"reduced-form semi-automatic SSVS needs T_eff > k + n + 1 = {k + n + 1}"
+            )
+        G = np.linalg.inv(X.T @ X)
+        E = Y - X @ (G @ (X.T @ Y))
+        S = E.T @ E
+        return np.sqrt(np.diag(S)[:, None] / dof * np.diag(G)[None, :])
+    if form not in ("structural", "linear_structural"):
+        raise ValueError(f"form must be 'structural' or 'reduced', got {form!r}")
+    Mc = np.asarray(Mc, dtype=np.float64) if Mc is not None else None
+    if Mc is None or Mc.shape != (k, n - 1):
+        raise ValueError(
+            f"the structural form needs the D3 centring columns Mc of shape ({k}, {n - 1})"
+        )
+    for i in range(n):
+        F = np.hstack([X, X @ Mc[:, :i] - Y[:, :i]])
+        dof = T - (k + i) - 2
+        if dof <= 0:
+            raise ValueError(
+                f"structural semi-automatic SSVS needs T_eff > q_i + 2 = {k + i + 2} (equation {i})"
+            )
+        G = np.linalg.inv(F.T @ F)
+        resid = Y[:, i] - F @ (G @ (F.T @ Y[:, i]))
+        out[i] = np.sqrt(resid @ resid / dof * np.diag(G)[:k])
+    return out
+
+
+class ConditionalForecastReference(NamedTuple):
+    """Result of :func:`conditional_forecast_reference` (stacked index ``(h − 1)·n + j``)."""
+
+    mean: np.ndarray  # (H, n) E_c: conditional mean of the path
+    cov: np.ndarray  # (nH, nH) Cov_c: conditional covariance of the stacked path
+    log_weight: float  # log N(r; Rμ, RΣRᵀ)
+    path: np.ndarray | None  # (H, n) Y_c from the given ε (None without ε)
+    uncond_mean: np.ndarray  # (H, n) μ
+    uncond_cov: np.ndarray  # (nH, nH) Σ = MMᵀ
+    M: np.ndarray  # (nH, nH) block lower triangular, M_{h,k} = Φ_{h−k} L_k
+    index: np.ndarray  # (m,) stacked indices of the conditioned cells
+    values: np.ndarray  # (m,) r
+
+
+def companion_impulse(lag_coefs: Any, H: int) -> np.ndarray:
+    """``Φ_0 … Φ_{H−1}`` (``(H, n, n)``) as the leading block of the powers of the companion
+    matrix ``C = [[A_1 … A_p], [I 0]]`` (``lag_coefs[l−1] = A_l``, the Phase 2 D-34 layout
+    ``A_l[i, j]`` = coefficient of ``y_{t−l, j}`` in equation ``i``)."""
+    A = np.asarray(lag_coefs, dtype=np.float64)
+    if A.ndim != 3 or A.shape[1] != A.shape[2]:
+        raise ValueError(f"lag_coefs must have shape (p, n, n), got {A.shape}")
+    p, n, _ = A.shape
+    C = np.zeros((n * p, n * p))
+    C[:n] = np.concatenate(list(A), axis=1)
+    if p > 1:
+        C[n:, : n * (p - 1)] = np.eye(n * (p - 1))
+    out = np.empty((H, n, n))
+    P = np.eye(n * p)
+    for j in range(H):
+        out[j] = P[:n, :n]
+        P = C @ P
+    return out
+
+
+def zero_shock_path(
+    coefs: Any, hist: Any, H: int, *, n_det: int, t_last: float = 0.0
+) -> np.ndarray:
+    """The unconditional (zero-shock) mean path ``μ`` (``(H, n)``) of a linear VAR
+    ``y_t = Bᵀx_t + u_t`` (``coefs = B``, ``k × n``, the ``data/design.py`` regressor layout) from
+    the last ``p`` observations ``hist`` (``p × n``, most recent last): ``x_{T+h} = (d_{T+h}',
+    y_{T+h−1}', …)'`` with ``d = (1, t_last + h)[:n_det]`` and the earlier means in place of future
+    values."""
+    B = np.asarray(coefs, dtype=np.float64)
+    hist = np.asarray(hist, dtype=np.float64)
+    p, n = hist.shape
+    if B.shape != (n_det + n * p, n):
+        raise ValueError(f"coefs must have shape ({n_det + n * p}, {n}), got {B.shape}")
+    window = list(hist)
+    out = np.empty((H, n))
+    for h in range(1, H + 1):
+        det = [1.0, t_last + h][:n_det]
+        x = np.concatenate([det, *[window[-lag] for lag in range(1, p + 1)]])
+        out[h - 1] = B.T @ x
+        window.append(out[h - 1])
+    return out
+
+
+def conditional_forecast_reference(
+    lag_coefs: Any,
+    chol: Any,
+    mean: Any,
+    conditions: Any,
+    *,
+    eps: Any = None,
+) -> ConditionalForecastReference:
+    """Exact hard-condition update of one draw's forecast path (P3 §6.2, D-50; the oracle of A10),
+    in stacked companion form with a dense Schur complement.
+
+    Inputs (plain arrays): ``lag_coefs`` ``(p, n, n)`` (``A_l``, D-34 layout), ``chol`` ``(H, n, n)``
+    (``L_k``, the shock factor of horizon ``k``, ``u_k = L_k ε_k``; it may vary with ``k``),
+    ``mean`` ``(H, n)`` the unconditional zero-shock path ``μ`` (e.g. :func:`zero_shock_path`) and
+    ``conditions`` an iterable of ``(h, j, value)`` with ``h ∈ 1..H`` and variable ``j ∈ 0..n−1``.
+    With ``Φ`` from :func:`companion_impulse`, ``Y = μ + Mε`` (``M_{h,k} = Φ_{h−k}L_k``, ``k ≤ h``),
+    ``Σ = MMᵀ``, ``R`` the selection of the conditioned cells and ``S = RΣRᵀ``:
+
+        E_c = μ + ΣRᵀS⁻¹(r − Rμ),   Cov_c = Σ − ΣRᵀS⁻¹RΣ,   log w = log N(r; Rμ, S),
+
+    and, given ``eps`` (``(H, n)``), the exact draw ``Y_c = Y + ΣRᵀS⁻¹(r − RY)`` from the same
+    shocks."""
+    Phi_lags = np.asarray(lag_coefs, dtype=np.float64)
+    L = np.asarray(chol, dtype=np.float64)
+    mu = np.asarray(mean, dtype=np.float64)
+    if L.ndim != 3 or L.shape[1] != L.shape[2]:
+        raise ValueError(f"chol must have shape (H, n, n), got {L.shape}")
+    H, n, _ = L.shape
+    if mu.shape != (H, n) or Phi_lags.shape[1:] != (n, n):
+        raise ValueError(f"mean must be ({H}, {n}) and lag_coefs (p, {n}, {n})")
+    cells: dict[int, float] = {}
+    for h, j, value in conditions:
+        if int(h) != h or not 1 <= h <= H or int(j) != j or not 0 <= j < n:
+            raise ValueError(
+                f"condition ({h}, {j}) outside horizons 1..{H} and variables 0..{n - 1}"
+            )
+        if not math.isfinite(float(value)):
+            raise ValueError(f"condition ({h}, {j}) is not finite")
+        idx = (int(h) - 1) * n + int(j)
+        if idx in cells:
+            raise ValueError(f"condition ({h}, {j}) given twice")
+        cells[idx] = float(value)
+    if not cells or len(cells) == n * H:
+        raise ValueError("need at least one condition and at least one free cell")
+    Phi = companion_impulse(Phi_lags, H)
+    M = np.zeros((n * H, n * H))
+    for h in range(H):
+        for k in range(h + 1):
+            M[h * n : (h + 1) * n, k * n : (k + 1) * n] = Phi[h - k] @ L[k]
+    Sigma = M @ M.T
+    idx = np.fromiter(cells, dtype=np.int64)
+    r = np.fromiter(cells.values(), dtype=np.float64)
+    mu_s = mu.reshape(-1)
+    S = Sigma[np.ix_(idx, idx)]
+    K = np.linalg.solve(S, Sigma[idx, :]).T  # ΣRᵀS⁻¹
+    dev = r - mu_s[idx]
+    cond_mean = mu_s + K @ dev
+    cond_cov = Sigma - K @ Sigma[idx, :]
+    _, logdet = np.linalg.slogdet(S)
+    log_w = -0.5 * (idx.size * LOG_2PI + logdet + dev @ np.linalg.solve(S, dev))
+    path = None
+    if eps is not None:
+        e = np.asarray(eps, dtype=np.float64)
+        if e.shape != (H, n):
+            raise ValueError(f"eps must have shape ({H}, {n}), got {e.shape}")
+        Yu = mu_s + M @ e.reshape(-1)
+        path = (Yu + K @ (r - Yu[idx])).reshape(H, n)
+    return ConditionalForecastReference(
+        mean=cond_mean.reshape(H, n), cov=cond_cov, log_weight=float(log_w), path=path,
+        uncond_mean=mu, uncond_cov=Sigma, M=M, index=idx, values=r,
+    )  # fmt: skip
+
+
 # --------------------------------------------------------------------------- composition
 
 
@@ -849,12 +1720,14 @@ class SlotReferences:
     coef: Reference
     core: Reference
     trans: Reference
+    gvol: Reference | None = None  # P3: the global volatility state (CommonSV), else None
 
 
 def core_kind(static: StaticConfig) -> str:
-    """Reference kind of the persistent core: ``"constant"``, ``"sv"`` or ``"sv_rw"``."""
+    """Reference kind of the persistent core: ``"constant"``, ``"sv"`` or ``"sv_rw"``; P3:
+    ``"constant_common"`` (Constant cores with the common ``h``)."""
     if static.vol.persistent == "constant":
-        return "constant"
+        return "constant_common" if static.vol.common else "constant"
     return "sv_rw" if static.vol.rw else "sv"
 
 
@@ -872,15 +1745,24 @@ def references_for(static: StaticConfig) -> SlotReferences:
         coef=make(static.coef.kind),
         core=make(core_kind(static)),
         trans=make(static.vol.transitory),
+        gvol=make("common_sv") if static.vol.common else None,
     )
 
 
 def effective_log_var(
-    vol: VolEq, static: StaticConfig, which: Which = "effective", refs: SlotReferences | None = None
+    vol: VolEq,
+    static: StaticConfig,
+    which: Which = "effective",
+    refs: SlotReferences | None = None,
+    *,
+    gvol: Any = None,
 ) -> Array:
     """``log λ_eff,i,t = log λ^pers_i,t + 2 log o_i,t + log τ_i,t`` (``which="effective"``) or the
     persistent part only; shape ``(..., n, T_pad)`` for a batched ``VolEq`` (leading equation axis),
-    computed equation by equation with the references."""
+    computed equation by equation with the references.
+
+    P3 CommonSV (``static.vol.common``): the persistent log variance is ``log λ_i + h_t`` with
+    ``h`` from the global state ``gvol = st.glob.vol`` (required; :func:`state_log_var`)."""
     refs = refs or references_for(static)
     T_pad = static.shapes.T_pad
 
@@ -888,7 +1770,20 @@ def effective_log_var(
         lv = refs.core.latent_log_var_eq(v.core, which, T_pad=T_pad)
         return lv + refs.trans.latent_log_var_eq(v.trans, which, T_pad=T_pad)
 
-    return jax.vmap(one)(vol)
+    out = jax.vmap(one)(vol)
+    if static.vol.common:
+        if not isinstance(gvol, CommonSVGlobal):
+            raise ValueError("CommonSV log variances need the common h: pass gvol=st.glob.vol")
+        out = out + gvol.h[None, :]
+    return out
+
+
+def state_log_var(
+    st: Any, static: StaticConfig, which: Which = "effective", refs: SlotReferences | None = None
+) -> Array:
+    """:func:`effective_log_var` of a chain state (its ``eq.vol`` and, under CommonSV, the common
+    ``h`` of ``glob.vol``); ``n × T_pad``."""
+    return effective_log_var(st.eq.vol, static, which, refs, gvol=st.glob.vol)
 
 
 def coupling_log_scale(vol_core: Any, static: StaticConfig) -> Array | float:
@@ -927,18 +1822,36 @@ def transitory_log_density(log_z2: Array, trans: Any, static: StaticConfig) -> A
 
 __all__ = [
     "KSC_SHIFT",
+    "LOG_2",
     "LOG_2PI",
     "REFERENCES",
+    "CommonSVRef",
+    "ConditionalForecastReference",
+    "ConstantCommonRef",
+    "DirichletLaplaceRef",
+    "GLReference",
+    "HorseshoeRef",
     "MixtureTableRef",
+    "NormalGammaRef",
     "PriorTails",
+    "R2D2Ref",
     "Reference",
+    "SSVSRef",
     "SlotReferences",
+    "a_values",
+    "companion_impulse",
+    "conditional_forecast_reference",
     "core_kind",
     "coupling_log_scale",
     "effective_log_var",
+    "gl_coefficient_log_density",
+    "gl_deviation_draw",
+    "gl_log_r_reference",
     "log_beta_fn",
     "log_beta_from_logs",
+    "log_gamma_from_logs",
     "log_inv_gamma_from_log",
+    "log_inv_gamma_from_logs",
     "log_logchi2_density",
     "log_mixture_components",
     "log_mixture_density",
@@ -950,6 +1863,9 @@ __all__ = [
     "reference",
     "references_for",
     "register_reference",
+    "ssvs_shat_reference",
+    "state_log_var",
     "t_scale_constant",
     "transitory_log_density",
+    "zero_shock_path",
 ]

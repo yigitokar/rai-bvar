@@ -25,6 +25,15 @@ The first is the target of the exact sampler extended by ``q(s | ξ) = p_s N(ξ;
 the second is the density of ``(θ, s, y*)`` under the auxiliary model, with the Jacobian of
 ``e ↦ y*`` (free of ``s`` and ``h``) omitted. Use them for the ``s``- and ``h | s``-step
 identities only; every other step uses the non-augmented joint.
+
+Phase 3 (``docs/phase3/DESIGN.md`` §9.1; WP30). Under a global-local or SSVS prior
+``log p(θ)`` is the Phase 2 sum for the structure and volatility parts plus
+
+    Σ_j log p(coefficient_j | scales) + Σ_j log p(local scales_j | group) + Σ_g log p(group, a_g)
+
+from the prior definitions of P3 §3.2 (``reference.GLReference``); under CommonSV it adds
+``log p(h, ρ, σ_h)`` of P3 §5.1 and the likelihood uses ``log λ_eff,i,t = log λ_i + h_t``. The
+coordinates are listed in ``reference``'s module docstring (natural scales, ``σ_h > 0``).
 """
 
 from __future__ import annotations
@@ -45,12 +54,14 @@ from rai_bvar.engines.mcmc.state import (
 from rai_bvar.validation.dummies import has_dummies, structural_dummy_log_factor_eq
 from rai_bvar.validation.reference import (
     LOG_2PI,
+    SlotReferences,
     coupling_log_scale,
-    effective_log_var,
+    gl_coefficient_log_density,
     log_mixture_components,
     log_mixture_density,
     mixture_table,
     references_for,
+    state_log_var,
 )
 from rai_bvar.validation.simulate import structural_gamma, unit_lower
 
@@ -69,7 +80,15 @@ def log_prior_eq(
 ) -> Array:
     """``log p`` of one equation's parameters and latents (all parts). With SOC/SUR dummy rows
     (structural, WP25) the rows' factor ``log p(d | θ_i, λ_i) − log p(d)`` is added (Bayes' rule,
-    ``validation.dummies``); it needs ``shared`` and the equation index ``i``."""
+    ``validation.dummies``); it needs ``shared`` and the equation index ``i``.
+
+    Not defined under a varying (GL) coefficient prior, whose scales couple the equations through
+    their groups: use :func:`log_prior`. The CommonSV ``h`` is global, so it is not included here."""
+    if static.coef.varies:
+        raise ValueError(
+            f"log_prior_eq is per equation; the {static.coef.kind!r} prior couples equations "
+            "through its group scales: use log_prior"
+        )
     refs = references_for(static)
     scale = coupling_log_scale(eq_i.vol.core, static)
     out = (
@@ -90,8 +109,13 @@ def log_prior_eq(
 
 
 def log_prior(st: ChainState, prior: PriorArrays, static: StaticConfig, tmask: Array) -> Array:
-    """``log p(θ)``: every equation's parts plus the global parts (reduced-form ``Π``)."""
+    """``log p(θ)``: every equation's parts plus the global parts (reduced-form ``Π``; P3: the
+    GL group scales and the CommonSV ``h, ρ, σ_h``)."""
     refs = references_for(static)
+    if static.coef.varies:
+        return _gl_log_prior(st, prior, static, tmask, refs) + _global_vol_log_prior(
+            st, prior, static, tmask, refs
+        )
     if has_dummies(static):
         n = static.shapes.n
         per_eq = jax.vmap(
@@ -102,10 +126,68 @@ def log_prior(st: ChainState, prior: PriorArrays, static: StaticConfig, tmask: A
     glob = (
         refs.mean.log_prior_global(st.glob.mean, prior, static)
         + refs.coef.log_prior_global(st.glob.coef, prior, static)
-        + refs.core.log_prior_global(st.glob.vol, prior, static)
+        + _global_vol_log_prior(st, prior, static, tmask, refs)
         + refs.structure.log_prior_global(st.glob.struct, prior, static)
     )
     return jnp.sum(per_eq) + glob
+
+
+def _global_vol_log_prior(
+    st: ChainState, prior: PriorArrays, static: StaticConfig, tmask: Array, refs: SlotReferences
+) -> Array:
+    """``log p(glob.vol)``: CommonSV's ``h, ρ, σ_h`` (P3 §5.1), else the core's (0)."""
+    if refs.gvol is not None:
+        return refs.gvol.log_prior_global(st.glob.vol, prior, static, tmask=tmask)
+    return refs.core.log_prior_global(st.glob.vol, prior, static)
+
+
+def gl_coefficients(st: ChainState, static: StaticConfig) -> tuple[Array, Array]:
+    """``(coefficients, dev_log)`` of a GL composition, both ``n × k`` with row ``i`` the
+    equation: structural ``δ``, reduced form ``Πᵀ`` (P3 §2.2)."""
+    if static.mean.kind == "linear_structural":
+        return st.eq.mean.delta, st.eq.mean.dev_log
+    return st.glob.mean.Pi.T, st.glob.mean.dev_log
+
+
+def gl_log_prior_terms(
+    st: ChainState, prior: PriorArrays, static: StaticConfig, refs: SlotReferences | None = None
+) -> tuple[Array, Array, Array]:
+    """The three GL parts of ``log p(θ)`` (P3 §3.1–§3.2): elementwise ``log p(coefficient |
+    scales)`` and ``log p(local scales | group)`` (``n × k``) and the group-level
+    ``log p(group scales, a)``."""
+    refs = refs or references_for(static)
+    gref = refs.coef
+    gl, arr = prior.shared.gl, prior.eq.coef.gl
+    coef, dev_log = gl_coefficients(st, static)
+    log_kv = gref.log_kernel_var(st.eq.coef, arr, st.glob.coef, gl, static)
+    dev = gl_coefficient_log_density(coef, dev_log, prior.eq.coef, log_kv)
+    local = gref.local_log_density(st.eq.coef, arr, st.glob.coef, gl, static)
+    return dev, local, gref.global_log_density(st.glob.coef, gl, static)
+
+
+def _gl_log_prior(
+    st: ChainState, prior: PriorArrays, static: StaticConfig, tmask: Array, refs: SlotReferences
+) -> Array:
+    """``log p(θ)`` without ``glob.vol`` under a varying coefficient prior: the Phase 2 structure,
+    core and transitory parts per equation, then the GL parts (:func:`gl_log_prior_terms`)."""
+
+    def one(e: EqState, p: EqPrior) -> Array:
+        scale = coupling_log_scale(e.vol.core, static)
+        return (
+            refs.core.log_prior_eq(e.vol.core, p, static, tmask)
+            + refs.trans.log_prior_eq(e.vol.trans, p, static, tmask)
+            + refs.structure.log_prior_eq(e.struct, p, static, tmask, log_scale=scale)
+        )
+
+    per_eq = jax.vmap(one)(st.eq, prior.eq)
+    dev, local, group = gl_log_prior_terms(st, prior, static, refs)
+    return (
+        jnp.sum(per_eq)
+        + jnp.sum(dev)
+        + jnp.sum(local)
+        + group
+        + refs.structure.log_prior_global(st.glob.struct, prior, static)
+    )
 
 
 def residuals(st: ChainState, data: EngineData, prior: PriorArrays, static: StaticConfig) -> Array:
@@ -126,7 +208,7 @@ def loglik_terms(
 ) -> Array:
     """Per ``(i, t)`` Gaussian log densities ``m_t log N(e_{i,t}; 0, λ_eff,i,t)``; ``n × T_pad``."""
     e = residuals(st, data, prior, static)
-    lv = effective_log_var(st.eq.vol, static)
+    lv = state_log_var(st, static)  # P3 CommonSV: log λ_i + h_t
     live = data.tmask[None, :] > 0
     lv = jnp.where(live, lv, 0.0)
     terms = -0.5 * (LOG_2PI + lv + e**2 * jnp.exp(-lv))
@@ -146,9 +228,7 @@ def log_e2_clean(
     e = residuals(st, data, prior, static)
     live = data.tmask[None, :] > 0
     log_e2 = jnp.where(live, jnp.log(jnp.where(live, e**2, 1.0)), 0.0)
-    scale2 = effective_log_var(st.eq.vol, static) - effective_log_var(
-        st.eq.vol, static, "persistent"
-    )
+    scale2 = state_log_var(st, static) - state_log_var(st, static, "persistent")
     return jnp.where(live, log_e2 - scale2, 0.0)
 
 
@@ -202,6 +282,8 @@ def log_joint(
 
 
 __all__ = [
+    "gl_coefficients",
+    "gl_log_prior_terms",
     "log_e2_clean",
     "log_joint",
     "log_prior",
