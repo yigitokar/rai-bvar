@@ -13,6 +13,14 @@ the window alone, and passed to the engine as arrays (R9; N05 §7.6, §12):
   ``Minnesota.own_lag_means``);
 * the data frequency, which resolves the outlier prior (D-9).
 
+**The ``AsymmetricConjugate`` adapter** (P3 DESIGN §4.2, WP33). The structural NIG closed form
+(``engines.structural_nig``) reads a ``Minnesota`` prior. :func:`structural_minnesota` maps an
+``AsymmetricConjugate`` onto its internal structural ``Minnesota`` (``AsymmetricConjugate.
+minnesota()``: the same ``lambda_``, ``alpha``, ``psi``, ``mean``, ``cross``, ``contemp``,
+``var_const``, ``soc``, ``sur``, ``soc_scope``, at ``form="structural"``, ``hierarchy="fixed"``),
+which never reaches the user or a spec; :func:`window_scales` and :func:`conjugate_omega` accept
+either prior through it. Every other prior is rejected, as before.
+
 Notation (DESIGN §6): 0-based equation ``i``, 1-based position ``ι = i + 1``, ``d = n + 2``;
 the Mode I fixed structural scale is ``σ̄_i² = ψ_i/(d − n + ι − 2) = ψ_i/ι`` (N05 §4.4).
 """
@@ -27,12 +35,14 @@ import numpy as np
 from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import n_deterministic
 from rai_bvar.engines.analytic import _ar_residual_variances
+from rai_bvar.priors.asymmetric import AsymmetricConjugate
 from rai_bvar.priors.minnesota import Minnesota
 
 # Keys of a Phase 1 hyperparameter dict (AnalyticFit.hyper). Only lambda and alpha enter the
 # coefficient arrays; psi enters through WindowScales; the SOC/SUR dummy rows are built by
 # priors.dummies (WP25; N05 §7.7) and the COVID scales are not available on the MCMC engine (D-21).
-_HYPER_KEYS = frozenset({"lambda", "alpha", "psi", "soc", "sur", "covid"})
+# A structural NIG dict (P3 §4.3) also carries cross and contemp, which enter through the prior.
+_HYPER_KEYS = frozenset({"lambda", "alpha", "psi", "soc", "sur", "covid", "cross", "contemp"})
 
 
 @dataclass(frozen=True)
@@ -77,9 +87,20 @@ class WindowScales:
         return self.psi / self.iota
 
 
+def structural_minnesota(prior: Minnesota | AsymmetricConjugate) -> Minnesota:
+    """The ``Minnesota`` the per-window helpers and the structural NIG closed form read (P3 DESIGN
+    §4.2): ``prior`` itself, or the internal structural ``Minnesota`` of an
+    ``AsymmetricConjugate`` (its ``minnesota()``; the adapter). ``TypeError`` for any other prior."""
+    if isinstance(prior, AsymmetricConjugate):
+        return prior.minnesota()
+    if isinstance(prior, Minnesota):
+        return prior
+    raise TypeError(f"prior must be a Minnesota prior, got {type(prior).__name__}")
+
+
 def window_scales(
     data: VARData,
-    prior: Minnesota,
+    prior: Minnesota | AsymmetricConjugate,
     lags: int,
     deterministic: str,
     psi: np.ndarray | None = None,
@@ -90,10 +111,10 @@ def window_scales(
     ``Minnesota(psi=(...))`` values are used, or, for ``psi="ar"``, the Phase 1 AR(p)-with-constant
     residual variances over the whole window (identical to ``ConjugateProblem.default["psi"]``
     without Lenza–Primiceri scaling). Only ``data`` is read, so a window ``data.upto(origin)``
-    ignores later observations (R9).
+    ignores later observations (R9). An ``AsymmetricConjugate`` is read through its internal
+    ``Minnesota`` (:func:`structural_minnesota`).
     """
-    if not isinstance(prior, Minnesota):
-        raise TypeError(f"prior must be a Minnesota prior, got {type(prior).__name__}")
+    prior = structural_minnesota(prior)
     if isinstance(lags, bool) or not isinstance(lags, int | np.integer) or lags < 1:
         raise ValueError(f"lags must be a positive integer, got {lags!r}")
     n_deterministic(deterministic)  # validates the kind
@@ -148,7 +169,15 @@ def prior_mean_matrix(scales: WindowScales, n: int, lags: int, n_det: int) -> np
 
 
 def conjugate_omega(
-    scales: WindowScales, prior: Minnesota, lam: float, alpha: float, n: int, lags: int, n_det: int
+    scales: WindowScales,
+    prior: Minnesota | AsymmetricConjugate,
+    lam: float,
+    alpha: float,
+    n: int,
+    lags: int,
+    n_det: int,
+    *,
+    cross: float | None = None,
 ) -> np.ndarray:
     """λ-free conjugate pattern ``Ω^{(i)}`` (n, k) of every equation (N05 §4.4; DESIGN §6.1):
 
@@ -156,16 +185,21 @@ def conjugate_omega(
         Ω^{(i)}_det     = κ_d,                              d = n + 2,
 
     computed in the operation order of ``ConjugateProblem.omega``, so at ``cross = 1`` every row
-    equals the Phase 1 ``Ω`` bit for bit.
+    equals the Phase 1 ``Ω`` bit for bit. ``κ_c`` is ``cross`` when given (the structural NIG
+    closed form passes it per evaluation, P3 §4.3), else ``prior.cross``; an ``AsymmetricConjugate``
+    is read through its internal ``Minnesota`` (:func:`structural_minnesota`).
     """
+    if isinstance(prior, AsymmetricConjugate):
+        prior = prior.minnesota()
     _check_scales(scales, n)
+    kappa_c = prior.cross if cross is None else cross
     lag_of, var_of = regressor_layout(n, lags, n_det)
     d = n + 2.0
     scale = scales.psi[np.maximum(var_of, 0)] / (d - n - 1.0)
     lagged = lam**2 / (np.maximum(lag_of, 1.0) ** alpha * scale)  # (k,)
     own = var_of[None, :] == np.arange(n)[:, None]  # (n, k)
-    cross = np.where(own, 1.0, prior.cross**2)
-    return np.where(var_of[None, :] < 0, prior.var_const, lagged[None, :] * cross)
+    pattern = np.where(own, 1.0, kappa_c**2)
+    return np.where(var_of[None, :] < 0, prior.var_const, lagged[None, :] * pattern)
 
 
 def lambda_alpha(
@@ -174,8 +208,10 @@ def lambda_alpha(
     """``(κ, α)`` in use: ``hyper`` values (EB, DESIGN §6.5) override the prior's.
 
     ``hyper`` may be a Phase 1 hyperparameter dict; a ``psi`` entry must equal ``scales.psi``
-    (ψ enters through :func:`window_scales`), and ``soc``/``sur``/``covid`` do not enter the
-    diagonal prior arrays. Unknown keys raise ``KeyError``.
+    (ψ enters through :func:`window_scales`), ``cross``/``contemp`` entries (a structural NIG
+    dict, P3 §4.3) must equal the prior's (they enter through ``prior``), and
+    ``soc``/``sur``/``covid`` do not enter the diagonal prior arrays. Unknown keys raise
+    ``KeyError``.
     """
     unknown = sorted(set(hyper) - _HYPER_KEYS)
     if unknown:
@@ -193,6 +229,12 @@ def lambda_alpha(
         raise ValueError(
             "hyper['psi'] differs from the window's psi: pass it to window_scales(..., psi=...)"
         )
+    for key in ("cross", "contemp"):
+        if key in hyper and hyper[key] != getattr(prior, key):
+            raise ValueError(
+                f"hyper[{key!r}] = {hyper[key]!r} differs from the prior's {key} = "
+                f"{getattr(prior, key)!r}: these arrays read {key} from the prior"
+            )
     return out[0], out[1]
 
 
@@ -222,5 +264,6 @@ __all__ = [
     "lambda_alpha",
     "prior_mean_matrix",
     "regressor_layout",
+    "structural_minnesota",
     "window_scales",
 ]

@@ -45,8 +45,13 @@ triangular map ``γ_i = δ_i + M_c a_i``: ``θ̂^γ = Tθ̂`` and ``R^γ = RT⁻
 
 **Empirical Bayes** (DESIGN §6.5 step 2; D-12): :func:`eb_structural` maximises
 ``Σ_i log p(y_i | h) + log p(h)`` (GLP hyperpriors, natural-scale densities as in Phase 1) over the
-free set (``lambda``, optionally ``alpha``, ``soc``, ``sur``) with ``cross`` and ``contemp``
-fixed, by L-BFGS-B on log values with Phase 1's stationarity test. ``psi`` is never free here.
+free set by L-BFGS-B on log values with Phase 1's stationarity test. The Phase 2 plug-in frees
+``lambda`` (optionally ``alpha``, ``soc``, ``sur``) with ``cross`` and ``contemp`` fixed by the
+prior; P3 §4.3 adds ``cross`` and ``contemp`` to the free names (flat prior on their log over
+``[1e-3, 10]``, so EB over them maximises the marginal likelihood, Chan 2022 §4). ``_Window``
+takes ``cross`` and ``contemp`` per evaluation, with the arithmetic of the fixed-``cross`` code,
+so at a fixed ``cross`` every evaluation is bit for bit the Phase 2 one (E118). ``psi`` is never
+free here.
 """
 
 from __future__ import annotations
@@ -64,12 +69,15 @@ from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import lagged_design, n_deterministic
 from rai_bvar.engines.analytic import _STATIONARITY_TOL, _stationarity
 from rai_bvar.linalg import positive_diagonal
+from rai_bvar.priors.asymmetric import LOG_FLAT_BOX
 from rai_bvar.priors.minnesota import Minnesota
 from rai_bvar.priors.scales import conjugate_omega, prior_mean_matrix, window_scales
 
 _LOG_2PI = float(np.log(2.0 * np.pi))
 _RANK_TOL = 1e-10  # |R_jj| relative to the stacked column norm (as ConjugateProblem._core)
-_EB_NAMES = ("lambda", "alpha", "soc", "sur")
+_EB_NAMES = ("lambda", "alpha", "soc", "sur")  # the GLP hyperparameters (Phase 1, P2 §6.5)
+_SCALE_NAMES = ("cross", "contemp")  # κ_c, κ_a: flat on their log over LOG_FLAT_BOX (P3 §4.3)
+_HYPER_NAMES = (*_EB_NAMES, *_SCALE_NAMES)
 
 
 @dataclass(frozen=True)
@@ -128,6 +136,26 @@ class EBResult:
     predicted_gain: float
     projected_gradient: float
     warnings: tuple[str, ...] = ()
+
+
+class _LogFlat:
+    """The flat prior on ``log κ`` over ``[log 1e-3, log 10]`` of ``cross`` and ``contemp`` (P3
+    DESIGN §4.3), as the EB objective sees it: a constant (the density of ``log κ``), so EB over
+    ``κ`` maximises the marginal likelihood (Chan 2022 §4). The natural-scale density
+    ``1/(κ·log(10/1e-3))``, which the Metropolis–Hastings target needs, is :meth:`logpdf_natural`."""
+
+    lower, upper = LOG_FLAT_BOX
+
+    @classmethod
+    def logpdf(cls, value: float) -> float:
+        return -float(np.log(np.log(cls.upper) - np.log(cls.lower)))
+
+    @classmethod
+    def logpdf_natural(cls, value: float) -> float:
+        return cls.logpdf(value) - float(np.log(value))
+
+
+_LOG_FLAT = _LogFlat()
 
 
 # --------------------------------------------------------------------------- one regression
@@ -197,8 +225,11 @@ class _Window:
     ``Y``, ``X`` from ``lagged_design``; ``W = X M_c − Y_{:, :n−1}`` the shared quasi-differenced
     contemporaneous columns (N05 §4.1); ψ and the own-lag means from the WP6 ``window_scales``
     (``psi`` overrides ψ); ``ȳ₀`` and the SOC rows as in Phase 1 (``soc_scope``); the
-    hyperparameter-free Mode II prior pieces (DESIGN §6.1) ``a_ij | λ_i ~ N(0, λ_i κ_a/ψ_j)`` and
-    ``λ_i ~ IG(1 + ι/2, ψ_i/2)``.
+    hyperparameter-free Mode II prior piece (DESIGN §6.1) ``λ_i ~ IG(1 + ι/2, ψ_i/2)``.
+    ``cross`` (``κ_c``) and ``contemp`` (``κ_a``, in ``a_ij | λ_i ~ N(0, λ_i κ_a/ψ_j)``) are
+    hyperparameters like ``lambda``: :meth:`complete` takes them from ``hyper`` (else the prior)
+    and :meth:`equations` reads them per evaluation (P3 DESIGN §4.3, E118), with the arithmetic of
+    the fixed-``cross`` code, so at the prior's values every array is bit for bit the same.
     """
 
     def __init__(
@@ -227,18 +258,19 @@ class _Window:
         self.Mc = self.M[:, : self.n - 1]
         self.W = self.X @ self.Mc - self.Y[:, : self.n - 1]
         psi = self.scales.psi
-        self.var_a = prior.contemp / psi[:-1]  # κ_a/ψ_j (contemp_arrays, scaling="lambda")
         self.nu0 = 1.0 + self.scales.iota / 2.0  # constant_prior shape
         self.S0 = psi / 2.0  # constant_prior scale
 
     def complete(self, hyper: Mapping[str, Any]) -> dict[str, Any]:
-        """``lambda``, ``alpha``, ``soc``, ``sur`` from ``hyper`` (else the prior), validated, and
-        the window's ``psi``. A ``covid`` entry must be ``None`` (no Lenza–Primiceri, D-21)."""
-        unknown = sorted(set(hyper) - {*_EB_NAMES, "psi", "covid"})
+        """``lambda``, ``alpha``, ``soc``, ``sur``, ``cross``, ``contemp`` from ``hyper`` (else the
+        prior), validated, and the window's ``psi``. A ``covid`` entry must be ``None`` (no
+        Lenza–Primiceri, D-21). ``cross`` and ``contemp`` given in ``hyper`` must be positive and
+        finite; the prior's values are taken as they are (Phase 2)."""
+        unknown = sorted(set(hyper) - {*_HYPER_NAMES, "psi", "covid"})
         if unknown:
             raise KeyError(
                 f"unknown hyperparameters {unknown}; expected some of "
-                f"{sorted({*_EB_NAMES, 'psi', 'covid'})}"
+                f"{sorted({*_HYPER_NAMES, 'psi', 'covid'})}"
             )
         if hyper.get("covid") is not None:
             raise ValueError(
@@ -255,17 +287,18 @@ class _Window:
             value = out[key]
             if value is None and key in ("soc", "sur"):
                 continue
-            if isinstance(value, bool) or not isinstance(value, int | float | np.number):
-                raise TypeError(f"hyperparameter {key!r} must be a number, got {value!r}")
-            if not (np.isfinite(value) and value > 0):
-                raise ValueError(
-                    f"hyperparameter {key!r} must be positive and finite, got {value!r}"
-                )
+            _check_positive(key, value)
             out[key] = float(value)
         if out["soc"] is not None and self.soc_rows.size == 0:
             raise ValueError(
                 "the SOC dummy needs at least one variable with a non-zero own-lag prior mean"
             )
+        for key in _SCALE_NAMES:  # κ_c, κ_a: per evaluation (P3 §4.3)
+            if key in hyper:
+                _check_positive(key, hyper[key])
+                out[key] = float(hyper[key])
+            else:
+                out[key] = getattr(p, key)
         out["psi"] = self.scales.psi.copy()
         return out
 
@@ -292,8 +325,16 @@ class _Window:
         (data rows, dummy rows, Mode II prior ``μ₀ = [m_i | 0]``, ``var0 = [Ω^{(i)} | κ_a/ψ_j]``;
         ``Ω`` from WP6 ``conjugate_omega``, bit for bit Phase 1's ``Ω`` at ``cross = 1``)."""
         omega = conjugate_omega(
-            self.scales, self.prior, h["lambda"], h["alpha"], self.n, self.lags, self.n_det
+            self.scales,
+            self.prior,
+            h["lambda"],
+            h["alpha"],
+            self.n,
+            self.lags,
+            self.n_det,
+            cross=h["cross"],
         )  # (n, k)
+        var_a = h["contemp"] / self.scales.psi[:-1]  # κ_a/ψ_j (contemp_arrays, scaling="lambda")
         Yd, Xd = self.dummies(h)
         Wd = Xd @ self.Mc - Yd[:, : self.n - 1]
         for i in range(self.n):
@@ -303,7 +344,7 @@ class _Window:
                 np.hstack([Xd, Wd[:, :i]]),
                 Yd[:, i],
                 np.concatenate([self.M[:, i], np.zeros(i)]),
-                np.concatenate([omega[i], self.var_a[:i]]),
+                np.concatenate([omega[i], var_a[:i]]),
                 float(self.nu0[i]),
                 float(self.S0[i]),
             )
@@ -439,25 +480,35 @@ def eb_structural(
     lags: int,
     deterministic: str,
     start: Mapping[str, float],
+    *,
+    free: Sequence[str] | None = None,
 ) -> EBResult:
-    """EB mode of ``prior.free`` under the structural NIG marginal likelihood (DESIGN §6.5 step 2).
+    """EB mode of the free hyperparameters under the structural NIG marginal likelihood (DESIGN
+    §6.5 step 2; P3 DESIGN §4.3).
 
-    Maximises ``structural_log_ml + Σ_free log p(h)`` (GLP hyperpriors of ``prior.hyperpriors``,
-    natural-scale densities) by L-BFGS-B on ``log h`` within the hyperprior bounds, starting from
-    ``start`` (the conjugate twin's mode, a Phase 1 hyperparameter dict: ``psi`` may be a vector,
-    ``covid`` must be ``None``), with Phase 1's multistart along the dummy axes, one perturbed
-    restart and stationarity test. Entries of ``start`` outside the free set are held fixed;
-    ``cross`` and ``contemp`` are fixed by ``prior``. ``psi`` in the free set raises: with
-    ``cross ≠ 1`` it is rejected at construction, and at ``cross = 1`` the twin estimates it.
+    Maximises ``structural_log_ml + Σ_free log p(h)`` by L-BFGS-B on ``log h`` within the
+    hyperprior bounds, starting from ``start`` (a Phase 1 hyperparameter dict, e.g. the conjugate
+    twin's mode: ``psi`` may be a vector, ``covid`` must be ``None``), with Phase 1's multistart
+    along the dummy axes, one perturbed restart and stationarity test. ``lambda``, ``alpha``,
+    ``soc``, ``sur`` have the GLP hyperpriors of ``prior.hyperpriors`` (natural-scale densities);
+    ``cross`` and ``contemp`` a flat prior on their logarithm over ``LOG_FLAT_BOX = [1e-3, 10]``,
+    so over them the objective is the marginal likelihood (Chan 2022 §4). ``free`` (default
+    ``prior.free``, the Phase 2 plug-in: ``cross`` and ``contemp`` fixed) names the optimised
+    hyperparameters; entries of ``start`` outside it are held fixed, and ``cross``/``contemp``
+    missing from ``start`` come from ``prior``. ``psi`` in the free set raises: with ``cross ≠ 1``
+    it is rejected at construction, and at ``cross = 1`` the twin estimates it.
     """
     if not isinstance(prior, Minnesota):
         raise TypeError(f"prior must be a Minnesota prior, got {type(prior).__name__}")
-    free = tuple(prior.free)
+    free = tuple(prior.free) if free is None else tuple(free)
     if "psi" in free:
         raise ValueError(
             "eb_structural estimates lambda, alpha, soc and sur only; psi is free only for the "
             "conjugate twin at cross = 1 (DESIGN §6.5)"
         )
+    unknown = [name for name in free if name not in _HYPER_NAMES]
+    if unknown or len(set(free)) != len(free):
+        raise ValueError(f"free must name distinct hyperparameters of {_HYPER_NAMES}, got {free}")
     window = _Window(data, prior, lags, deterministic, psi=start.get("psi"))
     base = window.complete(start)
     for name in free:
@@ -465,6 +516,7 @@ def eb_structural(
             raise ValueError(f"{name!r} is a free hyperparameter here and cannot be None")
     hp = prior.hyperpriors
     hyperpriors = {"lambda": hp.lambda_, "alpha": hp.alpha, "soc": hp.soc, "sur": hp.sur}
+    hyperpriors.update({name: _LOG_FLAT for name in _SCALE_NAMES})
     lower = np.array([hyperpriors[name].lower for name in free], dtype=np.float64)
     upper = np.array([hyperpriors[name].upper for name in free], dtype=np.float64)
     evaluations = 0
@@ -561,6 +613,13 @@ def eb_structural(
         projected_gradient=float(grad),
         warnings=messages,
     )
+
+
+def _check_positive(key: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | float | np.number):
+        raise TypeError(f"hyperparameter {key!r} must be a number, got {value!r}")
+    if not (np.isfinite(value) and value > 0):
+        raise ValueError(f"hyperparameter {key!r} must be positive and finite, got {value!r}")
 
 
 def _positive_int(value: object, name: str) -> int:
