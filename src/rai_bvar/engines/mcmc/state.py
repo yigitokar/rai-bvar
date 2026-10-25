@@ -142,6 +142,60 @@ class CoefPriorArrays:
     prec0: Array  # f64[n, k]
     group: Array  # i32[n, k]: 0 deterministic, 1 own lag, 2 cross lag
     dummy_w: Array | Empty = Empty()  # f64[n]: λ-free dummy-row weight (WP25)
+    gl: GLArrays | Empty = Empty()  # global-local / SSVS arrays (P3 §2.3; CoefPriorStatic GL kinds)
+
+
+@_pytree
+class SSVSArrays:
+    """SSVS spike and slab log standard deviations of every coefficient (P3 D-44)."""
+
+    log_tau0: Array  # f64[n, k]
+    log_tau1: Array  # f64[n, k]
+
+
+@_pytree
+class GLArrays:
+    """Per-coefficient arrays of a global-local or SSVS prior (P3 §2.3, §3.1, §3.6)."""
+
+    mask: Array  # f64[n, k]: 1 on GL-governed slots (lag coefficients), 0 elsewhere
+    group: Array  # i32[n, k]: group id g(j) on GL slots (0 elsewhere, masked)
+    log_r: Array  # f64[n, k]: log scale r_j (P3 D-37); 0 for scale="none"
+    ssvs: SSVSArrays | Empty = Empty()
+
+
+@_pytree
+class GLShared:
+    """Group-level hyperparameters of a global-local or SSVS prior (shared by every equation).
+
+    Unused fields are 0 for a family that has no such parameter (P3 §3.2): ``b``, ``c`` (NG,
+    R2D2; ``c`` < 0 encodes NG's tied ``c = a/2``), ``global_scale`` (HS), ``log_a_fixed`` (a fixed
+    ``a``), ``a_support``/``a_logw`` (the discrete hyperprior grid, ``CoefPriorStatic.a_grid``
+    points; shape ``(1,)`` zeros when ``a`` is fixed), ``p_fixed``, ``s1``, ``s2`` (SSVS)."""
+
+    b: Array  # f64[]
+    c: Array  # f64[]
+    global_scale: Array  # f64[]
+    log_a_fixed: Array  # f64[]
+    a_support: Array  # f64[A]
+    a_logw: Array  # f64[A]
+    p_fixed: Array  # f64[]
+    s1: Array  # f64[]
+    s2: Array  # f64[]
+
+
+@_pytree
+class CommonSVPrior:
+    """``ρ ~ N(ρ₀, V_ρ)·1(|ρ|<1)`` or ``(ρ+1)/2 ~ Beta(a, b)``; ``σ_h² ~ IG(c₀, C₀)`` or
+    ``B·χ²₁`` (P3 D-46); ``n_eq`` the number of equations sharing ``h``."""
+
+    rho_mean: Array  # f64[]
+    rho_var: Array  # f64[]
+    rho_a: Array  # f64[]
+    rho_b: Array  # f64[]
+    s2_shape: Array  # f64[]
+    s2_scale: Array  # f64[]
+    s2_B: Array  # f64[]
+    n_eq: Array  # f64[]
 
 
 @_pytree
@@ -213,6 +267,11 @@ class SharedPrior:
 
     Mc: Array  # f64[k, n−1]: D3 centring columns; zeros for reduced and zero means
     dummies: DummyRows | Empty = Empty()  # SOC/SUR rows (MeanStatic.n_dummy > 0; WP25)
+    gl: GLShared | Empty = Empty()  # global-local / SSVS group-level hyperparameters (P3)
+    shared_prec: Array | Empty = (
+        Empty()
+    )  # f64[q]: λ-free Mode II precision (shared_factor, P3 §5.3)
+    csv: CommonSVPrior | Empty = Empty()  # CommonSV priors (VolStatic.common, P3 §5)
 
 
 @_pytree
@@ -232,6 +291,7 @@ class RecursiveEq:
 @_pytree
 class LinearEq:
     delta: Array  # f64[n, k]; γ_i = δ_i + M_c a_i is derived, never stored
+    dev_log: Array | Empty = Empty()  # f64[n, k]: log|δ_i − m_i| (P3 §3.4; MeanStatic.coef_log)
 
 
 @_pytree
@@ -313,24 +373,106 @@ class VolEq:
     trans: OutlierEq | TEq | OutlierTEq | Empty
 
 
+# ---- Phase 3 coefficient-prior states (P3 §2.2): every scale is stored as its log; leaves are 0
+#      on non-GL slots (deterministic terms), which the prior's mask excludes from every sum.
+
+
+@_pytree
+class HSEq:
+    log_theta: Array  # f64[n, k]: local ϑ
+    log_nu: Array  # f64[n, k]: auxiliary ν (Makalic–Schmidt)
+
+
+@_pytree
+class HSGlobal:
+    log_zeta: Array  # f64[G]: group ζ_g
+    log_tau: Array  # f64[G]: auxiliary τ_g
+
+
+@_pytree
+class NGEq:
+    log_w: Array  # f64[n, k]: ϖ
+
+
+@_pytree
+class NGGlobal:
+    log_xi: Array  # f64[G]: rate ξ_g
+    a_idx: Array  # i32[G]: grid index of a_g (0 with a fixed a)
+
+
+@_pytree
+class R2D2Eq:
+    log_varrho: Array  # f64[n, k]: exponential mixing ϱ
+    log_w: Array  # f64[n, k]: ϖ
+
+
+@_pytree
+class R2D2Global:
+    log_xi: Array  # f64[G]
+    a_idx: Array  # i32[G]
+
+
+@_pytree
+class DLEq:
+    log_theta: Array  # f64[n, k]: Laplace scale θ̃
+    log_varrho: Array  # f64[n, k]: exponential mixing ϱ
+
+
+@_pytree
+class DLGlobal:
+    a_idx: Array  # i32[G]
+
+
+@_pytree
+class SSVSEq:
+    gamma: Array  # i32[n, k]: inclusion indicator
+    rb_incl: Array  # f64[n, k]: Σ P(γ = 1 | ·) over sampling sweeps
+
+
+@_pytree
+class SSVSGlobal:
+    log_p: Array  # f64[G]
+    log1m_p: Array  # f64[G]
+
+
+CoefEqState = HSEq | NGEq | R2D2Eq | DLEq | SSVSEq
+CoefGlobalState = HSGlobal | NGGlobal | R2D2Global | DLGlobal | SSVSGlobal
+
+
+@_pytree
+class CommonSVGlobal:
+    """Common log-volatility (P3 §5): index ``t`` is data row ``t`` (no presample state), 0 for
+    ``t ≥ T_eff``; ``σ_h`` is stored as its log."""
+
+    h: Array  # f64[T_pad]
+    rho: Array  # f64[]
+    log_sigma: Array  # f64[]
+    acc_h: Array  # f64[]: accepted fraction of the non-empty h blocks, summed over sweeps
+    acc_rho: Array  # f64[]
+    acc_newton: Array  # f64[]: Newton iterations that hit the cap
+    rb_ch_sum: Array  # f64[T_pad]
+    rb_ch_sq: Array  # f64[T_pad]
+
+
 @_pytree
 class EqState:
     struct: RecursiveEq
     mean: LinearEq | Empty
-    coef: Empty
+    coef: CoefEqState | Empty
     vol: VolEq
 
 
 @_pytree
 class CCCMGlobal:
     Pi: Array  # f64[k, n]
+    dev_log: Array | Empty = Empty()  # f64[n, k]: log|π_j − m_j|, row j (P3 §3.4; coef_log)
 
 
 @_pytree
 class GlobalState:
     mean: CCCMGlobal | Empty
-    coef: Empty
-    vol: Empty
+    coef: CoefGlobalState | Empty
+    vol: CommonSVGlobal | Empty
     struct: Empty
 
 
@@ -368,6 +510,7 @@ class EqContext:
     weights: Array  # f64[T_pad]: m_t · exp(−log λ_eff,i,t)
     log_scale: Array  # f64[]: log λ_i if a prior block is λ-scaled, else 0
     tmask: Array  # f64[T_pad]
+    common_w: Array | Empty = Empty()  # f64[T_pad]: m_t e^{−h_t}, unbatched (CommonSV, P3 §5.3)
 
 
 @_pytree
@@ -376,6 +519,16 @@ class GaussianDiag:
 
     mean: Array  # f64[m]
     prec: Array  # f64[m]
+    cmask: Array  # f64[m]
+
+
+@_pytree
+class GaussianLogDiag:
+    """A block prior ``N(mean, diag(exp(−log_prec)))`` of a varying coefficient prior (P3 §2.4,
+    §3.3): the mean takes the deviation path of P3 §3.4 (``MeanStatic.coef_log``)."""
+
+    mean: Array  # f64[m]
+    log_prec: Array  # f64[m]
     cmask: Array  # f64[m]
 
 
@@ -455,12 +608,19 @@ class CCCMDraw:
 
 
 @_pytree
+class CommonSVDraw:
+    h_T: Array  # f64[]: h[T_eff − 1], the last data row (P3 §5.5)
+    rho: Array  # f64[]
+    sigma: Array  # f64[]
+
+
+@_pytree
 class GlobDraw:
     """Global parameters of one draw, one part per owner (mirrors :class:`GlobalState`)."""
 
     mean: CCCMDraw | Empty
     coef: Empty
-    vol: Empty
+    vol: CommonSVDraw | Empty
     struct: Empty
 
 
@@ -568,20 +728,56 @@ def state_template(static: StaticConfig) -> ChainState:
         )  # fmt: skip
     else:
         trans = Empty()
+    coef_log = static.mean.coef_log
+    dev = _f(n, k) if coef_log else Empty()
+    coef_eq, coef_glob = _coef_templates(static)
     eq = EqState(
         struct=RecursiveEq(a=_f(n, n - 1)),
-        mean=LinearEq(delta=_f(n, k)) if static.mean.kind == "linear_structural" else Empty(),
-        coef=Empty(),
+        mean=(
+            LinearEq(delta=_f(n, k), dev_log=dev)
+            if static.mean.kind == "linear_structural"
+            else Empty()
+        ),
+        coef=coef_eq,
         vol=VolEq(core=core, trans=trans),
     )
     glob = GlobalState(
-        mean=CCCMGlobal(Pi=_f(k, n)) if static.mean.kind == "linear_reduced" else Empty(),
-        coef=Empty(),
-        vol=Empty(),
+        mean=(
+            CCCMGlobal(Pi=_f(k, n), dev_log=dev)
+            if static.mean.kind == "linear_reduced"
+            else Empty()
+        ),
+        coef=coef_glob,
+        vol=_common_sv_template(static) if vol.common else Empty(),
         struct=Empty(),
     )
     status = Status(np.zeros((), np.int32), np.zeros((), np.uint32), np.full((), np.inf))
     return ChainState(eq=eq, glob=glob, status=status)
+
+
+def _coef_templates(static: StaticConfig) -> tuple[PyTree, PyTree]:
+    """The coefficient prior's per-equation and global state (``Empty`` for ``fixed_diagonal``)."""
+    c, s = static.coef, static.shapes
+    n, k, G = s.n, s.k, c.n_groups
+    if c.kind == "horseshoe":
+        return HSEq(_f(n, k), _f(n, k)), HSGlobal(_f(G), _f(G))
+    if c.kind == "normal_gamma":
+        return NGEq(_f(n, k)), NGGlobal(_f(G), _i(G))
+    if c.kind == "r2d2":
+        return R2D2Eq(_f(n, k), _f(n, k)), R2D2Global(_f(G), _i(G))
+    if c.kind == "dirichlet_laplace":
+        return DLEq(_f(n, k), _f(n, k)), DLGlobal(_i(G))
+    if c.kind == "ssvs":
+        return SSVSEq(_i(n, k), _f(n, k)), SSVSGlobal(_f(G), _f(G))
+    return Empty(), Empty()
+
+
+def _common_sv_template(static: StaticConfig) -> CommonSVGlobal:
+    T = static.shapes.T_pad
+    return CommonSVGlobal(
+        h=_f(T), rho=_f(), log_sigma=_f(), acc_h=_f(), acc_rho=_f(), acc_newton=_f(),
+        rb_ch_sum=_f(T), rb_ch_sq=_f(T),
+    )  # fmt: skip
 
 
 def prior_template(static: StaticConfig) -> PriorArrays:
@@ -598,16 +794,38 @@ def prior_template(static: StaticConfig) -> PriorArrays:
         else TransitoryPrior(a_p=_f(n), b_p=_f(n), log_nu_w=_f(n, len(vol.nu_grid)))
     )
     m = static.mean.n_dummy
+    coef = static.coef
+    gl: GLArrays | Empty = Empty()
+    gl_shared: GLShared | Empty = Empty()
+    if coef.varies:
+        ssvs = SSVSArrays(_f(n, k), _f(n, k)) if coef.kind == "ssvs" else Empty()
+        gl = GLArrays(mask=_f(n, k), group=_i(n, k), log_r=_f(n, k), ssvs=ssvs)
+        A = max(coef.a_grid, 1)
+        gl_shared = GLShared(
+            b=_f(), c=_f(), global_scale=_f(), log_a_fixed=_f(), a_support=_f(A), a_logw=_f(A),
+            p_fixed=_f(), s1=_f(), s2=_f(),
+        )  # fmt: skip
     eq = EqPrior(
         coef=CoefPriorArrays(
-            mean0=_f(n, k), prec0=_f(n, k), group=_i(n, k), dummy_w=_f(n) if m else Empty()
+            mean0=_f(n, k),
+            prec0=_f(n, k),
+            group=_i(n, k),
+            dummy_w=_f(n) if m else Empty(),
+            gl=gl,
         ),
         contemp=ContempPriorArrays(mean0=_f(n, n - 1), prec0=_f(n, n - 1), cmask=_f(n, n - 1)),
         vol_core=core,
         transitory=trans,
     )
     dummies = DummyRows(Y=_f(m, n), X=_f(m, k)) if m else Empty()
-    return PriorArrays(eq=eq, shared=SharedPrior(Mc=_f(k, n - 1), dummies=dummies))
+    shared_prec = _f(s.q) if static.mean.const_path == "shared_factor" else Empty()
+    csv = (
+        CommonSVPrior(*(_f() for _ in range(len(fields(CommonSVPrior))))) if vol.common else Empty()
+    )
+    shared = SharedPrior(
+        Mc=_f(k, n - 1), dummies=dummies, gl=gl_shared, shared_prec=shared_prec, csv=csv
+    )
+    return PriorArrays(eq=eq, shared=shared)
 
 
 def draw_template(static: StaticConfig) -> ParamDraw:
@@ -631,7 +849,7 @@ def draw_template(static: StaticConfig) -> ParamDraw:
         glob=GlobDraw(
             mean=CCCMDraw(Pi=_f(k, n)) if reduced else Empty(),
             coef=Empty(),
-            vol=Empty(),
+            vol=CommonSVDraw(h_T=_f(), rho=_f(), sigma=_f()) if vol.common else Empty(),
             struct=Empty(),
         ),
         mean=LinearDraw(gamma=_f(n, k)) if static.mean.kind == "linear_structural" else Empty(),
@@ -803,4 +1021,21 @@ def check_state_invariants(st: ChainState, static: StaticConfig, T_eff: int) -> 
         out.append("eq.vol.core.sigma: σ must be > 0")
     if "eq.vol.core.phi" in arrays and (np.abs(arrays["eq.vol.core.phi"]) >= 1).any():
         out.append("eq.vol.core.phi: |φ| must be < 1")
+    # Phase 3 (P3 §2.2): GL leaves are exactly 0 off the GL slots (the deterministic columns)
+    if static.coef.varies:
+        n_det = shapes.n_det
+        for name, arr in arrays.items():
+            if name.startswith("eq.coef.") and (arr[..., :n_det] != 0).any():
+                out.append(f"{name}: non-zero on the deterministic slots (not GL coordinates)")
+    a_hi = max(static.coef.a_grid, 1)
+    if "glob.coef.a_idx" in arrays:
+        idx = arrays["glob.coef.a_idx"]
+        if ((idx < 0) | (idx >= a_hi)).any():
+            out.append(f"glob.coef.a_idx: index outside [0, {a_hi})")
+    if "eq.coef.gamma" in arrays and not np.isin(arrays["eq.coef.gamma"], (0, 1)).all():
+        out.append("eq.coef.gamma: SSVS indicators must be 0 or 1")
+    if "glob.vol.rho" in arrays and (np.abs(arrays["glob.vol.rho"]) >= 1).any():
+        out.append("glob.vol.rho: |ρ| must be < 1")
+    if "glob.vol.h" in arrays and (arrays["glob.vol.h"][..., T_eff:] != 0).any():
+        out.append(f"glob.vol.h: padded states t >= T_eff={T_eff} must be 0")
     return out

@@ -22,9 +22,14 @@ from typing import Literal, get_args
 StructKind = Literal["recursive"]
 Scaling = Literal["none", "lambda"]
 MeanKind = Literal["linear_structural", "linear_reduced", "zero"]
-ConstPath = Literal["weighted", "cholesky_const", "eigen", "fixed_factor"]
+ConstPath = Literal["weighted", "cholesky_const", "eigen", "fixed_factor", "shared_factor"]
 GramKind = Literal["packed", "packed_tiled", "batched"]
-CoefKind = Literal["fixed_diagonal"]
+CoefKind = Literal[
+    "fixed_diagonal", "horseshoe", "normal_gamma", "r2d2", "dirichlet_laplace", "ssvs"
+]  # fmt: skip
+GLKinds = ("horseshoe", "normal_gamma", "r2d2", "dirichlet_laplace", "ssvs")  # Phase 3 (P3 D-39)
+RhoPrior = Literal["truncated_normal", "beta"]
+CSVSigma2Prior = Literal["inv_gamma", "scaled_chi2"]
 Persistent = Literal["constant", "sv"]
 H0 = Literal["stationary", "fixed_b0"]
 Sigma2Prior = Literal["scaled_chi2", "inv_gamma"]
@@ -37,7 +42,10 @@ MAX_EQUATIONS = 999  # error codes encode the equation in three digits (DESIGN �
 
 # JAX-free capability tables of the Phase 2 kernels (mirrors of their ClassVars; DESIGN §3.8).
 SUPPORTS_REDUCED_MEAN: dict[str, bool] = {"recursive": True}  # CovarianceStructure
-COEF_VARIES: dict[str, bool] = {"fixed_diagonal": False}  # CoefPrior.varies
+COEF_VARIES: dict[str, bool] = {  # CoefPrior.varies
+    "fixed_diagonal": False,
+    **dict.fromkeys(GLKinds, True),  # global-local and SSVS priors (P3 D-43)
+}
 
 
 def _choice(owner: str, name: str, value: object, alias: object) -> None:
@@ -131,6 +139,7 @@ class MeanStatic:
     gram_tile: int = 0  # packed_tiled: columns of P per tile
     cccm_precompute: bool = True  # reduced form: every L_j before the j-loop (shape rule)
     n_dummy: int = 0  # SOC/SUR dummy rows of the coefficient prior (0 = none; WP25)
+    coef_log: bool = False  # deviation path with log-space Jacobi scaling (P3 §3.4; varying priors)
 
     def __post_init__(self) -> None:
         _choice("MeanStatic", "kind", self.kind, MeanKind)
@@ -140,6 +149,7 @@ class MeanStatic:
         _int(self, "gram_tile", 0)
         _bool(self, "cccm_precompute")
         _int(self, "n_dummy", 0)
+        _bool(self, "coef_log")
         if (self.gram == "packed_tiled") != (self.gram_tile > 0):
             raise ValueError(
                 "gram_tile > 0 is required by, and only allowed with, gram='packed_tiled'"
@@ -150,12 +160,41 @@ class MeanStatic:
 
 @dataclass(frozen=True)
 class CoefPriorStatic:
-    """Coefficient prior kernel (Phase 3 adds global-local siblings)."""
+    """Coefficient prior kernel: ``fixed_diagonal`` (Phase 2) or a global-local / SSVS sibling
+    (P3 §3). ``n_groups`` is the number ``G`` of coefficient groups (shape-defining; resolved at
+    fit because it can depend on ``n``), ``a_grid`` the size of the discrete hyperprior grid on
+    ``a`` (0: ``a`` fixed; NG, R2D2, DL only) and ``p_beta`` the SSVS Beta hyperprior on ``p``."""
 
     kind: CoefKind = "fixed_diagonal"
+    n_groups: int = 0
+    a_grid: int = 0
+    p_beta: bool = False
 
     def __post_init__(self) -> None:
         _choice("CoefPriorStatic", "kind", self.kind, CoefKind)
+        _int(self, "n_groups", 0)
+        _int(self, "a_grid", 0)
+        _bool(self, "p_beta")
+        gl = self.kind in GLKinds
+        if gl != (self.n_groups >= 1):
+            raise ValueError(
+                "n_groups >= 1 is required by, and only allowed with, a global-local or SSVS "
+                f"coefficient prior (kind={self.kind!r}, n_groups={self.n_groups})"
+            )
+        if self.a_grid and self.kind not in ("normal_gamma", "r2d2", "dirichlet_laplace"):
+            raise ValueError(
+                f"a_grid > 0 (a hyperprior on a) exists for normal_gamma, r2d2 and "
+                f"dirichlet_laplace only, not {self.kind!r}"
+            )
+        if self.p_beta and self.kind != "ssvs":
+            raise ValueError(
+                f"p_beta (a Beta hyperprior on p) is an SSVS option, not {self.kind!r}"
+            )
+
+    @property
+    def varies(self) -> bool:
+        """Whether the coefficient moments change during sampling (``COEF_VARIES``)."""
+        return COEF_VARIES[self.kind]
 
 
 @dataclass(frozen=True)
@@ -179,6 +218,10 @@ class VolStatic:
     asis: bool = True
     zero_offset: bool = False
     coupled: bool = False
+    common: bool = False  # CommonSV: λ_{i,t} = λ_i e^{h_t}, h in glob.vol (P3 §5)
+    csv_block: int = 100  # CommonSV h-step MH block length (P3 D-48)
+    csv_rho_prior: RhoPrior = "truncated_normal"
+    csv_sigma2_prior: CSVSigma2Prior = "inv_gamma"
 
     def __post_init__(self) -> None:
         _choice("VolStatic", "persistent", self.persistent, Persistent)
@@ -187,9 +230,12 @@ class VolStatic:
         _choice("VolStatic", "transitory", self.transitory, Transitory)
         _choice("VolStatic", "t_scale", self.t_scale, TScaleKind)
         _choice("VolStatic", "mixture", self.mixture, Mixture)
-        for name in ("rw", "exact", "asis", "zero_offset", "coupled"):
+        for name in ("rw", "exact", "asis", "zero_offset", "coupled", "common"):
             _bool(self, name)
         _int(self, "outlier_K", 1)
+        _int(self, "csv_block", 2)
+        _choice("VolStatic", "csv_rho_prior", self.csv_rho_prior, RhoPrior)
+        _choice("VolStatic", "csv_sigma2_prior", self.csv_sigma2_prior, CSVSigma2Prior)
         grid = tuple(self.nu_grid)
         if not grid or any(
             isinstance(v, bool) or not isinstance(v, numbers.Integral) for v in grid
@@ -210,8 +256,9 @@ class VolStatic:
 
     @property
     def constant_weights(self) -> bool:
-        """Equation weights ``m_t/λ_i`` are time-constant: Constant core, no transitory scale."""
-        return self.persistent == "constant" and self.transitory == "none"
+        """Equation weights ``m_t/λ_i`` are time-constant: Constant core, no transitory scale and no
+        common volatility (P3 E50: with ``common`` the weights are ``m_t/(λ_i e^{h_t})``)."""
+        return self.persistent == "constant" and self.transitory == "none" and not self.common
 
 
 @dataclass(frozen=True)
@@ -298,7 +345,18 @@ def validate_composition(
     7. ``fixed_factor`` needs Mode II and a non-varying coefficient prior;
     8. ``rw`` and ``zero_offset`` are SV options (``rw`` ignores ``h0``);
     9. outliers need ``outlier_K >= 2``;
-    10. Student-t with ``t_scale="standardized"`` needs every grid ν > 2.
+    10. Student-t with ``t_scale="standardized"`` needs every grid ν > 2;
+
+    Phase 3 (P3 DESIGN §2.1; rule 5 exempts ``shared_factor``, which has time-varying common
+    weights by construction):
+
+    11. a varying coefficient prior needs ``coef_log``, the ``weighted`` path and no λ-scaled
+        coefficient block (global-local priors are independent priors; P3 D-43);
+    12. ``coef_log`` needs a ``linear_structural`` or ``linear_reduced`` mean and a varying prior;
+    13. ``common`` (CommonSV) needs the Constant core and no transitory scale;
+    14. ``shared_factor`` needs ``linear_structural``, Mode II, ``common`` and a non-varying
+        coefficient prior (the equation invariance of its prior precision is data, checked by
+        ``resolve.py``).
     """
     scaled = struct.contemp_scaling == "lambda" or mean.coef_scaling == "lambda"
     mode = scaling_mode(struct, mean)
@@ -323,13 +381,14 @@ def validate_composition(
         )
     if vol.coupled and not scaled:
         raise ValueError("VolStatic.coupled=True without a λ-scaled prior block")
+    varies = COEF_VARIES[coef.kind]
     if mean.const_path != "weighted":
         if mean.kind != "linear_structural":
             raise ValueError(
                 f"const_path={mean.const_path!r} is a structural Linear path; "
                 f"use 'weighted' for mean kind {mean.kind!r}"
             )
-        if not vol.constant_weights:
+        if not vol.constant_weights and mean.const_path != "shared_factor":
             raise ValueError(
                 f"const_path={mean.const_path!r} needs time-constant weights "
                 "(Constant core, no transitory scale); use 'weighted'"
@@ -351,3 +410,39 @@ def validate_composition(
             "a standardized Student-t needs ν > 2 on the whole grid (Var = 1 requires ν > 2); "
             "drop ν <= 2 or use t_scale='unit'"
         )
+    if varies:
+        if not mean.coef_log:
+            raise ValueError(
+                f"the {coef.kind!r} coefficient prior varies during sampling and needs "
+                "MeanStatic(coef_log=True), the deviation path of P3 §3.4"
+            )
+        if mean.const_path != "weighted":
+            raise ValueError(
+                f"the {coef.kind!r} coefficient prior varies during sampling; "
+                f"const_path={mean.const_path!r} needs a fixed prior: use 'weighted'"
+            )
+        if mean.coef_scaling == "lambda":
+            raise ValueError(
+                f"the {coef.kind!r} coefficient prior is an independent prior; a λ-scaled "
+                "coefficient block (Mode II, Constant('iw')) is not available with it"
+            )
+    if mean.coef_log:
+        if mean.kind not in ("linear_structural", "linear_reduced"):
+            raise ValueError(
+                f"coef_log=True is a Linear mean path; mean kind {mean.kind!r} has none"
+            )
+        if not varies:
+            raise ValueError(
+                "coef_log=True (the deviation path) belongs to a varying coefficient prior; "
+                f"{coef.kind!r} is fixed"
+            )
+    if vol.common and (vol.persistent != "constant" or vol.transitory != "none"):
+        raise ValueError(
+            "CommonSV (common=True) needs the Constant persistent core and no transitory scale"
+        )
+    if mean.const_path == "shared_factor":
+        if mean.kind != "linear_structural" or mode != "II" or not vol.common or varies:
+            raise ValueError(
+                "const_path='shared_factor' needs the structural Linear mean, Mode II (the "
+                "conjugate prior), CommonSV (common=True) and a fixed coefficient prior"
+            )

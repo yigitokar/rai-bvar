@@ -245,7 +245,7 @@ def _check_capabilities(
     path = static.mean.const_path
     if path in ("eigen", "fixed_factor") and getattr(coef, "varies", False):
         raise ValueError(f"const_path={path!r} needs a coefficient prior that does not vary")
-    if path != "weighted":
+    if path not in ("weighted", "shared_factor"):  # shared_factor: common time-varying weights
         constant = getattr(vol, "constant_weights", None)
         if callable(constant) and not constant():
             raise ValueError(f"const_path={path!r} needs a volatility block with constant weights")
@@ -309,7 +309,10 @@ def _compose(static: StaticConfig, overrides: Mapping[str, Any]) -> Program:
     else:
         pre_steps = tuple(_build(kind, None, gpool, internals) for kind in kinds["global_pre"])
     coef_steps = tuple(_with_internals(g, internals) for g in coef.global_steps())
-    global_pre, global_post = _order_global_steps(pre_steps + coef_steps)
+    # Phase 3: a volatility block with global state brings its own steps (CommonSV, P3 §2.4)
+    vol_global = getattr(vol, "global_steps", None)
+    vol_steps = tuple(_with_internals(g, internals) for g in vol_global()) if vol_global else ()
+    global_pre, global_post = _order_global_steps(pre_steps + coef_steps + vol_steps)
 
     _check_capabilities(static, structure, mean, coef, vol)
     batching = max(
