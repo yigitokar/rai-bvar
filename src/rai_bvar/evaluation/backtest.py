@@ -41,10 +41,14 @@ MCMC models (DESIGN §11.6, WP23):
   ``"lpd": "<method>-v1"`` to the cache key of every model (the estimator changes the scores,
   not the fit) and ``attrs["lpd_method"]`` to the scores; ``"integrated"`` scores also carry the
   default estimator next to it (``score_forecast``). At ``h > 1`` the integrated estimator needs
-  the ``lag_coefs`` of MCMC forecasts: an analytic or benchmark model raises ``ValueError`` at
-  its first origin, after that origin's fit, with the model's name and the origin in the message
-  (``compare`` runs its backtests one after another, so list such a model first or pass a
-  cache). Changing ``lpd_method`` on an existing cache refits every origin (and every warm
+  the forecast's ``lag_coefs``: with ``"integrated"`` and ``horizon > 1`` every origin's forecast
+  is made with ``forecast(..., lag_coefs=True)`` (P3 DESIGN D-49, E120; analytic and structural
+  NIG fits then attach it, MCMC fits attach it always and are called as before,
+  ``models.base.forecast_options``); a model that cannot provide it (a benchmark) raises
+  ``ValueError`` at its first origin, after that origin's fit, with the model's name and the
+  origin in the message (``compare`` runs its backtests one after another, so list such a model
+  first or pass a cache). The request adds no random numbers, so it changes no forecast and no
+  cache key. Changing ``lpd_method`` on an existing cache refits every origin (and every warm
   chain), although fits and forecasts do not depend on it; ``"integrated"`` stores the default
   estimator too, so one run gives both.
 """
@@ -76,7 +80,7 @@ from rai_bvar._version import __version__
 from rai_bvar.data.dataset import VARData
 from rai_bvar.evaluation.scores import score_forecast
 from rai_bvar.forecast.result import LPD_METHODS
-from rai_bvar.models.base import Model
+from rai_bvar.models.base import Model, forecast_options
 
 DataSource = VARData | Callable[[pd.Period], VARData]
 DEFAULT_LPD = "conditioned"  # the SPEC §7 estimator: Phase 1 / WP23 scores and cache keys
@@ -374,6 +378,12 @@ def _check_lpd_method(lpd_method: Any) -> None:
         raise ValueError(f"lpd_method must be one of {LPD_METHODS}, got {lpd_method!r}")
 
 
+def needs_lag_coefs(lpd_method: str, horizons: Sequence[int]) -> bool:
+    """Whether forecasts scored with ``lpd_method`` at ``horizons`` need ``lag_coefs`` (P3 DESIGN
+    D-49): the integrated estimator at some horizon ``> 1``."""
+    return lpd_method == "integrated" and any(int(h) > 1 for h in horizons)
+
+
 def _lpd_kwargs(lpd_method: str) -> dict[str, str]:
     """``lpd_method=`` for :func:`_fit_and_score` only when it is not the default, so the default
     call stays the WP23 one."""
@@ -429,8 +439,10 @@ def _fit_and_score(
     Models without ``uses_fit_seed`` are called exactly as in Phase 1, ``fit(sample)``. The
     forecast generator ``default_rng([seed, crc32(origin)])`` is the Phase 1 one for every model.
     ``lpd_method`` goes to ``score_forecast`` (it uses no random numbers, so every other score is
-    the same whatever the estimator). A ``ValueError`` from scoring is re-raised with the model's
-    name and the origin in front of its message (a plain string: it pickles from a worker).
+    the same whatever the estimator); with ``"integrated"`` and ``horizon > 1`` the forecast is
+    requested with ``lag_coefs=True`` (D-49; no new random numbers). A ``ValueError`` from
+    scoring is re-raised with the model's name and the origin in front of its message (a plain
+    string: it pickles from a worker).
     """
     rng = np.random.default_rng([seed, zlib.crc32(str(origin).encode())])
     uses_seed = bool(getattr(model, "uses_fit_seed", False))
@@ -443,7 +455,8 @@ def _fit_and_score(
             fit = model.fit(sample, **kwargs)
         else:
             fit = model.fit(sample)
-        forecast = fit.forecast(horizon, draws, seed=rng)
+        options = forecast_options(fit, lag_coefs=needs_lag_coefs(lpd_method, (horizon,)))
+        forecast = fit.forecast(horizon, draws, seed=rng, **options)
     messages, passthrough = [], []
     for w in caught:  # user warnings are aggregated across origins; others go back to the caller
         if issubclass(w.category, UserWarning):

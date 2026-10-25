@@ -32,9 +32,11 @@ maximum is the conservative choice: noise is never understated (ARRS's 30-chain 
 Backtest scores carry no MCSE, so ``mode="backtest"`` needs ``noise_reps ≥ 1`` (otherwise no
 signal-to-noise ratio exists and "not material" would mean "undetermined").
 ``lpd_method`` (forecast and backtest modes) selects the estimator of every LPD statistic (DESIGN
-§7.3, D-34): the default is the SPEC §7 estimator, ``"integrated"`` the path-integrated one (MCMC
-models at ``h > 1``). The pooled forecast carries no ``lag_coefs``, so the integrated estimator
-raises for it at ``h > 1``.
+§7.3, D-34): the default is the SPEC §7 estimator, ``"integrated"`` the path-integrated one; with
+it and some horizon ``> 1`` every forecast is requested with ``lag_coefs=True`` (P3 DESIGN D-49:
+analytic and structural NIG fits then attach it, MCMC fits always do; benchmarks cannot and
+raise). The pooled forecast carries no ``lag_coefs``, so the integrated estimator raises for it
+at ``h > 1``.
 
 **Metrics** (per variable × horizon, joint where defined; over orderings; heuristic thresholds
 of N08 §B4 in :data:`THRESHOLDS`):
@@ -96,7 +98,7 @@ from rai_bvar._version import __version__
 from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import regressor_names
 from rai_bvar.forecast.result import LPD_METHODS, ForecastResult
-from rai_bvar.models.base import Model, spec_hash
+from rai_bvar.models.base import Model, forecast_options, spec_hash
 
 __all__ = [
     "MAX_ALL_ORDERINGS",
@@ -1323,6 +1325,8 @@ def _forecast_mode(
     batch: bool,
     lpd_method: str = "conditioned",
 ) -> OrderingSensitivityResult:
+    from rai_bvar.evaluation.backtest import needs_lag_coefs
+
     draws = FORECAST_DRAWS if draws is None else _positive_int(draws, "draws")
     data = ctx.data
     origin = _forecast_origin(origins, data)
@@ -1349,6 +1353,8 @@ def _forecast_mode(
 
     lags = getattr(ctx.model, "lags", None)
     det = getattr(ctx.model, "deterministic", None)
+    # the integrated LPD at h > 1 needs each forecast's lag_coefs (P3 D-49; no new random numbers)
+    lag = needs_lag_coefs(lpd_method, ctx.horizons)
     values, joints, posts, conv, forecasts = [], [], [], [], []
     mcse = mcse_joint = None
     for j in range(K + R):
@@ -1360,7 +1366,7 @@ def _forecast_mode(
             )[0]
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            fc = fit.forecast(H, draws, seed=fc_seeds[j])
+            fc = fit.forecast(H, draws, seed=fc_seeds[j], **forecast_options(fit, lag_coefs=lag))
         log.record(labels[j], caught)
         v, jt, mc, mcj = _forecast_stats(
             fc, run_orders[j], ctx.variables, ctx.horizons, ctx.quantiles, realized,

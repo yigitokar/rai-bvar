@@ -50,7 +50,7 @@ from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import lagged_design, n_deterministic
 from rai_bvar.data.outliers import COVID_NAMES, LenzaPrimiceri
 from rai_bvar.diagnostics import ess_bulk, rhat
-from rai_bvar.forecast.result import ForecastResult
+from rai_bvar.forecast.result import LAG_DIMS, ForecastResult
 from rai_bvar.forecast.simulate import simulate_linear_var
 from rai_bvar.linalg import (
     gram_cholesky,
@@ -62,7 +62,8 @@ from rai_bvar.models.base import SeedLike, seed_label, spec_hash_of
 from rai_bvar.priors.minnesota import Minnesota
 
 _LOG_PI = float(np.log(np.pi))
-_SCALARS = frozenset({"lambda", "alpha", "soc", "sur"})
+# scalar hyperparameters of a _Free vector (cross/contemp: the structural NIG problem, P3 §4.3)
+_SCALARS = frozenset({"lambda", "alpha", "soc", "sur", "cross", "contemp"})
 _CHUNK_ELEMENTS = 20_000_000  # coefficient-draw elements simulated at a time (~160 MB)
 _DRAW_BLOCK = 16  # parameter draws per random stream (chunk-size invariance)
 _STATIONARITY_TOL = 1e-6  # accepted predicted Newton gain at an EB mode (log-posterior units)
@@ -499,14 +500,132 @@ class ConjugateProblem:
         return value if np.isfinite(value) else -np.inf
 
 
-class AnalyticFit:
+class _LinearDraws:
+    """Draws, forecasts and impulse responses of an analytic fit with iid parameter draws.
+
+    Shared by :class:`AnalyticFit` and the structural NIG fit (``engines.structural_nig.
+    StructuralNIGFit``, P3 DESIGN §4.2), so both forecast with the same random streams, chunking
+    and attrs. A subclass provides ``model``, ``data``, ``warnings``, ``mh``, ``mh_seed``,
+    ``converged``, ``_iter_draws(size, rng)`` (chunks ``(slice, coefs, chol, covid or None)``)
+    and ``_layout()`` (``(k, n, n_det, outliers or None)``).
+    """
+
+    engine = "analytic"
+
+    def draw_parameters(self, size: int, rng: SeedLike = None) -> tuple[np.ndarray, np.ndarray]:
+        """Posterior draws ``(coefs (S, k, n), chol (S, n, n))``, integrating over MH hyperparameters."""
+        k, n, _, _ = self._layout()
+        coefs = np.empty((size, k, n))
+        chol = np.empty((size, n, n))
+        for sl, c, ch, _ in self._iter_draws(size, np.random.default_rng(rng)):
+            coefs[sl], chol[sl] = c, ch
+        return coefs, chol
+
+    def forecast(
+        self, horizon: int, draws: int = 1000, seed: SeedLike = None, *, lag_coefs: bool = False
+    ) -> ForecastResult:
+        """Predictive paths and their conditional moments (SPEC §7).
+
+        ``lag_coefs=True`` (P3 DESIGN D-49, E120) also attaches the accelerator variable
+        ``lag_coefs (chain, draw, lag, variable, variable_)``, ``A_l`` of each path's parameter
+        draw (``lag_coefs[0, s, l−1, i, j] = B[n_det + (l−1)·n + j, i]``), which
+        ``log_pred_density(lpd_method="integrated")`` needs at ``h > 1``. It is filled per chunk
+        from the coefficient draws the forecast already makes (no new random numbers), so
+        ``paths``, ``cond_mean`` and ``cond_chol`` are bitwise the same either way; it costs
+        ``draws·p·n²·8`` bytes, so the default forecast does not carry it (its memory and its
+        cache keys stay as in Phase 1).
+        """
+        if horizon < 1 or draws < 1:
+            raise ValueError("horizon and draws must be positive")
+        if not isinstance(lag_coefs, bool | np.bool_):
+            raise TypeError(f"lag_coefs must be a bool, got {lag_coefs!r}")
+        rng = np.random.default_rng(seed)
+        label = seed_label(seed, rng)
+        _, n, n_det, outliers = self._layout()
+        values, lags = self.data.values, self.model.lags
+        paths, means = np.empty((draws, horizon, n)), np.empty((draws, horizon, n))
+        scaled = outliers is not None
+        # without COVID scaling the conditional factor does not depend on h: keep (S, n, n) and
+        # expose a zero-stride view instead of materialising (S, H, n, n)
+        store = np.empty((draws, horizon, n, n)) if scaled else np.empty((draws, n, n))
+        lag = np.empty((draws, lags, n, n)) if lag_coefs else None
+        future = pd.period_range(self.data.last + 1, periods=horizon, freq=self.data.index.freq)
+        shock_rng = rng.spawn(1)[0]  # leaves rng's own stream to the parameter draws
+        shocks = shock_rng.standard_normal((draws, horizon, n))
+        for sl, coefs, chol, covid in self._iter_draws(draws, rng):
+            scale = None if covid is None else outliers.scales(future, covid)
+            p, m, c = simulate_linear_var(
+                coefs,
+                chol,
+                values[-lags:],
+                horizon,
+                self.model.deterministic,
+                len(values),
+                shock_rng,
+                scale,
+                shocks=shocks[sl],
+            )
+            paths[sl], means[sl] = p, m
+            store[sl] = c if scaled else chol
+            if lag is not None:  # A_l[i, j] = B[n_det + (l−1)n + j, i] (as the MCMC forecast)
+                lag[sl] = coefs[:, n_det:].reshape(len(coefs), lags, n, n).swapaxes(-1, -2)
+        cond_chol = store if scaled else np.broadcast_to(store[:, None], (draws, horizon, n, n))
+        spec = self.model.spec()
+        return ForecastResult.from_arrays(
+            paths=paths,
+            cond_mean=means,
+            cond_chol=cond_chol,
+            paths_level=self.data.inverse_paths(paths),
+            variables=self.data.variables,
+            origin=self.data.last,
+            attrs={
+                "model": self.model.name,
+                "engine": self.engine,
+                "spec": spec,
+                "spec_hash": spec_hash_of(spec),
+                "tcodes": self.data.tcodes,
+                "ordering": list(self.data.variables),  # SPEC R8; same string as the MCMC engine
+                "seed": label,
+                "mh_seed": self.mh_seed if self.mh is not None else -1,
+                "converged": int(self.converged),
+                "warnings": "\n".join(self.warnings),
+                "rai_bvar_version": __version__,
+            },
+            extra=None if lag is None else {"lag_coefs": (LAG_DIMS, lag)},
+        )
+
+    def irf(self, horizon: int = 20, draws: int = 1000, seed: SeedLike = None, shock: str = "sd"):
+        """Recursive (Cholesky) impulse responses to pre-COVID one-s.d. (or unit) shocks."""
+        from rai_bvar.structural import IRFResult, recursive_irf
+
+        if horizon < 0 or draws < 1:
+            raise ValueError("horizon must be ≥ 0 and draws positive")
+        rng = np.random.default_rng(seed)
+        label = seed_label(seed, rng)
+        _, n, n_det, _ = self._layout()
+        responses = np.empty((draws, horizon + 1, n, n))
+        for sl, coefs, chol, _ in self._iter_draws(draws, rng):
+            responses[sl] = recursive_irf(coefs, chol, self.model.lags, n_det, horizon, shock=shock)
+        spec = self.model.spec()
+        return IRFResult.from_arrays(
+            responses,
+            self.data.variables,
+            shock=shock,
+            attrs={
+                "model": self.model.name,
+                "spec_hash": spec_hash_of(spec),
+                "seed": label,
+                "mh_seed": self.mh_seed if self.mh is not None else -1,
+            },
+        )
+
+
+class AnalyticFit(_LinearDraws):
     """A fitted conjugate BVAR: hyperparameters, posterior, forecasts and impulse responses.
 
     ``warnings`` collects every warning the fit raised (also recorded in forecast attrs, so
     backtests can aggregate them across origins).
     """
-
-    engine = "analytic"
 
     def __init__(self, model, data: VARData, seed: int | None):
         if seed is not None and (
@@ -578,13 +697,9 @@ class AnalyticFit:
 
     # ------------------------------------------------------------------ draws
 
-    def draw_parameters(self, size: int, rng: SeedLike = None) -> tuple[np.ndarray, np.ndarray]:
-        """Posterior draws ``(coefs (S, k, n), chol (S, n, n))``, integrating over MH hyperparameters."""
-        coefs = np.empty((size, self.problem.k, self.problem.n))
-        chol = np.empty((size, self.problem.n, self.problem.n))
-        for sl, c, ch, _ in self._iter_draws(size, np.random.default_rng(rng)):
-            coefs[sl], chol[sl] = c, ch
-        return coefs, chol
+    def _layout(self) -> tuple[int, int, int, LenzaPrimiceri | None]:
+        prob = self.problem
+        return prob.k, prob.n, prob.n_det, prob.outliers
 
     def _iter_draws(
         self, size: int, rng: np.random.Generator
@@ -653,87 +768,6 @@ class AnalyticFit:
                 covid[:, prior_only] = prior_draws[start : start + total][:, prior_only]
             yield slice(start, start + total), coefs, chol, covid
             start += total
-
-    def forecast(self, horizon: int, draws: int = 1000, seed: SeedLike = None) -> ForecastResult:
-        if horizon < 1 or draws < 1:
-            raise ValueError("horizon and draws must be positive")
-        rng = np.random.default_rng(seed)
-        label = seed_label(seed, rng)
-        prob, values = self.problem, self.data.values
-        n = prob.n
-        paths, means = np.empty((draws, horizon, n)), np.empty((draws, horizon, n))
-        scaled = prob.outliers is not None
-        # without COVID scaling the conditional factor does not depend on h: keep (S, n, n) and
-        # expose a zero-stride view instead of materialising (S, H, n, n)
-        store = np.empty((draws, horizon, n, n)) if scaled else np.empty((draws, n, n))
-        future = pd.period_range(self.data.last + 1, periods=horizon, freq=self.data.index.freq)
-        shock_rng = rng.spawn(1)[0]  # leaves rng's own stream to the parameter draws
-        shocks = shock_rng.standard_normal((draws, horizon, n))
-        for sl, coefs, chol, covid in self._iter_draws(draws, rng):
-            scale = None if covid is None else prob.outliers.scales(future, covid)
-            p, m, c = simulate_linear_var(
-                coefs,
-                chol,
-                values[-self.model.lags :],
-                horizon,
-                self.model.deterministic,
-                len(values),
-                shock_rng,
-                scale,
-                shocks=shocks[sl],
-            )
-            paths[sl], means[sl] = p, m
-            store[sl] = c if scaled else chol
-        cond_chol = store if scaled else np.broadcast_to(store[:, None], (draws, horizon, n, n))
-        spec = self.model.spec()
-        return ForecastResult.from_arrays(
-            paths=paths,
-            cond_mean=means,
-            cond_chol=cond_chol,
-            paths_level=self.data.inverse_paths(paths),
-            variables=self.data.variables,
-            origin=self.data.last,
-            attrs={
-                "model": self.model.name,
-                "engine": self.engine,
-                "spec": spec,
-                "spec_hash": spec_hash_of(spec),
-                "tcodes": self.data.tcodes,
-                "ordering": list(self.data.variables),  # SPEC R8; same string as the MCMC engine
-                "seed": label,
-                "mh_seed": self.mh_seed if self.mh is not None else -1,
-                "converged": int(self.converged),
-                "warnings": "\n".join(self.warnings),
-                "rai_bvar_version": __version__,
-            },
-        )
-
-    def irf(self, horizon: int = 20, draws: int = 1000, seed: SeedLike = None, shock: str = "sd"):
-        """Recursive (Cholesky) impulse responses to pre-COVID one-s.d. (or unit) shocks."""
-        from rai_bvar.structural import IRFResult, recursive_irf
-
-        if horizon < 0 or draws < 1:
-            raise ValueError("horizon must be ≥ 0 and draws positive")
-        rng = np.random.default_rng(seed)
-        label = seed_label(seed, rng)
-        n = self.problem.n
-        responses = np.empty((draws, horizon + 1, n, n))
-        for sl, coefs, chol, _ in self._iter_draws(draws, rng):
-            responses[sl] = recursive_irf(
-                coefs, chol, self.model.lags, self.problem.n_det, horizon, shock=shock
-            )
-        spec = self.model.spec()
-        return IRFResult.from_arrays(
-            responses,
-            self.data.variables,
-            shock=shock,
-            attrs={
-                "model": self.model.name,
-                "spec_hash": spec_hash_of(spec),
-                "seed": label,
-                "mh_seed": self.mh_seed if self.mh is not None else -1,
-            },
-        )
 
     # ------------------------------------------------------------------ estimation
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
@@ -17,9 +18,37 @@ SeedLike = int | np.random.Generator | np.random.SeedSequence | None
 
 @runtime_checkable
 class FittedModel(Protocol):
+    """A fitted model: ``forecast(horizon, draws, seed, *, lag_coefs=False)``.
+
+    ``lag_coefs=True`` asks for the accelerator variable ``lag_coefs`` (the lag matrices of each
+    path's parameter draw, P3 DESIGN D-49, E120), which ``log_pred_density(lpd_method=
+    "integrated")`` needs at ``h > 1``; a fit that cannot provide it accepts and ignores the
+    keyword (the benchmarks). The default forecast is the Phase 1 one.
+    """
+
     def forecast(
-        self, horizon: int, draws: int = 1000, seed: SeedLike = None
+        self, horizon: int, draws: int = 1000, seed: SeedLike = None, *, lag_coefs: bool = False
     ) -> ForecastResult: ...
+
+
+def forecast_options(fit: Any, *, lag_coefs: bool) -> dict[str, Any]:
+    """Keywords for ``fit.forecast`` (P3 DESIGN D-49): ``{"lag_coefs": True}`` when
+    ``lag_coefs`` is requested and ``fit.forecast`` takes the keyword, else ``{}`` (the call is
+    then exactly the Phase 1 one). A forecast without the keyword is a fit that attaches
+    ``lag_coefs`` whenever it can (``MCMCFit``, P2 D-34) or a model written to the Phase 1
+    protocol; it is called as before."""
+    if not lag_coefs:
+        return {}
+    try:
+        params = inspect.signature(fit.forecast).parameters.values()
+    except (TypeError, ValueError):  # no introspectable signature: call as before
+        return {}
+    takes = any(
+        p.kind is inspect.Parameter.VAR_KEYWORD
+        or (p.name == "lag_coefs" and p.kind is not inspect.Parameter.POSITIONAL_ONLY)
+        for p in params
+    )
+    return {"lag_coefs": True} if takes else {}
 
 
 @runtime_checkable
