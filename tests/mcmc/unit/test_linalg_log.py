@@ -123,7 +123,10 @@ def test_matches_precision_draw_on_the_same_noise(seed, m, T, q, lpm, lps, col, 
     env = envelope(pr.K, pr.b, act)
     err = np.max(np.abs((pr.mean + np.asarray(d))[act] - np.asarray(th)[act]) / env.sd)
     assert err <= path_tolerance(env), (err, env.kappa, env.t)
-    np.testing.assert_allclose(float(info_l.min_pivot), float(info.min_pivot), rtol=1e-10)
+    # pivots of the unit-diagonal sKs: absolute rounding O(mε) (relative 3e-9 at a pivot of 7e-8)
+    np.testing.assert_allclose(
+        float(info_l.min_pivot), float(info.min_pivot), rtol=1e-10, atol=1e-13
+    )
 
 
 # --------------------------------------------------------------------------- against mpmath

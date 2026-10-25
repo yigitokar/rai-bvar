@@ -164,7 +164,7 @@ def test_shared_factor_equals_the_weighted_path_on_the_same_noise(
         assert np.all(theta[i][~act] == 0.0)
     # each equation's pivots are D-14's pivots of its own K (the leading block)
     np.testing.assert_allclose(
-        np.asarray(infos.min_pivot), np.asarray(info_w.min_pivot), rtol=1e-10
+        np.asarray(infos.min_pivot), np.asarray(info_w.min_pivot), rtol=1e-10, atol=1e-13
     )
 
 
