@@ -26,13 +26,16 @@ draws and the exact log marginal likelihood, hyperparameters ``fixed``, ``eb`` (
   under the same rule, with the analytic forecast's iid draws as the reference (``N_ref``).
 
 Besides A9: the fit contract (dispatch, attrs, the forecast structure checks, ``lag_coefs`` on
-request), Monte Carlo moments of ``draw_parameters`` against ``posterior_moments``, ``psi`` free
+request; no JAX loaded, §1.1), Monte Carlo moments of ``draw_parameters`` against
+``posterior_moments``, ``psi`` free
 only at ``cross = contemp = 1`` (the twin's mode), the R8 note for ``n ≥ 4`` when ``cross ≠ 1``
 or ``contemp ≠ 1``, and the MH seed (``fit(seed=…)``, E131).
 """
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import warnings
 
 import numpy as np
@@ -251,14 +254,22 @@ def test_a9_free_cross_eb_passes_phase1s_stationarity_test(data, name):
 # gradient of 4.5e-6 (lambda+cross) and 1.4e-6 (+contemp) on this window, above A9's 1e-6, while
 # Phase 1's stationarity rule (predicted Newton gain 9e-13 and 1.6e-13 < 1e-6) passes. A tighter
 # pgtol alone does not reach 1e-6 (ftol then stops it), so meeting the criterion means changing
-# the optimiser's tolerances: the owner's decision. Strict: a pass is reported.
-_PG_FINDING = pytest.mark.xfail(
-    strict=True,
-    reason="A9 projected gradient 4.5e-6 / 1.4e-6 > 1e-6 at the L-BFGS-B stop (WP33 finding)",
-)
+# the optimiser's tolerances: the owner's decision.
+# The +contemp case misses by 37% only, and where L-BFGS-B stops depends on its finite-difference
+# gradients (BLAS rounding), so that case is not strict: an XPASS elsewhere is not a regression.
+_PG_FINDING = {
+    "lambda+cross": pytest.mark.xfail(
+        strict=True,
+        reason="A9 projected gradient 4.5e-6 > 1e-6 at the L-BFGS-B stop (WP33 finding)",
+    ),
+    "lambda+cross+contemp": pytest.mark.xfail(
+        strict=False,
+        reason="A9 projected gradient 1.4e-6 > 1e-6 at the L-BFGS-B stop (WP33 finding; 37% margin)",
+    ),
+}
 
 
-@pytest.mark.parametrize("name", [pytest.param(n, marks=_PG_FINDING) for n in EB_FREE])
+@pytest.mark.parametrize("name", [pytest.param(n, marks=_PG_FINDING[n]) for n in EB_FREE])
 def test_a9_free_cross_eb_projected_gradient(data, name):
     model = ac(**EB_FREE[name])
     fit = fitted(model, data)
@@ -405,6 +416,29 @@ def test_r8_note_from_four_variables_when_not_the_niw_prior():
     ]
     assert note == [False, True, True]
     assert not any(ORDERING_NOTE in w for w in fitted(ac(hierarchy="fixed"), var_data()).warnings)
+
+
+def test_the_structural_nig_fit_never_loads_jax():
+    """P3 §1.1: the analytic engine for AsymmetricConjugate is NumPy only (fit with EB and MH,
+    forecast with ``lag_coefs``, IRFs, posterior moments, the ordering check's prior mode)."""
+    code = (
+        "import sys\n"
+        "import numpy as np, pandas as pd\n"
+        "import rai_bvar as rb\n"
+        "from rai_bvar.structural.ordering import prior_covariance_draws\n"
+        "rng = np.random.default_rng(0)\n"
+        "idx = pd.period_range('1980Q1', periods=60, freq='Q')\n"
+        "d = rb.VARData.from_frame(pd.DataFrame(rng.standard_normal((60, 3)), index=idx,\n"
+        "                                       columns=list('abc')))\n"
+        "mh = rb.MHSettings(draws=20, burn=10, chains=2)\n"
+        "for prior in (rb.AsymmetricConjugate(soc=1.0), rb.AsymmetricConjugate(hierarchy='mh', mh=mh)):\n"
+        "    m = rb.BVAR(mean=rb.Linear(prior), lags=2)\n"
+        "    fit = m.fit(d)\n"
+        "    fit.forecast(2, 10, seed=1, lag_coefs=True); fit.irf(2, 5, seed=1)\n"
+        "    fit.posterior_moments(); fit.summary(); prior_covariance_draws(m, d, 50)\n"
+        "assert 'jax' not in sys.modules, 'the structural NIG fit loaded JAX'\n"
+    )
+    subprocess.run([sys.executable, "-W", "ignore", "-c", code], check=True)
 
 
 def test_mh_seed_comes_from_the_fit_or_the_settings(data):

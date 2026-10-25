@@ -8,7 +8,8 @@
   numbers): ``paths``, ``cond_mean`` and ``cond_chol`` are bitwise the default's, and the lag
   matrices are those of ``draw_parameters`` on the same seed —
   :func:`test_lag_coefs_on_request_adds_no_random_numbers` (``hierarchy`` fixed and ``mh``, and
-  more draws than one chunk of ``_DRAW_BLOCK``);
+  more draws than one chunk of ``_DRAW_BLOCK``); their orientation end to end, with one draw the
+  integrated estimator is the exact two-step density — :func:`test_lag_coefs_orientation_end_to_end`;
 * the benchmarks accept the keyword and ignore it (the forecast protocol, ``models.base``), and
   ``models.base.forecast_options`` passes it only to forecasts that take it —
   :func:`test_benchmarks_accept_and_ignore_the_keyword`, :func:`test_forecast_options`.
@@ -23,6 +24,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 import rai_bvar as rb
 from rai_bvar.forecast.result import LAG_DIMS
@@ -111,6 +113,28 @@ def test_lag_coefs_on_request_adds_no_random_numbers(data, hierarchy):
     y = data.values[-1]
     assert np.isfinite(fr.log_pred_density(y, 2, lpd_method="integrated"))
     assert fr.log_pred_density(y, 1, lpd_method="integrated") == fr.log_pred_density(y, 1)
+
+
+def test_lag_coefs_orientation_end_to_end(data):
+    """One draw, constant volatility: the integrated estimator is the exact density
+    ``y_{T+2} | θ ~ N(m_2 − A_1 u_1, A_1ΣA_1ᵀ + Σ)`` (``u_1 = paths_1 − m_1``), with ``A_1`` built
+    here by index from the draw's coefficients (``A_1[i, j]`` = coefficient of lag 1 of variable
+    ``j`` in equation ``i``, regressor row ``1 + j`` after the constant)."""
+    fit = fitted(data)
+    ds = fit.forecast(2, 1, seed=8, lag_coefs=True).dataset
+    coefs, chol = fit.draw_parameters(1, 8)
+    A1 = np.empty((N, N))
+    for i in range(N):
+        for j in range(N):
+            A1[i, j] = coefs[0, 1 + j, i]
+    np.testing.assert_array_equal(ds["lag_coefs"].values[0, 0, 0], A1)
+    sigma = chol[0] @ chol[0].T
+    paths, means = ds["paths"].values[0, 0], ds["cond_mean"].values[0, 0]
+    mean2 = means[1] - A1 @ (paths[0] - means[0])
+    y = data.values[-1] + 0.3
+    want = stats.multivariate_normal(mean2, A1 @ sigma @ A1.T + sigma).logpdf(y)
+    got = rb.ForecastResult(ds).log_pred_density(y, 2, lpd_method="integrated")
+    assert got == pytest.approx(want, abs=1e-10)
 
 
 def test_benchmarks_accept_and_ignore_the_keyword(data):
