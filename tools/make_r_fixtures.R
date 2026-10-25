@@ -2685,9 +2685,11 @@ PROBES <- list(
     design = paste(
       "the columns of the returned X are matched exactly (max abs difference < 1e-10) to the",
       "rai-bvar design (const, lag-1 block, ..., lag-p block) built from the CSV, and PHI row r",
-      "is taken to belong to X column r; checks: the PHI row of the constant has posterior mean",
-      "(5, -3) +- 0.5 on probe_corr, and on var_sv_n3 (p = 2, loose prior) the mapped posterior",
-      "mean of every coefficient is within 0.3 of the simulated (c, B)")),
+      "is taken to belong to X column r; check: under a loose prior with constant variances the",
+      "mapped posterior mean of every PHI entry is within 0.05 (max abs difference) of the OLS",
+      "coefficients, on probe_corr (p = 1) and on var_sv_n3 (p = 2); decided iff every X column",
+      "matches exactly one design column, the intercept is the first or the last row on both",
+      "datasets, the lag rows follow rai-bvar's order and both OLS checks pass")),
   P4 = list(
     question = "What is the layout of the returned sv_para draws?",
     documented = "undocumented (N04 sec. 9.8, sec. 10 item 4)",
@@ -3746,7 +3748,10 @@ bv_gl_args <- function(fx, L) {
 }
 
 bv_transform <- function(Y, L) {
-  if (!isTRUE(L$standardise)) return(list(Y = Y, note = "none (P6: no internal standardisation)"))
+  if (!isTRUE(L$standardise)) {
+    return(list(Y = Y, note = if (identical(L$p6_outcome, "raw")) "none (P6 answered: raw)" else
+      "none (P6 unresolved)"))
+  }
   ctr <- colMeans(Y)
   scl <- apply(Y, 2, stats::sd)
   list(Y = sweep(sweep(Y, 2, ctr), 2, scl, "/"), center = ctr, scale = scl,
@@ -3891,6 +3896,7 @@ run_bvars_p3 <- function(env) {
   p3 <- list()
   p3$P6 <- attempt_probe("P6", probe_p6(L))
   L$standardise <- isTRUE(p3$P6$layout$standardise)
+  L$p6_outcome <- if (identical(p3$P6$status, "answered")) p3$P6$layout$p6_outcome else "undecided"
   p3$P7 <- attempt_probe("P7", probe_p7(L))
   if (!is.null(p3$P7$describe)) record_layout("bayesianvars_prior_phi.txt", p3$P7$describe)
   if (identical(p3$P7$status, "answered")) L$groups <- p3$P7$layout$groups
@@ -3924,12 +3930,16 @@ run_bvars_p3 <- function(env) {
   } else p8_txt <- "not run: P5 or P10 undecided"
   all_probes$P8$evidence <- paste(p8_txt, collapse = "; ")
   # parity runs
-  needs <- c("P1", "P2", "P3", "P4", "P5")
+  # staging dependencies (the rows of DESIGN 9.8): P1-P3 and P6 for every run, P4 for the SV runs,
+  # P5 for R2, P10 (and P7 for R8) for R3-R9; "its runs not met" is applied at comparison from
+  # each fixture's probe_answers (D-59), which also covers P8 and P9 (not needed to stage a run)
+  needs <- c("P1", "P2", "P3", "P6")
   run_txt <- character()
   for (i in seq_along(BV_RUN_TABLE)) {
     fx <- BV_RUN_TABLE[[i]]
     if (!want(fx$name)) next
-    dep <- c(needs, if (fx$family != "normal") c("P6", "P10"), if (identical(fx$groups, "olcl-lagwise")) "P7")
+    dep <- c(needs, if (fx$vol == "sv") "P4", if (fx$vol == "constant") "P5",
+             if (fx$family != "normal") "P10", if (identical(fx$groups, "olcl-lagwise")) "P7")
     open <- dep[vapply(dep, function(id) !identical(all_probes[[id]]$status, "answered"), logical(1))]
     if (length(open)) {
       run_txt <- c(run_txt, sprintf("%s (%s): not run, probes %s undecided (D-59: not met)", fx$name, fx$run, paste(open, collapse = ", ")))
@@ -4101,9 +4111,13 @@ wb_spec_code <- function(vol, p, tiny = FALSE) {
                    "T = nrow(data) - %dL, is_homoskedastic = FALSE); "), p, p))
 }
 
-wb_run_code <- function(vol, p, burn, draws, fixv = NULL, tiny = FALSE) {
+wb_sv_code <- function(sv) {
+  if (is.null(sv)) "" else "spec$prior$sv_a <- sv_setting$sv_a; spec$prior$sv_s <- sv_setting$sv_s; "
+}
+
+wb_run_code <- function(vol, p, burn, draws, fixv = NULL, tiny = FALSE, sv = NULL) {
   paste0(wb_spec_code(vol, p, tiny),
-         wb_fixv_code(fixv),
+         wb_fixv_code(fixv), wb_sv_code(sv),
          sprintf("burn <- estimate(spec, S = %dL, thin = 1L, show_progress = FALSE); ", burn),
          if (draws > 0L) sprintf("post <- estimate(burn, S = %dL, thin = 1L, show_progress = FALSE)",
                                  draws) else "post <- burn")
@@ -4119,8 +4133,10 @@ wb_eval <- function(code, vars, seed) {
 }
 
 # Chained estimate(·, S = s) calls after a burn-in: the last_draw state after every call.
-wb_chain <- function(Y, p, vol, burn, calls, s, seed, fixv = NULL, keep_post = TRUE, tiny = FALSE) {
-  r <- wb_eval(wb_run_code(vol, p, burn, 0L, fixv, tiny), list(data = Y, fixv = fixv), seed)
+wb_chain <- function(Y, p, vol, burn, calls, s, seed, fixv = NULL, keep_post = TRUE, tiny = FALSE,
+                     sv = NULL) {
+  r <- wb_eval(wb_run_code(vol, p, burn, 0L, fixv, tiny, sv), list(data = Y, fixv = fixv, sv_setting = sv),
+               seed)
   post <- r$env$post
   s_note <- ""
   if (s == 1L) {   # estimate() may refuse S = 1: then every call runs S = 2 draws
@@ -4388,7 +4404,9 @@ PROBES_WB <- list(
       "draws per fit and volatility: A (intercept / 10) and Sigma / 100 equal to the base fit",
       "under the Phase 2 rule => the volatility level is carried by Sigma and h has no free",
       "level (E h = 0); (c) the PIT of every rho draw against its full conditional given the",
-      "same sweep's h and variance under three candidates: rho ~ U(-1, 1) with h_0 = 0, rho ~",
+      "same call's h and variance (cSV: the same call's sigma2v; ncSV: unit variance on the stored",
+      "h-tilde; other conditioning variants are recorded as evidence only) under three",
+      "candidates: rho ~ U(-1, 1) with h_0 = 0, rho ~",
       "U(-1, 1) with a stationary h_1 (both rejected if any rho draw lies outside (-1, 1)), and",
       "a flat prior on the real line with h_0 = 0; KS alpha = 1e-3, no Metropolis repeats",
       "(repeat fraction <= 0.01): decided iff (b) passes and, for each volatility, exactly one",
@@ -4614,6 +4632,7 @@ wb_fix_scan <- function() {
   d <- wb_read("probe_t2n5.csv", P2_DATA)
   out <- character()
   cvs <- c(cSV = Inf, ncSV = Inf)
+  setting <- list(cSV = NULL, ncSV = NULL)
   for (vol in WB_VOLS) {
     pf <- wb_prior(wb_eval(wb_spec_code(vol, 1L, tiny = TRUE), list(data = d$Y), WB_SEED + 1399L)$env$spec)
     for (sc in list(c(1e6, 1e-6), c(1e6, 1), c(1e6, 1e6), c(1e8, 1), c(1e8, 1e-2))) {
@@ -4634,7 +4653,12 @@ wb_fix_scan <- function() {
           x <- as.numeric(state_matrix(s, f))
           if (!length(x)) NA_real_ else stats::sd(x) / abs(mean(x))
         }
-        cvs[[vol]] <- min(cvs[[vol]], if (vol == "ncSV") cv("sigma2_omega") else cv("sigma2v"), na.rm = TRUE)
+        cv_v <- if (vol == "ncSV") cv("sigma2_omega") else cv("sigma2v")
+        if (is.finite(cv_v) && cv_v <= 1e-3 && is.null(setting[[vol]])) {
+          setting[[vol]] <- list(sv_a = pf$sv_a * ma, sv_s = pf$sv_s * ms, cv = cv_v,
+                                 value = mean(as.numeric(state_matrix(s, if (vol == "ncSV") "sigma2_omega" else "sigma2v"))))
+        }
+        cvs[[vol]] <- min(cvs[[vol]], cv_v, na.rm = TRUE)
         sprintf("%s, sv_a x %g, sv_s x %g: CV(sigma2_omega) %.3g, CV(sigma2v) %.3g, CV(omega) %.3g, mean sigma2_omega %.4g",
                 vol, ma, ms, cv("sigma2_omega"), cv("sigma2v"), cv("omega"),
                 mean(as.numeric(state_matrix(s, "sigma2_omega")) %||% NA))
@@ -4642,7 +4666,7 @@ wb_fix_scan <- function() {
       out <- c(out, st)
     }
   }
-  list(text = out, fixed = is.finite(cvs) & cvs <= 1e-3)
+  list(text = out, fixed = is.finite(cvs) & cvs <= 1e-3, setting = setting)
 }
 
 # The scale experiment of P13 (b): A and Sigma/100 equivariant when the data are multiplied by 10.
@@ -4686,7 +4710,8 @@ run_wbvars_probes <- function() {
   pr$P12 <- attempt_probe("P12", wb_probe_p12())
   p16 <- tryCatch(wb_probe_p16(), error = function(e) e)
   scan <- tryCatch(wb_fix_scan(), error = function(e) list(text = paste("scan failed:", conditionMessage(e)),
-                                                           fixed = c(cSV = FALSE, ncSV = FALSE)))
+                                                           fixed = c(cSV = FALSE, ncSV = FALSE),
+                                                           setting = list(cSV = NULL, ncSV = NULL)))
   rmq <- pr$P15$rmq
   scale <- if (!is.null(rmq)) tryCatch(wb_scale_experiment(rmq),
                                        error = function(e) list(text = paste("failed:", conditionMessage(e)), pass = NA))
@@ -4716,12 +4741,19 @@ run_wbvars_probes <- function() {
     any(is.finite(v) & v > 1e-3)
   }
   same_only <- function(lst) lst[grepl("| h same", names(lst), fixed = TRUE)]
+  # the decision uses only the conditioning variant DESIGN 9.8 names (review m1): cSV the same
+  # call's sigma2v, ncSV unit variance on the stored h-tilde; the other variants are evidence
+  # only ("prev" is the state one call earlier, two Gibbs iterations back at S = 2)
+  decision_variant <- c(cSV = "h same, sigma2v_same", ncSV = "h same, unit_h")
   # rule: per volatility, exactly one (rho prior, initial condition) candidate has a passing
   # same-sweep PIT and rho shows no Metropolis repeats (fraction <= 0.01)
   cands <- c("U(-1, 1), h0_zero", "U(-1, 1), stationary", "flat, h0_zero")
   rho_cand <- vapply(WB_VOLS, function(vol) {
     if (is.null(pit[[vol]])) return("undecided")
-    ok <- vapply(cands, function(cd) pass_any(same_only(pit[[vol]]$rho), paste0(cd, " |")), logical(1))
+    ok <- vapply(cands, function(cd) {
+      v <- pit[[vol]]$rho[[sprintf("%s | %s", cd, decision_variant[[vol]])]]
+      isTRUE(is.finite(v) && v > 1e-3)
+    }, logical(1))
     if (isTRUE(pit[[vol]]$rep_rho > 0.01)) "undecided (rho has Metropolis repeats)" else
       if (sum(ok) == 1L) cands[ok] else "undecided"
   }, character(1))
@@ -4732,10 +4764,10 @@ run_wbvars_probes <- function() {
       "undecided", character(1))
   names(init) <- names(rho_prior) <- WB_VOLS
   pit_txt <- vapply(names(pit), function(vol) sprintf(
-    "%s: max |rho| %.4g; fraction of rho draws with |rho| > 1: %.4g, > 10: %.4g; flat-candidate support tests %s; rho PIT %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
+    "%s: max |rho| %.4g; fraction of rho draws with |rho| > 1: %.4g, > 10: %.4g; flat-candidate support tests %s; rho PIT (decision variant: %s; the others evidence only, 'prev' two Gibbs iterations back at S = 2) %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
     vol, attr(pit[[vol]]$rho, "max_abs_rho"), pit[[vol]]$frac_gt1, pit[[vol]]$frac_gt10,
     paste(sprintf("%s: %s", names(attr(pit[[vol]]$rho, "support")), unlist(attr(pit[[vol]]$rho, "support"))), collapse = "; "),
-    fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
+    decision_variant[[vol]], fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
     pit[[vol]]$rep_h, pit[[vol]]$rep_s2v, pit[[vol]]$rep_s2o), character(1))
   # P13 rule: decided iff the scale experiment passes (E h = 0, the level in Sigma) and, for each
   # volatility, exactly one initial condition passes; it maps onto CommonSV (stationary h_0 at the
@@ -4810,6 +4842,12 @@ run_wbvars_probes <- function() {
 # and P14 map bvars' SV prior exactly onto a CommonSV option and P15 is decided; otherwise branch
 # 2, the 1- and 4-step predictive comparison of two different posteriors, which review M6 / Q35
 # (owner) reads as evidence, not an equality gate.
+wb_branch1 <- function(res, vol) {
+  pr <- res$probes
+  isTRUE(pr$P12$holds) && identical(pr$P15$status, "answered") && isTRUE(pr$P13$maps[[vol]]) &&
+    isTRUE(pr$P14$maps[[vol]])
+}
+
 wb_gating <- function(res) {
   pr <- res$probes
   p12 <- isTRUE(pr$P12$holds)
@@ -4817,7 +4855,7 @@ wb_gating <- function(res) {
   out <- vapply(WB_VOLS, function(vol) {
     m13 <- isTRUE(pr$P13$maps[[vol]])
     m14 <- isTRUE(pr$P14$maps[[vol]])
-    if (p12 && m13 && m14 && p15) paste0(vol, ": branch 1 - quantiles of B and Sigma under the Phase ",
+    if (wb_branch1(res, vol)) paste0(vol, ": branch 1 - quantiles of B and Sigma under the Phase ",
       "2 rule; h_t, rho, sigma_h gate only if P16 passes (pending WP38), otherwise reported") else
       paste0(vol, ": branch 2 (", paste(c(if (!p12) "P12 does not hold", if (!m13) "P13 does not map",
                                        if (!m14) "P14 does not map", if (!p15) "P15 undecided"),
@@ -4879,7 +4917,9 @@ stage_wbvars_p16 <- function(res) {
   stage("probe_wbvars_p16", attrs, coords, vars)
 }
 
-wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx) {
+# Branch-1 runs use the mapped settings (review m11): the P12 V and the P14 (sv_a, sv_s) that fixes
+# the SV variance, recorded with its value; branch-2 runs keep bvars' defaults.
+wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx, sv = NULL) {
   q <- wb_qd()
   Y <- q$Y
   N <- ncol(Y)
@@ -4887,9 +4927,9 @@ wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx) {
   K <- 1L + N * p
   Tn <- nrow(Y) - p
   seed <- WB_SEED + 2000L + 100L * idx
-  code <- wb_run_code(vol, p, WB_BURN, WB_DRAWS, fixv)
+  code <- wb_run_code(vol, p, WB_BURN, WB_DRAWS, fixv, sv = sv)
   runs <- lapply(seq_len(WB_RUNS_N), function(k) {
-    r <- wb_eval(code, list(data = Y, fixv = fixv), seed + k)
+    r <- wb_eval(code, list(data = Y, fixv = fixv, sv_setting = sv), seed + k)
     rm <- wb_row_map(r$env$spec, Y, p)
     if (!identical(rm$ours_cols, rmq$ours_cols)) stop("unexpected X row order")
     po <- wb_post(r$env$post)
@@ -4904,7 +4944,7 @@ wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx) {
   })
   # chained state runs: h, rho, omega, ... every WB_CHAIN_S draws
   sruns <- lapply(seq_len(WB_RUNS_N), function(k) {
-    wb_chain(Y, p, vol, WB_BURN, WB_CHAIN_CALLS, WB_CHAIN_S, seed + 50L + k, fixv)
+    wb_chain(Y, p, vol, WB_BURN, WB_CHAIN_CALLS, WB_CHAIN_S, seed + 50L + k, fixv, sv = sv)
   })
   sigma_pairs <- which(lower.tri(diag(N), diag = TRUE), arr.ind = TRUE)
   sigma_pairs <- sigma_pairs[order(sigma_pairs[, 1], sigma_pairs[, 2]), , drop = FALSE]
@@ -4974,7 +5014,10 @@ wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx) {
     state_runs = sprintf("%d runs x %d chained estimate(post, S = %d) calls after the burn-in", WB_RUNS_N,
                          WB_CHAIN_CALLS, WB_CHAIN_S),
     v_fixed = as.integer(!is.null(fixv)),
-    v_fix_setting = if (!is.null(fixv)) sprintf("%s, c = %g, lambda = %g", fixv$orient, fixv$c, fixv$lambda) else "default (V sampled)",
+    v_fix_setting = if (!is.null(fixv)) sprintf("%s, c = %g, lambda = %g", fixv$orient, fixv$c, fixv$lambda) else
+      "default (bvars' starting V; P12: V is not moved by the sampler)",
+    sv_setting = if (!is.null(sv)) sprintf("sv_a = %.17g, sv_s = %.17g (fixes the SV variance at %.6g, CV %.3g)",
+                                           sv$sv_a, sv$sv_s, sv$value, sv$cv) else "bvars' defaults",
     prior_nu0 = pf$nu %||% NA_real_, prior_sv_a = pf$sv_a %||% NA_real_, prior_sv_s = pf$sv_s %||% NA_real_,
     prior_lambda = pf$lambda %||% NA_real_,
     extraction_max_abs_z = cmp$max_abs_z, extraction_m = cmp$m, extraction_pass = as.integer(cmp$pass),
@@ -5017,15 +5060,22 @@ run_wbvars <- function() {
   message(answers)
   runs_txt <- character()
   rmq <- res$probes$P15$rmq
+  stage_open <- c("P11", "P15")[vapply(c("P11", "P15"), function(id) {
+    !identical(res$probes[[id]]$status, "answered")
+  }, logical(1))]
   for (i in seq_along(WB_VOLS)) {
-    name <- sprintf("wbvars_%s", tolower(WB_VOLS[i]))
+    vol <- WB_VOLS[i]
+    name <- sprintf("wbvars_%s", tolower(vol))
     if (!want(name)) next
-    if (is.null(rmq)) {
-      runs_txt <- c(runs_txt, sprintf("%s: not run, P15 undecided", name))
+    if (length(stage_open) || is.null(rmq)) {
+      runs_txt <- c(runs_txt, sprintf("%s: not run, probes %s undecided (D-59: not met)", name,
+                                      paste(c(stage_open, if (is.null(rmq)) "P15 (no row map)"), collapse = ", ")))
       next
     }
+    b1 <- wb_branch1(res, vol)
     r <- tryCatch({
-      wb_parity_fixture(WB_VOLS[i], NULL, rmq, answers, gating, i)
+      wb_parity_fixture(vol, if (b1) res$probes$P12$fixv else NULL, rmq, answers, gating, i,
+                        sv = if (b1) res$scan$setting[[vol]] else NULL)
       "staged"
     }, error = function(e) paste("failed:", conditionMessage(e)))
     runs_txt <- c(runs_txt, sprintf("%s: %s", name, r))
