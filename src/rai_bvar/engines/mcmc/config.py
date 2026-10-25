@@ -350,8 +350,9 @@ def validate_composition(
     Phase 3 (P3 DESIGN §2.1; rule 5 exempts ``shared_factor``, which has time-varying common
     weights by construction):
 
-    11. a varying coefficient prior needs ``coef_log``, the ``weighted`` path and no λ-scaled
-        coefficient block (global-local priors are independent priors; P3 D-43);
+    11. a varying coefficient prior needs ``coef_log``, the ``weighted`` path, no λ-scaled
+        coefficient block (global-local priors are independent priors; P3 D-43) and no SOC/SUR
+        dummy rows (``n_dummy = 0``; GL priors have none, P3 D-36, E153);
     12. ``coef_log`` needs a ``linear_structural`` or ``linear_reduced`` mean and a varying prior;
     13. ``common`` (CommonSV) needs the Constant core and no transitory scale;
     14. ``shared_factor`` needs ``linear_structural``, Mode II, ``common`` and a non-varying
@@ -425,6 +426,11 @@ def validate_composition(
             raise ValueError(
                 f"the {coef.kind!r} coefficient prior is an independent prior; a λ-scaled "
                 "coefficient block (Mode II, Constant('iw')) is not available with it"
+            )
+        if mean.n_dummy:
+            raise ValueError(
+                f"the {coef.kind!r} coefficient prior has no SOC/SUR dummy rows (P3 D-36); "
+                f"MeanStatic.n_dummy must be 0, got {mean.n_dummy}"
             )
     if mean.coef_log:
         if mean.kind not in ("linear_structural", "linear_reduced"):

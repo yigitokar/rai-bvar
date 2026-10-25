@@ -214,6 +214,7 @@ def test_common_volatility_weights_are_not_constant():
          S0, "needs a fixed prior"),
         (MeanStatic(LIN, "lambda", coef_log=True), HS4, VolStatic("constant", coupled=True), SL,
          "independent prior"),
+        (MeanStatic(LIN, coef_log=True, n_dummy=4), HS4, SV, S0, "no SOC/SUR dummy rows"),
         (MeanStatic("zero", coef_log=True), HS4, SV, S0, "Linear mean path"),
         (MeanStatic(LIN, coef_log=True), CoefPriorStatic(), SV, S0, "is fixed"),
         (MeanStatic(LIN), CoefPriorStatic(), VolStatic("sv", common=True), S0,
@@ -335,10 +336,23 @@ def test_phase3_invariants(coef, vol, path, fn, message):
 
 
 def test_new_view_leaves_default_to_empty():
+    """Every new leaf defaults to Empty() in constructor calls (P3 §2), so Phase 2 pytrees keep
+    their leaves: construct each class with its Phase 2 fields only."""
     assert isinstance(S.LinearEq(delta=np.zeros((2, 3))).dev_log, S.Empty)
     assert isinstance(S.CCCMGlobal(Pi=np.zeros((3, 2))).dev_log, S.Empty)
-    assert jax.tree.leaves(S.LinearEq(delta=np.zeros((2, 3)))) != []
     assert len(jax.tree.leaves(S.LinearEq(delta=np.zeros((2, 3))))) == 1
+    new = {
+        S.EqContext: ("common_w",),
+        S.CoefPriorArrays: ("gl",),
+        S.SharedPrior: ("gl", "shared_prec", "csv"),
+    }
+    for cls, names in new.items():
+        fields = [f for f in dataclasses.fields(cls) if f.name not in names]
+        assert [f.name for f in dataclasses.fields(cls)][-len(names) :] == list(names)  # appended
+        obj = cls(*(np.zeros(1) for _ in fields))
+        for name in names:
+            assert isinstance(getattr(obj, name), S.Empty), (cls.__name__, name)
+        assert len(jax.tree.leaves(obj)) == len(fields), cls.__name__
 
 
 # ---------------------------------------------------------------------------------- registry, protocols
@@ -408,3 +422,75 @@ def test_compose_refuses_common_volatility_without_its_step():  # P3 E149
     vol = WithGlobal(**{f.name: getattr(base.vol, f.name) for f in dataclasses.fields(base.vol)})
     prog = compose_mod.compose(st, overrides={"vol": vol})
     assert step in prog.global_post
+
+
+def test_the_bitwise_ab_tool_covers_every_reachable_phase2_composition():  # P3 §2, E118
+    """The same-machine A/B (tools/phase3_bitwise_ab.py) runs every composition row of
+    ``validation.joint`` that the public API can build: all but row 17 (``zero_sv``)."""
+    import importlib.util
+
+    from rai_bvar.validation import joint
+
+    path = Path(__file__).parents[3] / "tools" / "phase3_bitwise_ab.py"
+    spec = importlib.util.spec_from_file_location("phase3_bitwise_ab", path)
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    cases = tool._models()
+    rows = {r for r in tool.ROWS.values() if r is not None}
+    reachable = {d.number for d in joint._COMPOSITIONS.values() if d.mean != "zero"}
+    assert rows == reachable and len(reachable) == len(joint._COMPOSITIONS) - 1
+    assert set(tool.ROWS) == set(cases)
+    assert {"opt-const-path-cholesky", "eb-default-sv", "analytic-mh", "ordering-analytic"} <= set(
+        cases
+    )
+
+
+STATIC_GOLDEN = json.loads(Path(__file__).with_name("golden_phase2_static.json").read_text())
+# fields Phase 3 adds to the static parts, which a Phase 2 model must carry at these defaults
+NEW_STATIC_DEFAULTS = {
+    "mean": {"coef_log": False},
+    "coef": {"n_groups": 0, "a_grid": 0, "p_beta": False},
+    "vol": {
+        "common": False,
+        "csv_block": 100,
+        "csv_rho_prior": "truncated_normal",
+        "csv_sigma2_prior": "inv_gamma",
+    },
+}
+
+
+def _ab_tool():
+    import importlib.util
+
+    path = Path(__file__).parents[3] / "tools" / "phase3_bitwise_ab.py"
+    spec = importlib.util.spec_from_file_location("phase3_bitwise_ab", path)
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool
+
+
+@pytest.mark.parametrize("key", sorted(STATIC_GOLDEN["statics"]))
+def test_phase2_models_resolve_to_the_same_static(key):  # P3 §2, review m23
+    """The resolved StaticConfig of each MCMC golden model on the A/B tool's data equals the one
+    recorded on the unmodified code, the Phase 3 fields at their defaults (catches resolve-level
+    changes such as the E65 reorder that the template goldens cannot see)."""
+    import warnings
+
+    from rai_bvar.engines.mcmc.resolve import resolve
+    from rai_bvar.evaluation.backtest import _static_to_dict
+    from rai_bvar.settings import Runtime
+
+    models = _golden_models()
+    models["cholesky-path"] = rb.BVAR(
+        mean=rb.Linear(prior=rb.Minnesota(form="structural")),
+        vol=rb.Constant("ig"),
+        mcmc=rb.MCMCSettings(const_path="cholesky"),
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        got = _static_to_dict(resolve(models[key], _ab_tool()._data(), Runtime()).static)
+    want = STATIC_GOLDEN["statics"][key]
+    for part, defaults in NEW_STATIC_DEFAULTS.items():
+        for name, value in defaults.items():
+            assert got[part].pop(name) == value, (part, name)
+    assert json.loads(json.dumps(got)) == want
