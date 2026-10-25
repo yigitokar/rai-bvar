@@ -1,17 +1,19 @@
 """The GIG sampler on the log scale and the Bernoulli-logit draw (P3 D-42, §3.5, §9.2 item 1).
 
 ``random.log_gig`` (Devroye 2014 §6, every term in logs) against the Tier U list of P3 §3.5,
-with its tolerances: on the pinned grid (``λ ∈ {0, ±1e-8, ±1e-3, ±0.5, ±1, ±10, ±50}``, every
-``a − ½`` and ``a − 1`` at the GK grid's first, middle and last points, ``½ − T_max/2`` for
-``T_max ∈ {200, 600}``, crossed with ``log ω ∈ {−2000, …, 12}``) a Kolmogorov–Smirnov test
-(``α = 1e-3``, 10⁴ draws per point) of ``Y = log X − log η`` against the CDF of
-``exp(λy − ω cosh y)`` from numerical integration in log space around the mode, and
-``E log X`` against ``log η + ∂_λ log K_λ(ω)`` (mpmath, 50 digits) within 4 Monte Carlo s.e.;
-no ``ok = False`` on the grid, mean and worst-case attempts reported; the gamma and
-inverse-gamma limits; improper input as a status; ``vmap`` lanes equal unbatched calls
-(1e-15); determinism by key. Beyond the list: the hat dominates ``f`` on every grid point (the
-envelope mutant M34 breaks this). ``random.bernoulli_logit``: frequencies (``|z| ≤ 4``),
-extreme logits, one uniform per element.
+with the multiplicity rule of the review erratum (M9, E117+; it replaces the per-cell KS rule of
+§3.5/D-60): on the pinned grid (``λ ∈ {0, ±1e-8, ±1e-3, ±0.5, ±1, ±10, ±50}``, every ``a − ½``
+and ``a − 1`` at the GK grid's first, middle and last points, ``½ − T_max/2`` for
+``T_max ∈ {200, 600}``, crossed with ``log ω ∈ {−2000, …, 12}``; ``m`` cells, each with its own
+key ``fold_in(key, cell)``, the ``−λ`` mirrors included) one family of Kolmogorov–Smirnov tests
+(10⁴ draws per cell) of ``Y = log X − log η`` against the CDF of ``exp(λy − ω cosh y)`` from
+numerical integration in log space around the mode, passing iff ``min p > 1e-3/m``; and
+``E log X`` against ``log η + ∂_λ log K_λ(ω)`` (mpmath, 50 digits) within 4 Monte Carlo s.e.,
+Bonferroni over the ``m`` compared moments (D-60: ``|z| ≤ max(4, z_{1−0.01/(2m)})``, the Phase 2
+rule's form); no ``ok = False`` on the grid, mean and worst-case attempts reported; the gamma and
+inverse-gamma limits; improper input as a status; ``vmap`` lanes equal unbatched calls (1e-15);
+determinism by key. Beyond the list: the hat dominates ``f`` on every grid point.
+``random.bernoulli_logit``: frequencies (``|z| ≤ 4``), extreme logits, one uniform per element.
 """
 
 from __future__ import annotations
@@ -33,8 +35,9 @@ pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
 KEY = jr.key(20261025, impl="threefry2x32")
 N_DRAWS = 10_000
-KS_ALPHA = 1e-3  # P3 D-60, §3.5
+KS_ALPHA = 1e-3  # family-wise (P3 D-60, §3.5; review M9: Bonferroni over a family of m tests)
 MC_SE = 4.0  # E log X within 4 Monte Carlo standard errors (P3 §3.5)
+MOMENT_FAMILY = 1e-2  # D-60 Bonferroni over compared moments, in the Phase 2 rule's form
 
 # P3 §3.5's pinned grid. The GK grid has 1,000 points (no single middle), so both middle points
 # (indices 499 and 500) are used.
@@ -121,17 +124,18 @@ def expected_log_y(lam: float, log_omega: float) -> float:
 
 @pytest.fixture(scope="module")
 def grid_draws():
-    """``N_DRAWS`` draws at every grid point: ``log ψ = log ω − log η``, ``log χ = log ω + log η``
-    with ``log η`` cycling over ``LOG_ETA``; lane ``j`` of point ``i`` uses the key
-    ``fold_in(key(1), i·N_DRAWS + j)``. Returns ``Y = log X − log η``, ``ok``, attempts and the
-    sampling time."""
-    base = key(1)
+    """``N_DRAWS`` draws at every grid cell: ``log ψ = log ω − log η``, ``log χ = log ω + log η``
+    with ``log η`` cycling over ``LOG_ETA``. Cell ``i`` has its own key ``fold_in(key(1), i)``
+    (the ``−λ`` mirror cells too: step 2's sign flip would make same-key mirrors identical) and
+    lane ``j`` uses ``fold_in(cell key, j)``. Returns ``Y = log X − log η``, ``ok``, attempts and
+    the sampling time."""
+    lanes = jnp.arange(N_DRAWS, dtype=jnp.uint32)
     Y, OK, ATT = [], [], []
     seconds = 0.0
     for i, (lam, lw) in enumerate(GRID):
         le = LOG_ETA[i % len(LOG_ETA)]
-        idx = jnp.arange(i * N_DRAWS, (i + 1) * N_DRAWS, dtype=jnp.uint32)
-        keys = jax.vmap(lambda c: jr.fold_in(base, c))(idx)
+        cell_key = jr.fold_in(key(1), i)
+        keys = jax.vmap(lambda c, ck=cell_key: jr.fold_in(ck, c))(lanes)
         args = (jnp.full((N_DRAWS,), v) for v in (lam, lw - le, lw + le))
         t0 = time.perf_counter()
         log_x, ok, att = jax.block_until_ready(_MANY(keys, *args))
@@ -172,30 +176,44 @@ def test_no_failures_on_the_grid_and_attempts_reported(grid_draws, capsys):
     assert means.max() <= 3.4597  # Theorem 2's uniform bound (sampled: a sanity check)
 
 
-def test_ks_of_log_y_against_the_numerical_cdf(grid_draws):
-    """KS (``α = 1e-3``, 10⁴ draws) of ``Y = log X − log η`` at every grid point against the
-    CDF of ``exp(λy − ω cosh y)`` integrated numerically in log space (P3 §3.5)."""
-    Y = grid_draws[0]
-    failed = []
+def ks_family_pvalues(Y: np.ndarray) -> np.ndarray:
+    """The KS p-value of every grid cell (``Y = log X − log η`` against the numerical CDF)."""
+    out = []
     for i, (lam, lw) in enumerate(GRID):
         u, c = log_y_cdf_table(lam, lw)
-        p = stats.kstest(Y[i], lambda y, u=u, c=c: np.interp(y, u, c)).pvalue
-        if not p >= KS_ALPHA:
-            failed.append((lam, lw, p))
-    assert not failed, failed
+        out.append(stats.kstest(Y[i], lambda y, u=u, c=c: np.interp(y, u, c)).pvalue)
+    return np.asarray(out)
+
+
+def moment_z(Y: np.ndarray) -> np.ndarray:
+    """``(mean log Y − ∂_λ log K_λ(ω))/s.e.`` per grid cell."""
+    out = []
+    for i, (lam, lw) in enumerate(GRID):
+        se = Y[i].std(ddof=1) / np.sqrt(Y.shape[1])
+        out.append((Y[i].mean() - expected_log_y(lam, lw)) / se)
+    return np.asarray(out)
+
+
+def test_ks_of_log_y_against_the_numerical_cdf(grid_draws):
+    """One family of ``m = len(GRID)`` (180) KS tests, 10⁴ draws per cell, of
+    ``Y = log X − log η`` against the CDF of ``exp(λy − ω cosh y)`` integrated numerically in log
+    space: passes iff ``min p > 1e-3/m`` (P3 §3.5 with the review's multiplicity rule M9)."""
+    m = len(GRID)
+    assert m == 180
+    p = ks_family_pvalues(grid_draws[0])
+    worst = np.argsort(p)[:3]
+    assert p.min() > KS_ALPHA / m, [(GRID[i], float(p[i])) for i in worst]
 
 
 def test_mean_log_x_against_the_bessel_derivative(grid_draws):
     """``E log X = log η + ∂_λ log K_λ(ω)`` (mpmath, 50 digits) within 4 Monte Carlo s.e. at
-    every grid point (P3 §3.5)."""
-    Y = grid_draws[0]
-    failed = []
-    for i, (lam, lw) in enumerate(GRID):
-        mean, se = Y[i].mean(), Y[i].std(ddof=1) / np.sqrt(N_DRAWS)
-        ref = expected_log_y(lam, lw)
-        if not abs(mean - ref) <= MC_SE * se:
-            failed.append((lam, lw, mean, ref, (mean - ref) / se))
-    assert not failed, failed
+    every one of the ``m = 180`` cells, Bonferroni over the compared moments (D-60):
+    ``|z| ≤ max(4, z_{1−0.01/(2m)})`` (P3 §3.5)."""
+    m = len(GRID)
+    crit = max(MC_SE, float(stats.norm.isf(MOMENT_FAMILY / (2.0 * m))))
+    z = moment_z(grid_draws[0])
+    bad = np.flatnonzero(~(np.abs(z) <= crit))
+    assert bad.size == 0, (crit, [(GRID[i], float(z[i])) for i in bad])
 
 
 def test_hat_dominates_f_on_the_grid():
@@ -255,7 +273,7 @@ def test_gamma_limit(lam):
     assert np.asarray(ok).all() and (np.asarray(att) == 0).all()
     g = np.asarray(lx) + (log_psi - np.log(2.0))
     p = stats.kstest(g, lambda y: log_gamma_cdf(y, lam)).pvalue
-    assert p >= KS_ALPHA, p
+    assert p > KS_ALPHA, p  # m = 1 KS test per test function
 
 
 @pytest.mark.parametrize("lam", [-1e-3, -0.5, -3.0, -50.0])
@@ -268,7 +286,7 @@ def test_inverse_gamma_limit(lam):
     assert np.asarray(ok).all() and (np.asarray(att) == 0).all()
     g = (log_chi - np.log(2.0)) - np.asarray(lx)
     p = stats.kstest(g, lambda y: log_gamma_cdf(y, -lam)).pvalue
-    assert p >= KS_ALPHA, p
+    assert p > KS_ALPHA, p  # m = 1 KS test per test function
 
 
 IMPROPER = [
