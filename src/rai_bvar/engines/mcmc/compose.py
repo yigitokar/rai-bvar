@@ -54,6 +54,7 @@ from rai_bvar.engines.mcmc import (
     registry,
 )
 from rai_bvar.engines.mcmc.config import StaticConfig
+from rai_bvar.engines.mcmc.keys import Block
 from rai_bvar.engines.mcmc.protocols import (
     INTERNALS,
     KERNEL_SLOTS,
@@ -313,6 +314,12 @@ def _compose(static: StaticConfig, overrides: Mapping[str, Any]) -> Program:
     vol_global = getattr(vol, "global_steps", None)
     vol_steps = tuple(_with_internals(g, internals) for g in vol_global()) if vol_global else ()
     global_pre, global_post = _order_global_steps(pre_steps + coef_steps + vol_steps)
+    if static.vol.common and not any(g.block == Block.G_COMMON_SV for g in global_post):
+        # a Phase 2 volatility block would silently ignore the common h (P3 E149)
+        raise NotImplementedError(
+            "VolStatic(common=True) needs the volatility block's common-volatility step "
+            "(G_COMMON_SV), which this build does not provide (CommonSV arrives with P3 WP32)"
+        )
 
     _check_capabilities(static, structure, mean, coef, vol)
     batching = max(

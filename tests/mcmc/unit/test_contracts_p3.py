@@ -391,3 +391,20 @@ def test_compose_collects_the_volatility_blocks_global_steps():
     vol = WithGlobal(**{f.name: getattr(base.vol, f.name) for f in dataclasses.fields(base.vol)})
     prog = compose_mod.compose(st, overrides={"vol": vol})
     assert step in prog.global_post and prog.global_pre == base.global_pre
+
+
+def test_compose_refuses_common_volatility_without_its_step():  # P3 E149
+    with pytest.raises(NotImplementedError, match="G_COMMON_SV"):
+        compose_mod.compose(make(vol=COMMON))
+    st = make(vol=COMMON)
+    base_static = make(vol=VolStatic("constant"))
+    base = compose_mod.compose(base_static)
+    step = _ToyCommonStep()
+
+    class WithGlobal(type(base.vol)):
+        def global_steps(self):
+            return (step,)
+
+    vol = WithGlobal(**{f.name: getattr(base.vol, f.name) for f in dataclasses.fields(base.vol)})
+    prog = compose_mod.compose(st, overrides={"vol": vol})
+    assert step in prog.global_post
