@@ -2275,8 +2275,8 @@ CPU's rounding: `test_g_full_inexact_recorded[structural_sv_outliers_t]` ran 2 s
 on the 7763 (274 min) leaves no room under the 6 h job limit. *Decision.* The `nightly` job is a matrix of six
 shards, defined in `tools/weekly_shards.py`: `tests/geweke` and `tests/sbc` each split by `-k structural` /
 `-k "not structural"`, `tests/unit`, and the rest (`tests` with those three directories `--ignore`d, so a new
-directory lands there). On the 9V45 the shards take 55, 40, 43, 41, 53 and 41 min; on the 7763 the two Geweke
-shards took 160 and 113. A `nightly-plan` job collects the tier and every shard with `pytest --collect-only`, fails
+directory lands there). On the 9V45 the shards take 55, 40, 43, 41, 53 and 41 min. On the 2-vCPU 7763 the two
+Geweke shards would take 160 and 113 min, from run 40052069815's per-row times. A `nightly-plan` job collects the tier and every shard with `pytest --collect-only`, fails
 unless every test of the tier is in exactly one shard, and passes the matrix on. Each shard runs the same
 `-m "$TIER_MARKERS"` (now set once at the workflow level) with `fail-fast: false`. Its timeouts are 240 min for
 the test step and 270 min for the job. Its XLA cache prefix carries the shard name (`xla-slow-<shard>-…`):
@@ -2285,7 +2285,12 @@ artifact `validation-record-<sha>-<attempt>-<shard>`, whose `meta.json` adds `sh
 `nightly-record` job merges the shard records into `validation-record-<sha>-<attempt>`, one directory per shard,
 because two shards each write `geweke.jsonl` or `sbc.jsonl` and each shard ran on its own CPU. No test, prior,
 setting, tolerance or criterion changed. This replaces the 330/360 min timeouts of the previous amendment and
-the nightly tier's single-job budget of ≤ 3 h, which no x86 runner met.
+the nightly tier's single-job budget of ≤ 3 h, which no x86 runner met. *First sharded run* (run 40140397848,
+`b1e3801`; every shard on an EPYC 7763 with 4 vCPU, cold cache): all six shards passed, with 483 tests, each in
+exactly one shard (481 passed, 1 skipped, 1 xfailed). The jobs took 120 (geweke-structural), 82, 79, 72, 73 and
+74 min in the order above, and the tier took 121 min from dispatch to the merged record. The two
+`G-full-inexact` reruns of run 40052069815 (`reduced_sv_outliers`, `structural_sv_outliers_t`) recurred on this
+ISA, and they account for most of geweke-structural's lead.
 
 ---
 
