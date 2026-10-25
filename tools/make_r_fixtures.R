@@ -4141,14 +4141,17 @@ wb_pit_rho <- function(runs, vol) {
   out
 }
 
-# σ_ω² | ω, s_ for ω ~ N(0, σ_ω²), σ_ω² ~ G(sv_a, scale s_) or G(sv_a, rate s_).
-wb_pit_sigma2_omega <- function(runs, sv_a) {
+# σ_ω² | w, s_ for w ~ N(0, σ_ω²) (ncSV: w = ω; cSV: w² = σ_v², i.e. σ_v² ~ σ_ω² χ²₁),
+# σ_ω² ~ G(sv_a, scale s_) or G(sv_a, rate s_). Only same-sweep states are observed when a call
+# runs S = 2 draws; "prev" is then the state two iterations earlier (recorded, not decisive).
+wb_pit_sigma2_omega <- function(runs, sv_a, w2_field = "omega") {
   ygrid <- seq(-40, 15, length.out = 8001L)
   out <- list()
   for (form in c("scale", "rate")) for (om_at in c("same", "prev")) for (s_at in c("same", "prev")) {
     u <- unlist(lapply(runs, function(st) {
       s2o <- as.numeric(state_matrix(st, "sigma2_omega"))
-      om <- as.numeric(state_matrix(st, "omega"))
+      om <- as.numeric(state_matrix(st, w2_field))
+      if (w2_field == "sigma2v") om <- sqrt(om)
       ss <- as.numeric(state_matrix(st, "s_"))
       if (!length(s2o) || !length(om) || !length(ss)) return(NULL)
       idx <- 2:length(s2o)
@@ -4161,6 +4164,31 @@ wb_pit_sigma2_omega <- function(runs, sv_a) {
       }, ygrid)
     }))
     out[[sprintf("G(sv_a, %s s_) | omega %s, s_ %s", form, om_at, s_at)]] <- ks_p(u)
+  }
+  out
+}
+
+# cSV: σ_v² | h, ρ, σ_ω² for σ_v² ~ G(1/2, scale 2σ_ω²) (σ_v² ~ σ_ω² χ²₁) and h_0 = 0 or a stationary
+# h_1: GIG(1/2 - T/2, 1/σ_ω², SS), SS the sum of squared AR(1) innovations.
+wb_pit_sigma2v <- function(runs) {
+  ygrid <- seq(-40, 15, length.out = 8001L)
+  out <- list()
+  for (init in c("h0_zero", "stationary")) {
+    u <- unlist(lapply(runs, function(st) {
+      H <- state_matrix(st, "h")
+      rho <- as.numeric(state_matrix(st, "rho"))
+      s2v <- as.numeric(state_matrix(st, "sigma2v"))
+      s2o <- as.numeric(state_matrix(st, "sigma2_omega"))
+      if (is.null(H) || !length(rho) || !length(s2v) || !length(s2o)) return(NULL)
+      Tn <- ncol(H)
+      pit_grid(log(s2v), function(i) {
+        h <- H[i, ]
+        ss <- (if (init == "h0_zero") h[1]^2 else (1 - rho[i]^2) * h[1]^2) +
+          (if (Tn > 1L) sum((h[-1] - rho[i] * h[-Tn])^2) else 0)
+        (0.5 - Tn / 2) * ygrid - exp(ygrid) / (2 * s2o[i]) - ss * exp(-ygrid) / 2
+      }, ygrid)
+    }))
+    out[[sprintf("sigma2v ~ sigma2_omega chi2_1, %s | same sweep", init)]] <- ks_p(u)
   }
   out
 }
@@ -4230,7 +4258,8 @@ PROBES_WB <- list(
     documented = "manual: the starting values include S, 'the auxiliary mixture component indicator' (an Omori-type mixture sampler)",
     dataset = "data/probe_t2n5.csv (n = 5, p = 1, T = 2)",
     design = paste(
-      "chained estimate(., S = 1) calls after a 10,000-draw burn-in, recording h, rho, omega",
+      "chained estimate(., S = 1) calls (S = 2 where estimate() refuses S = 1) after a",
+      "10,000-draw burn-in, recording h, rho, omega",
       "(and sigma2v, sigma2_omega, s_, S) after each, k = 4 seeded runs per volatility;",
       "the extraction is checked against single estimate() runs (A and Sigma quantiles, Phase",
       "2 rule); the oracle (4-D quadrature with the closed-form p(Y | h), N08 sec. A4; KS",
@@ -4365,10 +4394,13 @@ wb_probe_p12 <- function() {
   ran <- all(vapply(res, `[[`, logical(1), "ok"))
   list(
     status = if (length(best) || ran) "answered" else "unresolved",
-    answer = if (length(best)) sprintf(paste(
+    answer = if (length(best) && !default_moves) paste(
+      "V is held fixed: its posterior draws equal the starting value exactly (sd 0) under every",
+      "concentrated matrix-GIG setting and under the default prior (a starting V of 2 Omega",
+      "stays at 2 Omega), so bvars 1.1 does not move V; the runs keep the default starting V",
+      "(Omega, recorded) and the conjugate comparison uses V = Omega") else if (length(best)) sprintf(paste(
       "V can be held fixed at the default starting V (Omega): %s, lambda = (K + 1)/2, starting V =",
-      "Omega%s"), best, if (default_moves) "" else
-        "; note: V does not move under the default prior either (see the control runs)")
+      "Omega"), best)
       else if (ran) "V cannot be held fixed by the matrix-GIG settings tried (P12 does not hold)" else "(undecided)",
     evidence = paste(txt, collapse = "; "),
     fixv = if (length(best)) settings[[best]] else NULL, Omega = Om, holds = length(best) > 0L)
@@ -4417,12 +4449,14 @@ wb_fix_scan <- function() {
   cvs <- numeric()
   for (vol in WB_VOLS) {
     pf <- wb_prior(wb_eval(wb_spec_code(vol, 1L, tiny = TRUE), list(data = d$Y), WB_SEED + 1399L)$env$spec)
-    for (ms in c(1e-6, 1, 1e6)) {
+    for (sc in list(c(1e6, 1e-6), c(1e6, 1), c(1e6, 1e6), c(1e8, 1), c(1e8, 1e-2))) {
+      ma <- sc[1]
+      ms <- sc[2]
       st <- tryCatch({
         code <- paste0(wb_spec_code(vol, 1L, tiny = TRUE),
                        "spec$prior$sv_a <- sv_a; spec$prior$sv_s <- sv_s; ",
                        "burn <- estimate(spec, S = 2000L, thin = 1L, show_progress = FALSE); post <- burn")
-        r <- wb_eval(code, list(data = d$Y, sv_a = pf$sv_a * 1e6, sv_s = pf$sv_s * ms), WB_SEED + 1400L)
+        r <- wb_eval(code, list(data = d$Y, sv_a = pf$sv_a * ma, sv_s = pf$sv_s * ms), WB_SEED + 1400L)
         post <- r$env$post
         s <- vector("list", if (QUICK) 30L else 200L)
         for (k in seq_along(s)) {
@@ -4433,11 +4467,11 @@ wb_fix_scan <- function() {
           x <- as.numeric(state_matrix(s, f))
           if (!length(x)) NA_real_ else stats::sd(x) / abs(mean(x))
         }
-        cvs <- c(cvs, min(cv("sigma2_omega"), cv("sigma2v"), na.rm = TRUE))
-        sprintf("%s, sv_a x 1e6, sv_s x %g: CV(sigma2_omega) %.3g, CV(sigma2v) %.3g, CV(omega) %.3g, mean sigma2_omega %.4g",
-                vol, ms, cv("sigma2_omega"), cv("sigma2v"), cv("omega"),
+        cvs <- c(cvs, if (vol == "ncSV") cv("sigma2_omega") else cv("sigma2v"))
+        sprintf("%s, sv_a x %g, sv_s x %g: CV(sigma2_omega) %.3g, CV(sigma2v) %.3g, CV(omega) %.3g, mean sigma2_omega %.4g",
+                vol, ma, ms, cv("sigma2_omega"), cv("sigma2v"), cv("omega"),
                 mean(as.numeric(state_matrix(s, "sigma2_omega")) %||% NA))
-      }, error = function(e) sprintf("%s, sv_s x %g: failed (%s)", vol, ms, conditionMessage(e)))
+      }, error = function(e) sprintf("%s, sv_a x %g, sv_s x %g: failed (%s)", vol, ma, ms, conditionMessage(e)))
       out <- c(out, st)
     }
   }
@@ -4496,9 +4530,14 @@ run_wbvars_probes <- function() {
   if (!inherits(p16, "error")) for (vol in WB_VOLS) {
     st <- p16[[vol]]$states
     hlen <- length(st[[1]][[1]]$h)
+    sva <- p16[[vol]]$prior$sv_a
     pit[[vol]] <- list(
       rho = wb_pit_rho(st, vol),
-      s2o = if (!is.null(p16[[vol]]$prior$sv_a)) wb_pit_sigma2_omega(st, p16[[vol]]$prior$sv_a) else list(),
+      s2o = if (is.null(sva)) list() else c(
+        wb_pit_sigma2_omega(st, sva, "omega"),
+        if (vol == "cSV") stats::setNames(wb_pit_sigma2_omega(st, sva, "sigma2v"),
+                                          paste("[w^2 = sigma2v]", names(wb_pit_sigma2_omega(st, sva, "sigma2v"))))),
+      s2v = if (vol == "cSV") wb_pit_sigma2v(st) else list(),
       rep_rho = repeat_fraction(st, "rho"), rep_omega = repeat_fraction(st, "omega"),
       rep_h = repeat_fraction(st, "h"), rep_s2v = repeat_fraction(st, "sigma2v"),
       rep_s2o = repeat_fraction(st, "sigma2_omega"))
@@ -4507,16 +4546,17 @@ run_wbvars_probes <- function() {
     v <- unlist(lst[grepl(pat, names(lst), fixed = TRUE)])
     any(is.finite(v) & v > 1e-3)
   }
+  same_only <- function(lst) lst[grepl("| h same", names(lst), fixed = TRUE)]
   init <- vapply(WB_VOLS, function(vol) {
     if (is.null(pit[[vol]])) return("undecided")
-    a <- pass_any(pit[[vol]]$rho, "h0_zero")
-    b <- pass_any(pit[[vol]]$rho, "stationary")
+    a <- pass_any(same_only(pit[[vol]]$rho), "h0_zero")
+    b <- pass_any(same_only(pit[[vol]]$rho), "stationary")
     if (isTRUE(pit[[vol]]$rep_rho > 0.01)) "undecided (rho has Metropolis repeats)" else
       if (a && !b) "h_0 = 0" else if (b && !a) "stationary" else "undecided"
   }, character(1))
   pit_txt <- vapply(names(pit), function(vol) sprintf(
-    "%s: rho PIT (U(-1, 1) prior) %s; sigma2_omega PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
-    vol, fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
+    "%s: rho PIT (U(-1, 1) prior) %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
+    vol, fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
     pit[[vol]]$rep_h, pit[[vol]]$rep_s2v, pit[[vol]]$rep_s2o), character(1))
   p13_decided <- all(init %in% c("h_0 = 0", "stationary")) && isTRUE(scale$pass)
   pr$P13 <- list(
