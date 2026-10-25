@@ -73,7 +73,7 @@ None of these blocks Phase 4.
 | `src/rai_bvar/components/mean/_bart_spike.py` | `BartPrior` (static tree-prior choices, fixed cutpoint grid); `template_state` (a root-only bartz `State` with dtypes normalised to `step`'s output); **`set_data`** (the setter); `bartz_step` (bartz under the right x64 setting); `BartSpikeMean`, a `MeanBlock` with `fuses_contemp=False`, `has_state=True`, `Batching.VMAP` |
 | `src/rai_bvar/validation/_bart_spike.py` | `BartJoint` (a `JointModel` for Geweke and SBC: the BART tree prior on top of the `zero_sv` composition's structure, SV block, test prior and fixed design). Independent box-form references: `forest_prior_sample`, `forest_eval`, `tree_log_prior`. Plus `bartz_x64_patch` (the path-(b) experiment) |
 | `tests/mcmc/blocks/test_bart_spike.py` | 13 block tests: Q1 setter exactness, Q3 precision hook, the x64 facts, the reference model against bartz |
-| `tests/geweke/test_geweke_bart_spike.py` | Geweke rows (G-small, G-full) with `test_geweke_compositions`' sizes, rule and record |
+| `tests/geweke/test_geweke_bart_spike.py` | Geweke rows (G-small, G-full) with `test_geweke_compositions`' sizes, rule and record, and two kernel mutants that must fail (`test_g_small_bart_mutant_fails`) |
 | `tests/sbc/test_sbc_bart_spike.py` | SBC with `test_sbc_compositions`' sizes, rule and record |
 | `benchmarks/phase4_bart_spike_cost.py` | Per-sweep cost (§4) |
 | `benchmarks/phase4_float32_leaf_error.py` | Float32 leaf-conditional error study (§Q2.4) |
@@ -281,7 +281,9 @@ The settings are those of `test_sbc_compositions` (DESIGN §9.6 with that module
 data-only filter `max|ỹ| < 10³`, both ESS gates and the Gandy–Scott wrapper. They were
 pre-registered from a pilot before any SBC run: on 16 prior-drawn `T = 100` datasets × 3000 sweeps,
 the largest per-quantity IAT was 43 (`φ`; tree split counts 20–38, median over quantities ≈ 20),
-inside what `t_max = 200` covers (IAT ≤ 182).
+inside what `t_max = 200` covers (IAT ≤ 182). The 16-dataset pilot underestimated the tail: at N = 4000 the pilot IATs reached a
+99th percentile of 59 and a maximum of 113. That still lies inside what the cap covers, so the
+pre-registered `t_max = 200` held and nothing was changed after seeing results.
 
 The quantities are the 53 test functions minus data functions, squares and cross-products: `a`, the
 SV parameters and states, `g` at probe points and dates, `g` mean and mean square, leaf count, mean
