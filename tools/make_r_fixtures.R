@@ -1482,11 +1482,12 @@ nc_auto <- function(x, description = NULL) {
   d <- dim(x)
   attributes(x) <- NULL
   if (!is.null(d)) dim(x) <- d
-  if (is.logical(x)) storage.mode(x) <- "integer"
+  if (is.logical(x) || (is.integer(x) && anyNA(x))) storage.mode(x) <- "double"
   if (is.numeric(x) && !is.integer(x)) storage.mode(x) <- "double"
   shape <- if (is.null(dim(x))) length(x) else dim(x)
   if (length(shape) == 1L) x <- as.vector(x)
-  nc_array(x, paste0("n", shape), description)
+  nc_array(x, if (length(shape) == 1L) paste0("n", shape) else
+    paste0("n", shape, "_", seq_along(shape)), description)
 }
 
 # Move the axis of size D (the draws) last; the last such axis if several have size D.
@@ -1503,6 +1504,14 @@ draws_last <- function(x, D) {
   ax <- ax[length(ax)]
   if (ax == length(d)) return(x)
   aperm(x, c(setdiff(seq_along(d), ax), ax))
+}
+
+# Warnings are reported by their message only (no call: it could quote a line of a GPL package).
+quiet_calls <- function(expr) {
+  withCallingHandlers(expr, warning = function(w) {
+    message("Warning: ", conditionMessage(w))
+    invokeRestart("muffleWarning")
+  })
 }
 
 attempt_probe <- function(id, expr) {
@@ -1892,9 +1901,10 @@ sv_t5_four_obs <- function(seed = 20261199L) {
     "set.seed(%dL); svsample(c(0.4, -2.5, 0.3, 0.6), draws = %dL, burnin = 10000L, ",
     "n_chains = 2L, priorspec = specify_priors(mu = sv_normal(-1, 0.5), phi = sv_beta(20, 1.5), ",
     "sigma2 = sv_gamma(0.5, 0.5/0.1), nu = sv_constant(5), latent0_variance = \"stationary\"), ",
-    "keeptau = TRUE, quiet = TRUE)"), seed, draws)
+    "quiet = TRUE)"), seed, draws)
   tryCatch({
     res <- eval(parse(text = code), new.env(parent = globalenv()))
+    if (is.null(res$tau)) stop("svsample returned no tau draws")
     col <- function(mcl, j) unlist(lapply(mcl, function(m) as.numeric(as.matrix(m)[, j])),
                                    use.names = FALSE)
     q <- function(x) quantile(x, P2_PROBS, names = FALSE, type = 7)
@@ -1929,7 +1939,7 @@ if ("stochvol" %in% SECTIONS) {
   i <- 0L
   for (fx in SV_FIXTURES) for (run_name in fx$runs) {
     if (!length(SV_ONLY) || sprintf("stochvol_%s_%s", fx$data, run_name) %in% SV_ONLY) {
-      run_stochvol_fixture(fx$data, run_name, SV_SEED0 + i, direct_check)
+      quiet_calls(run_stochvol_fixture(fx$data, run_name, SV_SEED0 + i, direct_check))
     }
     i <- i + 1L
   }
@@ -2693,50 +2703,46 @@ PROBES <- list(
 BV_LOOSE_PHI <- 'prior = "normal", normal_sds = 100, priormean = 0, PHI_tol = 0'
 BV_HOMO_LOOSE <- bv_sigma_args("constant", normal_sds = "100")
 
+# OLS coefficients (rai-bvar regressor order) of a VAR(p) with intercept: the posterior mean under
+# a loose Normal prior with constant variances (identical regressors: GLS = OLS).
+ols_coef <- function(Y, p) {
+  des <- swa_design(Y, p)
+  solve(crossprod(des$X), crossprod(des$X, des$Y))
+}
+
 probe_p3 <- function() {
-  r <- bv_probe_fit("probe_corr.csv", 1L, BV_LOOSE_PHI, BV_HOMO_LOOSE, "100",
-                    draws = if (QUICK) 1000L else 5000L)
-  f <- unclass(r$fit)
-  Y <- r$data
-  M <- ncol(Y)
-  K <- 1L + M
-  P <- bv_phi(f, M, K, r$D)
-  pm <- apply(P, c(1, 2), mean)
-  int_row <- which.min(rowSums((pm - matrix(c(5, -3), K, 2, byrow = TRUE))^2))
-  rule <- if (int_row == 1L) "first" else if (int_row == K) "last" else "other"
-  rm1 <- bv_row_map(r$fit, Y, 1L, rule)
-  ok1 <- rm1$intercept_bv == int_row && max(abs(pm[int_row, ] - c(5, -3))) < 0.5
-  # var_sv_n3, p = 2: every mapped posterior mean near the DGP
-  r2 <- bv_probe_fit("var_sv_n3.csv", 2L, BV_LOOSE_PHI, BV_HOMO_LOOSE, "100",
-                     draws = if (QUICK) 1000L else 5000L)
-  Y2 <- r2$data
-  rm2 <- bv_row_map(r2$fit, Y2, 2L, rule)
-  P2m <- apply(bv_phi(unclass(r2$fit), 3L, 7L, r2$D), c(1, 2), mean)[rm2$phi_rows, ]
-  truth <- rbind(BV_N3_DGP$c, t(BV_N3_DGP$B[[1]]), t(BV_N3_DGP$B[[2]]))   # (regressor, eq)
-  err <- max(abs(P2m - truth)[-1, ])     # lag coefficients (the intercepts are less precise)
-  err_c <- max(abs(P2m - truth)[1, ])
-  ok2 <- err < 0.3 && err_c < 0.6
-  order_txt <- paste(rm2$x_names, collapse = ", ")
-  status <- if (ok1 && ok2) "answered" else "unresolved"
+  check_fit <- function(file, lags) {
+    r <- bv_probe_fit(file, lags, BV_LOOSE_PHI, BV_HOMO_LOOSE, "100",
+                      draws = if (QUICK) 1000L else 5000L)
+    Y <- r$data
+    M <- ncol(Y)
+    K <- 1L + M * lags
+    rm <- bv_row_map(r$fit, Y, lags, NA_character_)
+    pm <- apply(bv_phi(unclass(r$fit), M, K, r$D), c(1, 2), mean)
+    err <- max(abs(pm[rm$phi_rows, , drop = FALSE] - ols_coef(Y, lags)))
+    list(fit = r$fit, rm = rm, pm = pm, err = err, K = K)
+  }
+  a <- check_fit("probe_corr.csv", 1L)
+  b <- check_fit("var_sv_n3.csv", 2L)
+  rule <- if (all(c(a$rm$intercept_bv == 1L, b$rm$intercept_bv == 1L))) "first" else
+    if (a$rm$intercept_bv == a$K && b$rm$intercept_bv == b$K) "last" else "other"
+  lag_order <- if (identical(b$rm$bv_to_ours[-b$rm$intercept_bv], 2:b$K)) "rai-bvar" else "other"
+  ok <- a$err < 0.05 && b$err < 0.05 && rule != "other" && lag_order == "rai-bvar"
   list(
-    status = status,
-    answer = if (status == "answered") sprintf(
-      "PHI row r is X column r; the intercept is PHI row %d of %d (%s) and the lag rows follow the rai-bvar order %s",
-      rm2$intercept_bv, nrow(P2m), rule,
-      if (identical(rm2$bv_to_ours, seq_len(7L))) "(const first)" else
-        paste0("permuted: rai-bvar regressor of PHI row r = (", paste(rm2$bv_to_ours, collapse = ", "), ")"))
+    status = if (ok) "answered" else "unresolved",
+    answer = if (ok) sprintf(paste(
+      "PHI row r belongs to column r of the returned X; the intercept is the %s row and the lag",
+      "rows follow rai-bvar's order (lag 1 of y1..yM, ..., lag p of y1..yM)"), rule)
       else "(undecided)",
-    evidence = paste0(
-      sprintf("probe_corr: PHI posterior means (rows) %s; row nearest (5, -3): %d; X has %d columns",
-              paste(apply(signif(pm, 4), 1, paste, collapse = "/"), collapse = "; "), int_row,
-              rm1$x_cols),
-      sprintf("; X column -> rai-bvar regressor (probe_corr): %s; (var_sv_n3, p = 2): %s",
-              paste(rm1$bv_to_ours, collapse = ","), paste(rm2$bv_to_ours, collapse = ",")),
-      sprintf("; X column names (var_sv_n3): %s", order_txt),
-      sprintf("; var_sv_n3 max |mapped posterior mean - B| = %.3f (limit 0.3), - c: %.3f (limit 0.6)",
-              err, err_c)),
-    layout = list(intercept_rule = rule, rowmap_n3p2 = rm2),
-    describe = c(describe(r$fit, "probe_corr_fit"), describe(r2$fit, "var_sv_n3_fit")))
+    evidence = sprintf(paste(
+      "X columns (var_sv_n3, p = 2): %s, matched exactly to the rai-bvar regressors (%s);",
+      "probe_corr: X columns -> rai-bvar regressors (%s); max |mapped posterior mean - OLS|",
+      "(loose prior, constant variances): probe_corr %.4f, var_sv_n3 %.4f (limit 0.05);",
+      "probe_corr posterior means (PHI rows) %s"), paste(b$rm$x_names, collapse = ", "),
+      paste(b$rm$bv_to_ours, collapse = ","), paste(a$rm$bv_to_ours, collapse = ","), a$err,
+      b$err, paste(apply(signif(a$pm, 4), 1, paste, collapse = "/"), collapse = "; ")),
+    layout = list(intercept_rule = rule, lag_order = lag_order, rowmap_n3p2 = b$rm),
+    describe = c(describe(a$fit, "probe_corr_fit"), describe(b$fit, "var_sv_n3_fit")))
 }
 
 probe_p2 <- function() {
@@ -2819,58 +2825,60 @@ probe_p4 <- function() {
   M <- 3L
   S <- draws_last(f$sv_para, D)
   lv <- bv_logvar(f, M, D)
-  truth <- list(mu = c(-3, 0, 2), phi = c(0.8, 0.9, 0.97), sigma = c(0.4, 0.3, 0.15))
-  tol <- c(mu = 0.6, phi = 0.1, sigma = 0.12)
+  truth <- rbind(mu = c(-3, 0, 2), phi = c(0.8, 0.9, 0.97), sigma = c(0.4, 0.3, 0.15),
+                 sigma2 = c(0.4, 0.3, 0.15)^2)
+  # rule: every slice is nearest to exactly one target row, at less than half its distance to
+  # the second-nearest target; mu, phi and one of sigma / sigma^2 must be matched
   try_orient <- function(orient) {
     So <- if (orient == "cols_params") aperm(S, c(2, 1, 3)) else S
     if (dim(So)[2] != M) return(NULL)
     pm <- apply(So, c(1, 2), mean)
-    dist <- function(k, target) apply(pm, 1, function(row) max(abs(row - target)))
-    d_mu <- dist("mu", truth$mu)
-    d_phi <- dist("phi", truth$phi)
-    d_sd <- dist("sigma", truth$sigma)
-    d_var <- dist("sigma", truth$sigma^2)
-    near_mu <- which(d_mu < tol[["mu"]])
-    h0 <- NA_integer_
-    mu_row <- which.min(d_mu)
-    if (length(near_mu) == 2L) {   # h_0: the slice most correlated with h_1
-      cr <- vapply(near_mu, function(rw) mean(vapply(seq_len(M), function(j) {
+    dist <- t(apply(pm, 1, function(row) apply(truth, 1, function(tr) max(abs(row - tr)))))
+    near <- apply(dist, 1, which.min)
+    clear <- apply(dist, 1, function(d) {
+      o <- sort(d)
+      o[1] < 0.5 * o[2]
+    })
+    tn <- rownames(truth)[near]
+    rows <- c(mu = NA_integer_, phi = NA_integer_, sigma = NA_integer_, h0 = NA_integer_)
+    for (k in c("mu", "phi")) if (sum(tn == k) == 1L) rows[[k]] <- which(tn == k)
+    sig <- which(tn %in% c("sigma", "sigma2"))
+    if (length(sig) == 1L) rows[["sigma"]] <- sig
+    if (sum(tn == "mu") == 2L) {     # h_0 next to mu: the slice most correlated with h_1
+      two <- which(tn == "mu")
+      cr <- vapply(two, function(rw) mean(vapply(seq_len(M), function(j) {
         stats::cor(So[rw, j, ], lv[lv_row(1L, dim(lv)[1], nrow(r$data) - 1L), j, ])
       }, numeric(1))), numeric(1))
-      h0 <- near_mu[which.max(cr)]
-      mu_row <- near_mu[which.min(cr)]
+      rows[["h0"]] <- two[which.max(cr)]
+      rows[["mu"]] <- two[which.min(cr)]
     }
-    sig_sd <- min(d_sd) <= min(d_var)
-    sig_row <- if (sig_sd) which.min(d_sd) else which.min(d_var)
-    rows <- c(mu = mu_row, phi = which.min(d_phi), sigma = sig_row, h0 = h0)
-    ok <- d_mu[mu_row] < tol[["mu"]] && min(d_phi) < tol[["phi"]] &&
-      min(if (sig_sd) d_sd else d_var) < tol[["sigma"]] &&
-      length(unique(rows[!is.na(rows)])) == sum(!is.na(rows))
-    list(orient = orient, rows = rows, sigma_is = if (sig_sd) "sd" else "variance", ok = ok,
-         pm = pm)
+    ok <- all(clear) && !anyNA(rows[c("mu", "phi", "sigma")]) &&
+      length(unique(rows[!is.na(rows)])) == sum(!is.na(rows)) &&
+      nrow(pm) == sum(!is.na(rows))
+    list(orient = orient, rows = rows,
+         sigma_is = if (length(sig) == 1L && tn[sig] == "sigma2") "variance" else "sd",
+         ok = ok, pm = pm, dist = dist)
   }
   res <- Filter(Negate(is.null), lapply(c("rows_params", "cols_params"), try_orient))
   good <- Filter(function(x) x$ok, res)
   dn <- dimnames(S)
-  status <- if (length(good) == 1L || (length(good) == 2L &&
-                                        identical(good[[1]]$rows, good[[2]]$rows))) "answered"
-    else "unresolved"
-  g <- if (length(good)) good[[1]] else NULL
+  status <- if (length(good) == 1L) "answered" else "unresolved"
+  g <- if (length(good) == 1L) good[[1]] else NULL
   list(
     status = status,
     answer = if (status == "answered") sprintf(
-      "sv_para slices (%s): mu = %d, phi = %d, sigma = %d (%s)%s; the other axis holds the equations",
-      if (g$orient == "rows_params") "first axis" else "second axis", g$rows[["mu"]],
-      g$rows[["phi"]], g$rows[["sigma"]], if (g$sigma_is == "sd") "the s.d. of the h innovation"
-      else "a variance", if (is.na(g$rows[["h0"]])) "; no h_0 slice" else
-        sprintf("; h_0 = %d", g$rows[["h0"]])) else "(undecided)",
+      "sv_para is (parameter, equation, draw): slice %d = mu, %d = phi, %d = sigma (%s)%s",
+      g$rows[["mu"]], g$rows[["phi"]], g$rows[["sigma"]], if (g$sigma_is == "sd")
+        "the s.d. of the h innovation" else "a variance",
+      if (is.na(g$rows[["h0"]])) "; no h_0 slice" else sprintf("; h_0 = slice %d", g$rows[["h0"]]))
+      else "(undecided)",
     evidence = paste0(
       sprintf("sv_para: dim %s; dimnames %s; ", paste(dim(S), collapse = " x "),
               if (is.null(dn)) "none" else paste(vapply(dn, function(z) paste(z, collapse = ","),
                                                          ""), collapse = " | ")),
-      paste(vapply(res, function(x) sprintf("%s: posterior means %s (ok = %s)", x$orient,
-                                            paste(apply(signif(x$pm, 4), 1, paste,
-                                                        collapse = "/"), collapse = "; "),
+      paste(vapply(res, function(x) sprintf("%s: posterior means %s; distance to (mu, phi, sigma, sigma^2) %s (ok = %s)",
+                                            x$orient, paste(apply(signif(x$pm, 4), 1, paste, collapse = "/"), collapse = "; "),
+                                            paste(apply(signif(x$dist, 3), 1, paste, collapse = "/"), collapse = "; "),
                                             x$ok), ""), collapse = " || ")),
     layout = list(sv = if (!is.null(g)) g[c("orient", "rows", "sigma_is")] else NULL),
     describe = describe(r$fit, "probe_sv_fit"))
@@ -2906,6 +2914,10 @@ probe_p1 <- function() {
   slot_rule <- if (normal_reading == "undecided") "undecided" else
     if (identical(unname(idx) + 0, colmajor + 0)) "column-major" else
       if (identical(unname(idx) + 0, rowmajor + 0)) "row-major" else "other"
+  vp <- if (!is.null(f$V_prior)) apply(draws_last(f$V_prior, r$D), c(1, 2), mean) else NULL
+  vp_txt <- if (is.null(vp)) "V_prior not returned" else sprintf(
+    "V_prior (bayesianVARs' prior variances of PHI, rows as PHI): %s",
+    paste(signif(vp, 4), collapse = ", "))
   status <- if (normal_reading != "undecided" && ureading != "undecided" &&
                 slot_rule %in% c("column-major", "row-major")) "answered" else "unresolved"
   list(
@@ -2918,9 +2930,9 @@ probe_p1 <- function() {
     evidence = sprintf(paste(
       "posterior variance of the lag coefficients (PHI lag rows x equations, intercept row %d",
       "excluded): %s; slot numbers as variance %s, as s.d. %s; posterior variance of the free U",
-      "element: %.3e"), int_row, paste(signif(lag, 4), collapse = ", "),
+      "element: %.3e; %s"), int_row, paste(signif(lag, 4), collapse = ", "),
       paste(signif(lag / 1e-3, 4), collapse = ", "), paste(signif(sqrt(lag) / 1e-3, 4),
-                                                           collapse = ", "), uv),
+                                                           collapse = ", "), uv, vp_txt),
     layout = list(normal_reading = normal_reading, chol_reading = ureading,
                   slot_rule = slot_rule))
 }
@@ -3386,6 +3398,7 @@ same_partition <- function(a, b) {
 }
 
 probe_p7 <- function(L) {
+  if (is.null(L$rowmap_n3p2)) stop("needs P3")
   ds <- bv_data("var_sv_n3.csv")
   Y <- ds$Y
   M <- 3L
@@ -3393,49 +3406,53 @@ probe_p7 <- function(L) {
   rm2 <- L$rowmap_n3p2
   lag_bv <- setdiff(seq_len(1L + M * p), rm2$intercept_bv)
   ours_lag <- rm2$bv_to_ours[lag_bv] - 1L
-  res <- list()
-  for (g in c("global", "equation-wise", "covariate-wise", "olcl-lagwise")) {
+  gs <- c("global", "equation-wise", "covariate-wise", "olcl-lagwise")
+  fields <- list()
+  desc <- character()
+  for (g in gs) {
     pr <- bayesianVARs::specify_prior_phi(data = Y, lags = p, prior = "HS", global_grouping = g)
     fl <- flatten_fields(as_data(pr))
-    cand <- Filter(function(v) is.numeric(v) && length(v) == p * M * M && all(is.finite(v)) &&
-                     all(v == round(v)) && all(v >= 1), fl)
-    if (length(cand) > 1L) {
-      named <- cand[grepl("group", names(cand), ignore.case = TRUE)]
-      if (length(named)) cand <- named
-    }
-    grp_fields <- grep("group", names(fl), value = TRUE, ignore.case = TRUE)
-    if (length(cand) != 1L) {
-      res[[g]] <- list(found = FALSE, fields = grp_fields, n_cand = length(cand))
-      next
-    }
-    v <- cand[[1]]
+    desc <- c(desc, describe(pr, sprintf("prior_phi_HS_%s", g)))
+    fields[[g]] <- Filter(function(v) is.numeric(v) && length(v) == p * M * M &&
+                            all(is.finite(v)) && all(v == round(v)) && all(v >= 0), fl)
+  }
+  # the grouping field: present for every grouping, its number of distinct values varies with it
+  common <- Reduce(intersect, lapply(fields, names))
+  nuniq <- vapply(common, function(nm) vapply(gs, function(g) length(unique(as.vector(fields[[g]][[nm]]))),
+                                              integer(1)), integer(length(gs)))
+  nuniq <- matrix(nuniq, nrow = length(gs), dimnames = list(gs, common))
+  varies <- common[apply(nuniq, 2, function(z) length(unique(z)) > 1L)]
+  if (length(varies) != 1L) {
+    return(list(status = "unresolved", answer = "(no unique grouping field)",
+                evidence = sprintf("integer fields of length lags*M^2 present for every grouping: %s; distinct values per grouping: %s",
+                                   paste(common, collapse = ", "),
+                                   paste(sprintf("%s %s", colnames(nuniq), apply(nuniq, 2, paste, collapse = "/")), collapse = "; ")),
+                describe = desc))
+  }
+  fld <- varies
+  res <- list()
+  for (g in gs) {
+    v <- fields[[g]][[fld]]
     G <- if (!is.null(dim(v)) && all(dim(v) == c(p * M, M))) matrix(v, p * M, M) else
       if (L$slot_rule == "column-major") matrix(v, p * M, M) else matrix(v, p * M, M, byrow = TRUE)
     Go <- matrix(NA_integer_, p * M, M)
     Go[ours_lag, ] <- as.integer(G)
-    res[[g]] <- list(found = TRUE, field = names(cand)[1], G = Go, G_bv = G,
-                     d38 = same_partition(Go, d38_groups(g, M, p)), fields = grp_fields)
+    res[[g]] <- list(found = TRUE, field = fld, G = Go, d38 = same_partition(Go, d38_groups(g, M, p)))
   }
-  found <- vapply(res, `[[`, logical(1), "found")
-  txt <- vapply(names(res), function(g) {
-    x <- res[[g]]
-    if (!x$found) sprintf("%s: no unique grouping field (%d candidates; group fields: %s)", g,
-                          x$n_cand, paste(x$fields, collapse = ", "))
-    else sprintf("%s: field %s, %d groups, %s D-38", g, x$field, length(unique(as.vector(x$G))),
-                 if (x$d38) "equals" else "differs from")
-  }, character(1))
+  txt <- vapply(gs, function(g) sprintf("%s: %d groups, %s D-38", g, length(unique(as.vector(res[[g]]$G))),
+                                       if (res[[g]]$d38) "equals" else "differs from"), character(1))
   list(
-    status = if (all(found)) "answered" else "unresolved",
-    answer = if (all(found)) paste(txt, collapse = "; ") else "(not all grouping matrices found)",
-    evidence = paste(c(txt, vapply(names(res), function(g) if (res[[g]]$found) sprintf(
-      "%s (rai-bvar lag rows x equations, column-major): %s", g,
-      paste(res[[g]]$G, collapse = ",")) else "", character(1))), collapse = "; "),
-    layout = list(groups = lapply(res, `[[`, "G"),
-                  group_field = if (isTRUE(res[["olcl-lagwise"]]$found)) res[["olcl-lagwise"]]$field),
-    groups = res)
+    status = "answered",
+    answer = paste0("grouping field ", fld, " (group ids per coefficient); ", paste(txt, collapse = "; ")),
+    evidence = paste(c(txt, vapply(gs, function(g) sprintf(
+      "%s (rai-bvar lag rows x equations, column-major): %s", g, paste(res[[g]]$G, collapse = ",")),
+      character(1))), collapse = "; "),
+    layout = list(groups = lapply(res, `[[`, "G"), group_field = fld),
+    groups = res, describe = desc)
 }
 
 probe_p9 <- function(L) {
+  if (is.null(L$rowmap_n3p2)) stop("needs P3")
   ds <- bv_data("var_sv_n3.csv")
   Y <- ds$Y
   M <- 3L
@@ -3477,11 +3494,14 @@ probe_p9 <- function(L) {
     for (cn in names(cands)) {
       for (form in c("c * s", "c * s^2", "c^2 * s^2")) for (cc in c(c0 = c0, c1 = c1)) {
         target <- switch(form, "c * s" = cc * sl, "c * s^2" = cc * sl^2, "c^2 * s^2" = cc^2 * sl^2)
+        if (length(target) != length(cands[[cn]]) || anyNA(target)) next
         rel <- max(abs(cands[[cn]] / target - 1))
         if (is.finite(rel) && rel < 1e-8) hits <- c(hits, sprintf("%s = %s with c = %g, s from %s (max rel. diff %.1e)", cn, form, cc, vn, rel))
       }
-      ratios <- c(ratios, sprintf("%s / (c0 s, %s): %.6g .. %.6g", cn, vn,
-                                  min(cands[[cn]] / (c0 * sl)), max(cands[[cn]] / (c0 * sl))))
+      if (length(sl) == length(cands[[cn]]) && !anyNA(sl)) {
+        ratios <- c(ratios, sprintf("%s / (c0 s, %s): %.6g .. %.6g", cn, vn,
+                                    min(cands[[cn]] / (c0 * sl)), max(cands[[cn]] / (c0 * sl))))
+      }
     }
   }
   d44 <- any(grepl("D-44", hits))
@@ -3771,15 +3791,11 @@ run_bvars_p3 <- function(env) {
   record_layout("bayesianvars_probes.txt", unlist(lapply(probes, `[[`, "describe")))
   if (want("probe_bayesianvars")) stage_probes(env, probes)
   L <- bv_layout(probes)
-  if (identical(probes$P3$status, "answered")) {
-    L$lag_order <- if (identical(sort(L$rowmap_n3p2$bv_to_ours[-L$rowmap_n3p2$intercept_bv]),
-                                 L$rowmap_n3p2$bv_to_ours[-L$rowmap_n3p2$intercept_bv]))
-      "rai-bvar" else "other"
-  }
   p3 <- list()
   p3$P6 <- attempt_probe("P6", probe_p6(L))
   L$standardise <- isTRUE(p3$P6$layout$standardise)
   p3$P7 <- attempt_probe("P7", probe_p7(L))
+  if (!is.null(p3$P7$describe)) record_layout("bayesianvars_prior_phi.txt", p3$P7$describe)
   if (identical(p3$P7$status, "answered")) L$groups <- p3$P7$layout$groups
   p3$P9 <- attempt_probe("P9", probe_p9(L))
   p3$P10 <- attempt_probe("P10", probe_p10(L))
@@ -3862,7 +3878,7 @@ if ("bvars" %in% SECTIONS) {
   if (isTRUE(env$bayesianvars_available)) {
     suppressPackageStartupMessages(library(bayesianVARs))
     message("  bayesianVARs ", packageVersion("bayesianVARs"))
-    run_bvars_p3(env)
+    quiet_calls(run_bvars_p3(env))
   } else {
     stage_probes(env)
   }
@@ -3951,9 +3967,27 @@ wb_fixv_code <- function(fixv) {
          "spec$prior$lambda <- fixv$lambda; spec$starting_values$V <- fixv$Omega; ")
 }
 
-wb_run_code <- function(vol, p, burn, draws, fixv = NULL) {
-  paste0(sprintf(paste0("spec <- specify_bvar$new(data = data, p = %dL, common_volatility = \"%s\", ",
-                        "distribution = \"norm\"); "), p, vol),
+# specify_bvar$new() fits AR models to every series and needs more rows than the T = 2 dataset of
+# P16 has; there the specification is built on a carrier (the data plus 40 N(0, 1) rows) and its
+# data matrices, prior and starting values are then replaced by those of the data themselves
+# (bsvars::specify_data_matrices, specify_prior_bvar, specify_starting_values_bvar).
+wb_spec_code <- function(vol, p, tiny = FALSE) {
+  if (!tiny) {
+    return(sprintf(paste0("spec <- specify_bvar$new(data = data, p = %dL, common_volatility = \"%s\", ",
+                          "distribution = \"norm\"); "), p, vol))
+  }
+  paste0(
+    "carrier <- rbind(data, matrix(stats::rnorm(40L * ncol(data)), 40L, ncol(data))); ",
+    sprintf(paste0("spec <- specify_bvar$new(data = carrier, p = %dL, common_volatility = \"%s\", ",
+                   "distribution = \"norm\"); "), p, vol),
+    sprintf("spec$data_matrices <- bsvars::specify_data_matrices$new(data, p = %dL); ", p),
+    sprintf("spec$prior <- specify_prior_bvar$new(N = ncol(data), p = %dL, is_homoskedastic = FALSE); ", p),
+    sprintf(paste0("spec$starting_values <- specify_starting_values_bvar$new(N = ncol(data), p = %dL, ",
+                   "T = nrow(data) - %dL, is_homoskedastic = FALSE); "), p, p))
+}
+
+wb_run_code <- function(vol, p, burn, draws, fixv = NULL, tiny = FALSE) {
+  paste0(wb_spec_code(vol, p, tiny),
          wb_fixv_code(fixv),
          sprintf("burn <- estimate(spec, S = %dL, thin = 1L, show_progress = FALSE); ", burn),
          if (draws > 0L) sprintf("post <- estimate(burn, S = %dL, thin = 1L, show_progress = FALSE)",
@@ -3970,8 +4004,8 @@ wb_eval <- function(code, vars, seed) {
 }
 
 # Chained estimate(·, S = s) calls after a burn-in: the last_draw state after every call.
-wb_chain <- function(Y, p, vol, burn, calls, s, seed, fixv = NULL, keep_post = TRUE) {
-  r <- wb_eval(wb_run_code(vol, p, burn, 0L, fixv), list(data = Y, fixv = fixv), seed)
+wb_chain <- function(Y, p, vol, burn, calls, s, seed, fixv = NULL, keep_post = TRUE, tiny = FALSE) {
+  r <- wb_eval(wb_run_code(vol, p, burn, 0L, fixv, tiny), list(data = Y, fixv = fixv), seed)
   post <- r$env$post
   states <- vector("list", calls)
   posts <- vector("list", calls)
@@ -4246,7 +4280,9 @@ wb_probe_p15 <- function() {
   rw <- a0(FALSE)[, rmq$ours_cols]
   wn <- a0(TRUE)[, rmq$ours_cols]
   own1 <- cbind(1:3, 1L + 1:3)        # (equation i, regressor y_i.L1) in rai-bvar order
-  rw_ok <- all(rw[own1] == 1) && all(rw[-own1] == 0)
+  own_mask <- matrix(FALSE, 3L, K)
+  own_mask[own1] <- TRUE
+  rw_ok <- all(rw[own_mask] == 1) && all(rw[!own_mask] == 0)
   wn_ok <- all(wn == 0)
   status <- if (err_cov < 0.05 && int_ok && rw_ok && wn_ok) "answered" else "unresolved"
   list(
@@ -4278,10 +4314,17 @@ wb_probe_p12 <- function() {
       Psi = if (orient == "Psi = c Omega") cc * Om else cc * Oi,
       Gamma = if (orient == "Psi = c Omega") cc * Oi else cc * Om)
   }
+  settings[["control: default prior and starting V"]] <- list(control = "")
+  settings[["control: default prior, starting V = 2 Omega"]] <- list(
+    control = "spec$starting_values$V <- 2 * Omega; ")
   res <- lapply(names(settings), function(nm) tryCatch({
     st <- settings[[nm]]
-    r <- wb_eval(wb_run_code("cSV", WB_LAGS, if (QUICK) 200L else 1000L, if (QUICK) 300L else 2000L, st),
-                 list(data = q$Y, fixv = st), WB_SEED + 12L)
+    code <- if (is.null(st$control)) wb_run_code("cSV", WB_LAGS, if (QUICK) 200L else 1000L,
+                                                 if (QUICK) 300L else 2000L, st) else
+      paste0(wb_spec_code("cSV", WB_LAGS), st$control,
+             sprintf("burn <- estimate(spec, S = %dL, thin = 1L, show_progress = FALSE); ", if (QUICK) 200L else 1000L),
+             sprintf("post <- estimate(burn, S = %dL, thin = 1L, show_progress = FALSE)", if (QUICK) 300L else 2000L))
+    r <- wb_eval(code, list(data = q$Y, fixv = st, Omega = Om), WB_SEED + 12L)
     V <- wb_post(r$env$post)$V
     sdV <- apply(V, c(1, 2), stats::sd)
     mV <- apply(V, c(1, 2), mean)
@@ -4295,14 +4338,18 @@ wb_probe_p12 <- function() {
       sprintf("%s: max sd(V_ij)/sqrt(Om_ii Om_jj) %.2e, max |mean - Omega| (scaled) %.2e, vs Omega^-1 %.2e",
               nm, x$ratio, x$err, x$err_inv)
   }, character(1))
-  pass <- names(res)[vapply(res, function(x) isTRUE(x$ok) && x$ratio <= 1e-3, logical(1))]
+  ctrl <- grepl("^control", names(res))
+  pass <- names(res)[!ctrl & vapply(res, function(x) isTRUE(x$ok) && x$ratio <= 1e-3, logical(1))]
+  default_moves <- isTRUE(res[[which(ctrl)[1]]]$ratio > 1e-3)
   at_om <- pass[vapply(pass, function(nm) res[[nm]]$err <= 1e-3, logical(1))]
   best <- if (length(at_om)) at_om[1] else NULL
   ran <- all(vapply(res, `[[`, logical(1), "ok"))
   list(
     status = if (length(best) || ran) "answered" else "unresolved",
-    answer = if (length(best)) sprintf(
-      "V can be held fixed at the default starting V (Omega): %s, lambda = (K + 1)/2, starting V = Omega", best)
+    answer = if (length(best)) sprintf(paste(
+      "V can be held fixed at the default starting V (Omega): %s, lambda = (K + 1)/2, starting V =",
+      "Omega%s"), best, if (default_moves) "" else
+        "; note: V does not move under the default prior either (see the control runs)")
       else if (ran) "V cannot be held fixed by the matrix-GIG settings tried (P12 does not hold)" else "(undecided)",
     evidence = paste(txt, collapse = "; "),
     fixv = if (length(best)) settings[[best]] else NULL, Omega = Om, holds = length(best) > 0L)
@@ -4314,11 +4361,11 @@ wb_probe_p16 <- function() {
   for (v in seq_along(WB_VOLS)) {
     vol <- WB_VOLS[v]
     runs <- lapply(seq_len(WB_RUNS_N), function(k) {
-      wb_chain(d$Y, 1L, vol, WB_P16_BURN, WB_P16_CALLS, 1L, WB_SEED + 1600L + 100L * v + k)
+      wb_chain(d$Y, 1L, vol, WB_P16_BURN, WB_P16_CALLS, 1L, WB_SEED + 1600L + 100L * v + k, tiny = TRUE)
     })
     message(sprintf("    P16 %s: %.4fs per chained call", vol, mean(vapply(runs, `[[`, 1, "seconds_per_call"))))
     ref <- lapply(seq_len(WB_RUNS_N), function(k) {
-      r <- wb_eval(wb_run_code(vol, 1L, WB_P16_BURN, WB_P16_CALLS), list(data = d$Y),
+      r <- wb_eval(wb_run_code(vol, 1L, WB_P16_BURN, WB_P16_CALLS, tiny = TRUE), list(data = d$Y),
                    WB_SEED + 1650L + 100L * v + k)
       wb_post(r$env$post)
     })
@@ -4349,10 +4396,10 @@ wb_fix_scan <- function() {
   out <- character()
   cvs <- numeric()
   for (vol in WB_VOLS) {
-    pf <- wb_prior(wb_spec(d$Y, 1L, vol))
+    pf <- wb_prior(wb_eval(wb_spec_code(vol, 1L, tiny = TRUE), list(data = d$Y), WB_SEED + 1399L)$env$spec)
     for (ms in c(1e-6, 1, 1e6)) {
       st <- tryCatch({
-        code <- paste0(sprintf("spec <- specify_bvar$new(data = data, p = 1L, common_volatility = \"%s\", distribution = \"norm\"); ", vol),
+        code <- paste0(wb_spec_code(vol, 1L, tiny = TRUE),
                        "spec$prior$sv_a <- sv_a; spec$prior$sv_s <- sv_s; ",
                        "burn <- estimate(spec, S = 2000L, thin = 1L, show_progress = FALSE); post <- burn")
         r <- wb_eval(code, list(data = d$Y, sv_a = pf$sv_a * 1e6, sv_s = pf$sv_s * ms), WB_SEED + 1400L)
@@ -4719,7 +4766,7 @@ if ("wbvars" %in% SECTIONS) {
   if (!requireNamespace("bvars", quietly = TRUE)) stop("section wbvars needs the R package bvars")
   suppressPackageStartupMessages(library(bvars))
   message("  bvars ", packageVersion("bvars"), ", bsvars ", packageVersion("bsvars"))
-  run_wbvars()
+  quiet_calls(run_wbvars())
 }
 
 # ------------------------------------------------------------------------------------------------
