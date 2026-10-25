@@ -1402,7 +1402,9 @@ p3_meta <- function(packages, kind) {
   out <- p2_meta(unique(c("stochvol", packages)))
   out$design <- P3_DESIGN
   out$kind <- kind
-  out$repos <- paste(getOption("repos"), collapse = " ")
+  # the repository the packages were installed from (the CI install step exports it); this R
+  # session's own repos option is irrelevant
+  out$repos <- Sys.getenv("RAI_BVAR_PPM_REPO", paste(getOption("repos"), collapse = " "))
   out$ppm_snapshot <- Sys.getenv("RAI_BVAR_PPM_SNAPSHOT", "not set")
   out$os <- os_release()
   out$packages <- paste(package_record(), collapse = "\n")
@@ -3280,7 +3282,8 @@ hyper_staging <- function(chains, select = NULL, grid = NULL) {
   cls <- vapply(seq_along(nm), function(k) {
     x <- unlist(col(k), use.names = FALSE)
     u <- unique(x)
-    if (length(u) == 1L) "constant" else if (all(u %in% c(0, 1))) "binary" else
+    if (all(u %in% c(0, 1)) && (length(u) == 2L || startsWith(nm[k], "gamma"))) "binary" else
+      if (length(u) == 1L) "constant" else
       if (!is.null(grid) && all(vapply(u, function(v) min(abs(v - grid)) < 1e-10, logical(1))))
         "grid" else "continuous"
   }, character(1))
@@ -4199,17 +4202,27 @@ rho_logdens <- function(h, s2, init) {
 }
 
 wb_pit_rho <- function(runs, vol) {
+  # candidates (prior, initial condition): U(-1, 1) with h_0 = 0 or a stationary h_1 (the CDF on
+  # the grid; rejected outright, p = 0, if any rho draw lies outside (-1, 1)), and a flat prior on
+  # the real line with h_0 = 0 (the exact normal conditional; a stationary h_1 needs |rho| < 1)
+  rho_all <- unlist(lapply(runs, function(st) as.numeric(state_matrix(st, "rho"))))
+  in_support <- length(rho_all) > 0L && all(abs(rho_all) < 1)
   out <- list()
-  for (init in c("h0_zero", "stationary")) {
-    combos <- if (vol == "cSV") {
-      expand.grid(h = c("same", "prev"), s2 = c("sigma2v_same", "sigma2v_prev", "omega2_same",
-                                                 "omega2_prev"), stringsAsFactors = FALSE)
-    } else {
-      expand.grid(h = c("same", "prev"), s2 = c("unit_h", "unit_h_over_omega"),
-                  stringsAsFactors = FALSE)
-    }
+  combos <- if (vol == "cSV") {
+    expand.grid(h = c("same", "prev"), s2 = c("sigma2v_same", "sigma2v_prev", "omega2_same",
+                                               "omega2_prev"), stringsAsFactors = FALSE)
+  } else {
+    expand.grid(h = c("same", "prev"), s2 = c("unit_h", "unit_h_over_omega"),
+                stringsAsFactors = FALSE)
+  }
+  for (cand in c("U(-1, 1), h0_zero", "U(-1, 1), stationary", "flat, h0_zero")) {
     for (k in seq_len(nrow(combos))) {
       cb <- combos[k, ]
+      key <- sprintf("%s | h %s, %s", cand, cb$h, cb$s2)
+      if (startsWith(cand, "U(-1, 1)") && !in_support) {
+        out[[key]] <- 0
+        next
+      }
       u <- unlist(lapply(runs, function(st) {
         H <- state_matrix(st, "h")
         rho <- as.numeric(state_matrix(st, "rho"))
@@ -4219,7 +4232,7 @@ wb_pit_rho <- function(runs, vol) {
         n <- nrow(H)
         idx <- 2:n
         hi <- if (cb$h == "same") idx else idx - 1L
-        pit_grid(rho[idx], function(i) {
+        cond <- function(i) {
           s <- idx[i]
           hh <- H[hi[i], ]
           if (cb$s2 == "unit_h_over_omega") hh <- if (is.null(om)) NA_real_ else hh / om[hi[i]]
@@ -4229,13 +4242,29 @@ wb_pit_rho <- function(runs, vol) {
                        omega2_same = if (is.null(om)) NA_real_ else om[s]^2,
                        omega2_prev = if (is.null(om)) NA_real_ else om[s - 1L]^2,
                        1)
-          if (!is.finite(s2) || any(!is.finite(hh))) return(rep(NA_real_, length(RHO_GRID)))
-          rho_logdens(hh, s2, if (init == "h0_zero") "h0_zero" else "stationary")
-        }, RHO_GRID)
+          list(hh = hh, s2 = s2)
+        }
+        if (cand == "flat, h0_zero") {
+          vapply(seq_along(idx), function(i) {
+            cd <- cond(i)
+            Tn <- length(cd$hh)
+            sxx <- sum(cd$hh[-Tn]^2)
+            if (!is.finite(cd$s2) || any(!is.finite(cd$hh)) || !(sxx > 0)) return(NA_real_)
+            stats::pnorm(rho[idx[i]], sum(cd$hh[-1] * cd$hh[-Tn]) / sxx, sqrt(cd$s2 / sxx))
+          }, numeric(1))
+        } else {
+          pit_grid(rho[idx], function(i) {
+            cd <- cond(i)
+            if (!is.finite(cd$s2) || any(!is.finite(cd$hh))) return(rep(NA_real_, length(RHO_GRID)))
+            rho_logdens(cd$hh, cd$s2, if (endsWith(cand, "h0_zero")) "h0_zero" else "stationary")
+          }, RHO_GRID)
+        }
       }))
-      out[[sprintf("%s | h %s, %s", init, cb$h, cb$s2)]] <- ks_p(u)
+      out[[key]] <- ks_p(u)
     }
   }
+  attr(out, "in_support") <- in_support
+  attr(out, "max_abs_rho") <- if (length(rho_all)) max(abs(rho_all)) else NA_real_
   out
 }
 
@@ -4331,22 +4360,23 @@ PROBES_WB <- list(
       "draws per fit and volatility: A (intercept / 10) and Sigma / 100 equal to the base fit",
       "under the Phase 2 rule => the volatility level is carried by Sigma and h has no free",
       "level (E h = 0); (c) the PIT of every rho draw against its full conditional given the",
-      "same sweep's h and variance (rho ~ U(-1, 1); h_0 = 0 or a stationary h_1), KS alpha =",
-      "1e-3, no Metropolis repeats (repeat fraction <= 0.01): decided iff (b) passes and, for",
-      "each volatility, exactly one initial condition passes; maps onto CommonSV iff that",
-      "initial condition is the stationary one")),
+      "same sweep's h and variance under three candidates: rho ~ U(-1, 1) with h_0 = 0, rho ~",
+      "U(-1, 1) with a stationary h_1 (both rejected if any rho draw lies outside (-1, 1)), and",
+      "a flat prior on the real line with h_0 = 0; KS alpha = 1e-3, no Metropolis repeats",
+      "(repeat fraction <= 0.01): decided iff (b) passes and, for each volatility, exactly one",
+      "candidate passes; maps onto CommonSV iff its initial condition is the stationary one")),
   P14 = list(
     question = "What are the rho and omega / sigma_omega^2 priors, and does a setting fix sigma_omega^2?",
     documented = "manual: sv_a 'shape', sv_s 'scale' of the gamma prior in the hierarchical prior for the common SV; s_ and sigma2_omega are starting values",
     dataset = "data/probe_t2n5.csv (chained draws of P16)",
     design = paste(
-      "PIT tests (KS alpha = 1e-3, same-sweep states) of single updates: rho against its",
-      "conditional under rho ~ U(-1, 1) (P13 (c)); ncSV sigma_omega^2 against the GIG",
+      "PIT tests (KS alpha = 1e-3, same-sweep states) of single updates: rho by the candidates",
+      "of P13 (c) (its prior is that of the one passing candidate); ncSV sigma_omega^2 against the GIG",
       "conditional of omega ~ N(0, sigma_omega^2), sigma_omega^2 ~ G(sv_a, scale s_) or G(sv_a,",
       "rate s_); cSV sigma2v against sigma2v ~ sigma_omega^2 chi2_1 and sigma_omega^2 against",
       "G(sv_a, s_) with w^2 = omega^2 or sigma2v; fixing scan: sv_a x {1e6, 1e8} with sv_s",
       "scaled, posterior CV of sigma_omega^2 (ncSV) or sigma2v (cSV) <= 1e-3 => fixed; decided",
-      "iff rho passes for both volatilities and one ncSV sigma_omega^2 candidate passes; maps",
+      "iff the rho prior is decided for both volatilities and one ncSV sigma_omega^2 candidate passes; maps",
       "onto CommonSV for a volatility iff rho ~ U(-1, 1) (= Beta(1, 1)) and its variance prior",
       "has the family and every parameter of an option (ncSV: sigma_omega^2 fixed => ScaledChi2;",
       "cSV: a fixed inverse gamma => InvGamma, not established by these candidates)")),
@@ -4656,16 +4686,23 @@ run_wbvars_probes <- function() {
     any(is.finite(v) & v > 1e-3)
   }
   same_only <- function(lst) lst[grepl("| h same", names(lst), fixed = TRUE)]
-  init <- vapply(WB_VOLS, function(vol) {
+  # rule: per volatility, exactly one (rho prior, initial condition) candidate has a passing
+  # same-sweep PIT and rho shows no Metropolis repeats (fraction <= 0.01)
+  cands <- c("U(-1, 1), h0_zero", "U(-1, 1), stationary", "flat, h0_zero")
+  rho_cand <- vapply(WB_VOLS, function(vol) {
     if (is.null(pit[[vol]])) return("undecided")
-    a <- pass_any(same_only(pit[[vol]]$rho), "h0_zero")
-    b <- pass_any(same_only(pit[[vol]]$rho), "stationary")
+    ok <- vapply(cands, function(cd) pass_any(same_only(pit[[vol]]$rho), paste0(cd, " |")), logical(1))
     if (isTRUE(pit[[vol]]$rep_rho > 0.01)) "undecided (rho has Metropolis repeats)" else
-      if (a && !b) "h_0 = 0" else if (b && !a) "stationary" else "undecided"
+      if (sum(ok) == 1L) cands[ok] else "undecided"
   }, character(1))
+  init <- vapply(rho_cand, function(x) if (endsWith(x, "h0_zero")) "h_0 = 0" else
+    if (endsWith(x, "stationary")) "stationary" else "undecided", character(1))
+  rho_prior <- vapply(rho_cand, function(x) if (startsWith(x, "U(-1, 1)")) "U(-1, 1)" else
+    if (startsWith(x, "flat")) "flat on the real line" else "undecided", character(1))
+  names(init) <- names(rho_prior) <- WB_VOLS
   pit_txt <- vapply(names(pit), function(vol) sprintf(
-    "%s: rho PIT (U(-1, 1) prior) %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
-    vol, fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
+    "%s: max |rho| %.4g; rho PIT %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
+    vol, attr(pit[[vol]]$rho, "max_abs_rho"), fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
     pit[[vol]]$rep_h, pit[[vol]]$rep_s2v, pit[[vol]]$rep_s2o), character(1))
   # P13 rule: decided iff the scale experiment passes (E h = 0, the level in Sigma) and, for each
   # volatility, exactly one initial condition passes; it maps onto CommonSV (stationary h_0 at the
@@ -4676,7 +4713,7 @@ run_wbvars_probes <- function() {
     status = if (p13_decided) "answered" else "unresolved",
     maps = p13_maps,
     answer = if (p13_decided) sprintf(
-      "h has %d entries (t = 1..T, no h_0 state); the volatility level is carried by Sigma (E h = 0); initial condition: cSV %s, ncSV %s; maps onto CommonSV's stationary h_0: cSV %s, ncSV %s",
+      "h has %d entries (t = 1..T, no h_0 state); the volatility level is carried by Sigma (E h = 0); initial condition (with the rho prior of P14): cSV %s, ncSV %s; maps onto CommonSV's stationary h_0: cSV %s, ncSV %s",
       hlen, init[["cSV"]], init[["ncSV"]], if (p13_maps[["cSV"]]) "yes" else "no",
       if (p13_maps[["ncSV"]]) "yes" else "no") else sprintf(
         "(undecided) h has %s entries; scale experiment pass = %s; initial condition: cSV %s, ncSV %s",
@@ -4684,10 +4721,7 @@ run_wbvars_probes <- function() {
     evidence = paste(c(paste("scale experiment:", scale$text), pit_txt), collapse = " || "))
   # rho ~ U(-1, 1) is consistent when, for every volatility, some same-sweep conditional built on
   # it passes; each SV variance prior is reported by the candidate conditionals that pass
-  rho_unif <- length(pit) == length(WB_VOLS) && all(vapply(WB_VOLS, function(vol) {
-    v <- unlist(same_only(pit[[vol]]$rho))
-    any(is.finite(v) & v > 1e-3)
-  }, logical(1)))
+  rho_dec <- all(rho_prior != "undecided")
   s2o_pass <- vapply(names(pit), function(vol) {
     v <- unlist(c(pit[[vol]]$s2o[grepl("omega same, s_ same", names(pit[[vol]]$s2o), fixed = TRUE)],
                   pit[[vol]]$s2v))
@@ -4701,21 +4735,25 @@ run_wbvars_probes <- function() {
   # (rho + 1)/2) and the variance prior has the family and every parameter of an option: ncSV
   # omega ~ N(0, sigma_omega^2) with sigma_omega^2 fixed by a setting (= ScaledChi2); cSV a fixed
   # inverse-gamma sigma2v (= InvGamma), which no candidate here establishes
-  p14_maps <- c(cSV = FALSE, ncSV = rho_unif && ncsv_ok && isTRUE(scan$fixed[["ncSV"]]))
+  p14_maps <- c(cSV = FALSE, ncSV = rho_dec && ncsv_ok && identical(rho_prior[["ncSV"]], "U(-1, 1)") &&
+                  isTRUE(scan$fixed[["ncSV"]]))
   pr$P14 <- list(
-    status = if (rho_unif && ncsv_ok) "answered" else "unresolved",
+    status = if (rho_dec && ncsv_ok) "answered" else "unresolved",
     maps = p14_maps,
-    answer = if (rho_unif && ncsv_ok) sprintf(paste(
-      "rho ~ U(-1, 1) for cSV and ncSV (its full conditional passes the PIT test); ncSV: omega ~",
-      "N(0, sigma_omega^2), sigma_omega^2 | s_ ~ G(sv_a, scale s_) with s_ a sampled state",
-      "(conditional passing: %s); cSV: %s; a setting that fixes sigma_omega^2 (or sigma2v): %s"),
+    answer = if (rho_dec && ncsv_ok) sprintf(paste(
+      "rho prior: cSV %s, ncSV %s (the one candidate whose full conditional passes the PIT test);",
+      "ncSV: omega ~ N(0, sigma_omega^2), sigma_omega^2 | s_ ~ G(sv_a, scale s_) with s_ a",
+      "sampled state (conditional passing: %s); cSV: %s; a setting that fixes sigma_omega^2 (or",
+      "sigma2v): %s; maps onto a CommonSV option: cSV no, ncSV %s"),
+      rho_prior[["cSV"]], rho_prior[["ncSV"]],
       s2o_of("ncSV"), if (identical(s2o_of("cSV"), "no candidate passes"))
         "the prior of sigma2v is not identified by the candidates tried (sigma2v ~ sigma_omega^2 chi2_1; G(sv_a, s_) on sigma_omega^2 with omega^2 or sigma2v)"
         else paste("passing:", s2o_of("cSV")),
       if (any(scan$fixed)) paste("found for", paste(names(scan$fixed)[scan$fixed], collapse = ", "),
-                                 "(see evidence)") else "none among those tried")
-      else sprintf("(undecided) rho uniform consistent: %s; ncSV sigma_omega^2: %s", rho_unif,
-                   s2o_of("ncSV")),
+                                 "(see evidence)") else "none among those tried",
+      if (p14_maps[["ncSV"]]) "yes" else "no")
+      else sprintf("(undecided) rho prior: cSV %s, ncSV %s; ncSV sigma_omega^2: %s",
+                   rho_prior[["cSV"]], rho_prior[["ncSV"]], s2o_of("ncSV")),
     evidence = paste(c(pit_txt, paste("fixing scan:", paste(scan$text, collapse = "; "))), collapse = " || "))
   pr$P16 <- if (inherits(p16, "error")) list(status = "unresolved", answer = "(extraction failed)",
                                             evidence = conditionMessage(p16)) else list(
