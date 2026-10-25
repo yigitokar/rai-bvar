@@ -3217,7 +3217,7 @@ hyper_staging <- function(chains, select = NULL, grid = NULL) {
   cls <- vapply(seq_along(nm), function(k) {
     x <- unlist(col(k), use.names = FALSE)
     u <- unique(x)
-    if (all(u %in% c(0, 1))) "binary" else if (length(u) == 1L) "constant" else
+    if (length(u) == 1L) "constant" else if (all(u %in% c(0, 1))) "binary" else
       if (!is.null(grid) && all(vapply(u, function(v) min(abs(v - grid)) < 1e-10, logical(1))))
         "grid" else "continuous"
   }, character(1))
@@ -3615,11 +3615,11 @@ P8_CONFIGS <- list(
   list(id = "dl_a1overK", family = "DL", args = 'prior = "DL", DL_a = "1/K", DL_tol = 0'),
   list(id = "dl_a0.5", family = "DL", args = 'prior = "DL", DL_a = 0.5, DL_tol = 0'))
 
-BV_GRID_SUPPORT <- seq(0.1, 1, by = 0.1)
+BV_GRID_SUPPORT <- c(0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1)
 BV_GRID_WEIGHTS <- exp(-BV_GRID_SUPPORT) / sum(exp(-BV_GRID_SUPPORT))
 # Hyperparameter columns summarised (with MCSE) besides the thinned draws of all columns: the
 # global scales and the hyperprior index (regular expressions on the column names).
-BV_HYPER_SELECT <- "zeta|global|^a$|^a[0-9_]|xi|lambda"
+BV_HYPER_SELECT <- "^(zeta|xi|a)[0-9]+$"
 
 BV_RUN_TABLE <- c(
   list(
@@ -3644,7 +3644,7 @@ bv_gl_args <- function(fx, L) {
                  if (isTRUE(fx$grid)) "ng_grid" else "0.1", num_text(t)),
     R2D2 = sprintf('prior = "R2D2", R2D2_a = 0.1, R2D2_b = 0.5, R2D2_tol = %s', num_text(t)),
     DL = sprintf('prior = "DL", DL_a = 0.5, DL_tol = %s', num_text(t)),
-    SSVS = 'prior = "SSVS", SSVS_c0 = 0.01, SSVS_c1 = 100, SSVS_semiautomatic = FALSE, SSVS_p = 0.5')
+    SSVS = 'prior = "SSVS", SSVS_c0 = 0.01, SSVS_c1 = 1, SSVS_semiautomatic = FALSE, SSVS_p = 0.5')
   sprintf('%s, priormean = 0, PHI_tol = %s, global_grouping = "%s"', fam, num_text(t), fx$groups)
 }
 
@@ -3927,6 +3927,13 @@ wb_read <- function(file, dir = FIXTURES) {
        md5 = unname(tools::md5sum(path)), variables = colnames(frame)[-1], Y = Y)
 }
 
+# The FRED-QD small set (tests/parity/fixtures/qd_small_levels.csv: 100 x log GDPC1, 100 x log
+# GDPCTPI, FEDFUNDS, 1960Q1-2019Q4) as the stationary data/qd3_growth.csv written by
+# tools/make_sv_parity_data.py (4 x the first difference of the two log levels, FEDFUNDS as is):
+# on the levels bvars' ncSV sampler stopped with "iwishrnd(): given matrix is not symmetric
+# positive definite" (first discovery run).
+wb_qd <- function() wb_read("qd3_growth.csv", P2_DATA)
+
 wb_spec <- function(Y, p, vol) {
   bvars::specify_bvar$new(data = Y, p = p, common_volatility = vol, distribution = "norm")
 }
@@ -4007,6 +4014,16 @@ wb_eval <- function(code, vars, seed) {
 wb_chain <- function(Y, p, vol, burn, calls, s, seed, fixv = NULL, keep_post = TRUE, tiny = FALSE) {
   r <- wb_eval(wb_run_code(vol, p, burn, 0L, fixv, tiny), list(data = Y, fixv = fixv), seed)
   post <- r$env$post
+  s_note <- ""
+  if (s == 1L) {   # estimate() may refuse S = 1: then every call runs S = 2 draws
+    t1 <- tryCatch(wb_est(post, 1L), error = function(e) e)
+    if (inherits(t1, "error")) {
+      s_note <- paste("estimate(post, S = 1) failed:", conditionMessage(t1), "- chained calls use S = 2")
+      s <- 2L
+    } else {
+      post <- t1
+    }
+  }
   states <- vector("list", calls)
   posts <- vector("list", calls)
   t0 <- proc.time()[["elapsed"]]
@@ -4019,7 +4036,7 @@ wb_chain <- function(Y, p, vol, burn, calls, s, seed, fixv = NULL, keep_post = T
     }
   }
   list(states = states, posts = posts, seconds_per_call = (proc.time()[["elapsed"]] - t0) / calls,
-       burn_seconds = r$seconds, spec = r$env$spec)
+       burn_seconds = r$seconds, spec = r$env$spec, s = s, s_note = s_note)
 }
 
 state_matrix <- function(states, field) {   # (calls x length) numeric
@@ -4167,12 +4184,12 @@ PROBES_WB <- list(
   P11 = list(
     question = "What are the defaults of specify_prior_bvar and specify_starting_values_bvar?",
     documented = "manual: fields A, S, nu, Psi, Gamma, lambda, sv_a, sv_s; starting values A, Sigma, V, h, rho, omega, sigma2v, S, sigma2_omega, s_, lambda, df",
-    dataset = "qd_small_levels.csv (FRED-QD: GDPC1, GDPCTPI, FEDFUNDS, 1960Q1-2019Q4, 100 x log levels and percent), p = 4",
+    dataset = "data/qd3_growth.csv (FRED-QD small set: 400 dlog GDPC1, 400 dlog GDPCTPI, FEDFUNDS, 1960Q2-2019Q4), p = 4",
     design = "recorded as data (the get_prior() and get_starting_values() lists) for homoskedastic, cSV and ncSV"),
   P12 = list(
     question = "Can V be held fixed?",
     documented = "manual: V has a matrix-GIG prior with Psi, Gamma (K x K scale matrices) and lambda (shape); its draws are the documented output",
-    dataset = "qd_small_levels.csv, p = 4, cSV",
+    dataset = "data/qd3_growth.csv, p = 4, cSV",
     design = paste(
       "Psi = c Omega, Gamma = c Omega^-1 (and the swapped orientation), lambda = (K + 1)/2,",
       "starting V = Omega = the default starting V, c in {1e4, 1e6, 1e8}: V is held fixed if",
@@ -4181,10 +4198,10 @@ PROBES_WB <- list(
   P13 = list(
     question = "What is the common-volatility normalisation (E h = 0, initial condition) under cSV and ncSV?",
     documented = "manual: sigma_t^2 'estimated and following (non-)centred stochastic volatility'; h is a T-vector of starting values",
-    dataset = "qd_small_levels.csv (scale experiment) and data/probe_t2n5.csv (n = 5, p = 1, T = 2; chained draws)",
+    dataset = "data/probe_t2n5.csv (n = 5, p = 1, T = 2; chained draws) and data/qd3_growth.csv (scale experiment)",
     design = paste(
-      "(a) the length of h (T: no separate h_0 state); (b) with V fixed (P12), data x 10 and",
-      "S0 x 100, V' = D V D (D = 1 on the constant, 1/10 on the lags): A and Sigma/100",
+      "(a) the length of h (T: no separate h_0 state); (b) data x 10 and S0 x 100 (the",
+      "starting V, from AR fits, rescales itself; V is not moved by the sampler, P12): A and Sigma/100",
       "equivariant under the Phase 2 rule => the level of the volatility is carried by Sigma",
       "and h has no free level (E h = 0); (c) the initial condition by the PIT test of every",
       "rho draw against its full conditional given h (rho ~ U(-1, 1)) under h_0 = 0 or a",
@@ -4202,11 +4219,12 @@ PROBES_WB <- list(
   P15 = list(
     question = "Is Sigma a covariance or a scale, what is the prior mean (stationary), where is the intercept?",
     documented = "manual: e_t ~ N(0, sigma_t^2 lambda_t Sigma); stationary = FALSE sets a random-walk prior mean, TRUE white noise",
-    dataset = "data/probe_corr.csv (n = 2, p = 1, T = 600, Sigma = [[1, 1.6], [1.6, 4]], intercepts 5, -3) and qd_small_levels.csv",
+    dataset = "data/probe_corr.csv (n = 2, p = 1, T = 600, Sigma = [[1, 1.6], [1.6, 4]], intercepts 5, -3) and data/qd3_growth.csv",
     design = paste(
       "homoskedastic normal fit: posterior mean of Sigma within 5% of the residual covariance",
       "(OLS, df T - k) => covariance; prior A0 of stationary = FALSE / TRUE; the row of X",
-      "equal to 1 is the intercept, its A column has posterior mean (5, -3) +- 0.5")),
+      "equal to 1 is the intercept; check: its A column has posterior mean (5, -3) +- 1.5,",
+      "every entry above 2 in absolute value, every other entry below 2")),
   P16 = list(
     question = "Is bvars' h sampler exact?",
     documented = "manual: the starting values include S, 'the auxiliary mixture component indicator' (an Omori-type mixture sampler)",
@@ -4220,7 +4238,7 @@ PROBES_WB <- list(
 )
 
 wb_probe_p11 <- function() {
-  q <- wb_read("qd_small_levels.csv")
+  q <- wb_qd()
   lines <- character()
   vars <- list()
   vals <- list()
@@ -4257,7 +4275,7 @@ wb_probe_p11 <- function() {
 }
 
 wb_probe_p15 <- function() {
-  q <- wb_read("qd_small_levels.csv")
+  q <- wb_qd()
   rmq <- wb_row_map(wb_spec(q$Y, WB_LAGS, "homoskedastic"), q$Y, WB_LAGS)
   cr <- wb_read("probe_corr.csv", P2_DATA)
   r <- wb_eval(wb_run_code("homoskedastic", 1L, if (QUICK) 500L else 2000L, if (QUICK) 1000L else 5000L),
@@ -4271,7 +4289,8 @@ wb_probe_p15 <- function() {
   Sh <- crossprod(des$Y - des$X %*% B) / (nrow(des$X) - ncol(des$X))
   err_cov <- max(abs(Sig - Sh)) / max(abs(Sh))
   int <- A[, rmc$ours_cols[1]]
-  int_ok <- max(abs(int - c(5, -3))) < 0.5
+  others <- A[, rmc$ours_cols[-1], drop = FALSE]
+  int_ok <- max(abs(int - c(5, -3))) < 1.5 && min(abs(int)) > 2 && max(abs(others)) < 2
   K <- 1L + 3L * WB_LAGS
   a0 <- function(stationary) {
     pr <- bvars::specify_prior_bvar$new(N = 3L, p = WB_LAGS, stationary = rep(stationary, 3L))
@@ -4301,7 +4320,7 @@ wb_probe_p15 <- function() {
 }
 
 wb_probe_p12 <- function() {
-  q <- wb_read("qd_small_levels.csv")
+  q <- wb_qd()
   K <- 1L + 3L * WB_LAGS
   Om <- wb_start(wb_spec(q$Y, WB_LAGS, "cSV"))$V
   Oi <- solve(Om)
@@ -4383,6 +4402,7 @@ wb_probe_p16 <- function() {
     states <- lapply(runs, `[[`, "states")
     out[[vol]] <- list(states = states, cmp = cmp,
                        seconds_per_call = mean(vapply(runs, `[[`, 1, "seconds_per_call")),
+                       s = runs[[1]]$s, s_note = runs[[1]]$s_note,
                        seeds = WB_SEED + 1600L + 100L * v + seq_len(WB_RUNS_N),
                        ref_seeds = WB_SEED + 1650L + 100L * v + seq_len(WB_RUNS_N),
                        prior = wb_prior(runs[[1]]$spec))
@@ -4425,33 +4445,24 @@ wb_fix_scan <- function() {
 }
 
 # The scale experiment of P13 (b): A and Sigma/100 equivariant when the data are multiplied by 10.
-wb_scale_experiment <- function(fixv, rmq) {
-  if (is.null(fixv)) return(list(text = "not run: V cannot be held fixed (P12)", pass = NA))
-  q <- wb_read("qd_small_levels.csv")
+wb_scale_experiment <- function(rmq) {
+  q <- wb_qd()
   K <- 1L + 3L * WB_LAGS
   cfac <- 10
-  dvec <- rep(1 / cfac, K)
-  dvec[rmq$ours_cols[1]] <- 1                          # the constant (wb order)
-  fx2 <- fixv
-  fx2$Omega <- fixv$Omega * outer(dvec, dvec)
-  Om2i <- solve(fx2$Omega)
-  fx2$Psi <- if (fixv$orient == "Psi = c Omega") fixv$c * fx2$Omega else fixv$c * Om2i
-  fx2$Gamma <- if (fixv$orient == "Psi = c Omega") fixv$c * Om2i else fixv$c * fx2$Omega
   txt <- character()
   pass <- logical()
   for (vol in WB_VOLS) {
     S0 <- wb_prior(wb_spec(q$Y, WB_LAGS, vol))$S
     draws <- if (QUICK) 1000L else 10000L
     burn <- if (QUICK) 500L else 2000L
-    fit <- function(Y, fv, S0x, seed0) lapply(seq_len(WB_RUNS_N), function(k) {
-      code <- paste0(sprintf("spec <- specify_bvar$new(data = data, p = %dL, common_volatility = \"%s\", distribution = \"norm\"); ",
-                             WB_LAGS, vol), wb_fixv_code(fv), "spec$prior$S <- S0x; ",
+    fit <- function(Y, S0x, seed0) lapply(seq_len(WB_RUNS_N), function(k) {
+      code <- paste0(wb_spec_code(vol, WB_LAGS), "spec$prior$S <- S0x; ",
                      sprintf("burn <- estimate(spec, S = %dL, thin = 1L, show_progress = FALSE); ", burn),
                      sprintf("post <- estimate(burn, S = %dL, thin = 1L, show_progress = FALSE)", draws))
-      wb_post(wb_eval(code, list(data = Y, fixv = fv, S0x = S0x), seed0 + k)$env$post)
+      wb_post(wb_eval(code, list(data = Y, S0x = S0x), seed0 + k)$env$post)
     })
-    base <- fit(q$Y, fixv, S0, WB_SEED + 1300L)
-    scl <- fit(q$Y * cfac, fx2, S0 * cfac^2, WB_SEED + 1350L)
+    base <- fit(q$Y, S0, WB_SEED + 1300L)
+    scl <- fit(q$Y * cfac, S0 * cfac^2, WB_SEED + 1350L)
     pairs <- list()
     cst <- rmq$ours_cols[1]
     for (i in 1:3) for (j in seq_len(K)) pairs[[length(pairs) + 1L]] <- list(
@@ -4476,7 +4487,7 @@ run_wbvars_probes <- function() {
   scan <- tryCatch(wb_fix_scan(), error = function(e) list(text = paste("scan failed:", conditionMessage(e)),
                                                            fixed = FALSE))
   rmq <- pr$P15$rmq
-  scale <- if (!is.null(rmq)) tryCatch(wb_scale_experiment(pr$P12$fixv, rmq),
+  scale <- if (!is.null(rmq)) tryCatch(wb_scale_experiment(rmq),
                                        error = function(e) list(text = paste("failed:", conditionMessage(e)), pass = NA))
     else list(text = "not run: P15 undecided", pass = NA)
   # P13 / P14 from the chained draws
@@ -4534,8 +4545,9 @@ run_wbvars_probes <- function() {
     status = "pending",
     answer = "data committed (probe_wbvars_p16.nc), decision pending WP38 (quadrature oracle)",
     evidence = paste(vapply(WB_VOLS, function(vol) sprintf(
-      "%s: %d runs x %d chained draws; extraction check max |z| %.2f over m = %d (bound %.2f, pass %s); %.4fs per call",
-      vol, WB_RUNS_N, WB_P16_CALLS, p16[[vol]]$cmp$max_abs_z, p16[[vol]]$cmp$m, p16[[vol]]$cmp$bound,
+      "%s: %d runs x %d chained calls of estimate(post, S = %d)%s; extraction check max |z| %.2f over m = %d (bound %.2f, pass %s); %.4fs per call",
+      vol, WB_RUNS_N, WB_P16_CALLS, p16[[vol]]$s, if (nzchar(p16[[vol]]$s_note)) paste0(" (", p16[[vol]]$s_note, ")") else "",
+      p16[[vol]]$cmp$max_abs_z, p16[[vol]]$cmp$m, p16[[vol]]$cmp$bound,
       p16[[vol]]$cmp$pass, p16[[vol]]$seconds_per_call), character(1)), collapse = "; "))
   pr <- pr[names(PROBES_WB)]
   for (id in names(pr)) pr[[id]] <- c(PROBES_WB[[id]], pr[[id]])
@@ -4594,6 +4606,9 @@ stage_wbvars_p16 <- function(res) {
     attrs[[paste0(vol, "_extraction_m")]] <- p16[[vol]]$cmp$m
     attrs[[paste0(vol, "_extraction_pass")]] <- as.integer(p16[[vol]]$cmp$pass)
     attrs[[paste0(vol, "_seconds_per_call")]] <- p16[[vol]]$seconds_per_call
+    attrs[[paste0(vol, "_draws_per_call")]] <- p16[[vol]]$s
+    attrs[[paste0(vol, "_draws_per_call_note")]] <- p16[[vol]]$s_note
+    attrs[[paste0(vol, "_spec_code")]] <- wb_spec_code(vol, 1L, tiny = TRUE)
     pf <- p16[[vol]]$prior
     for (nm in names(pf)) if (is.numeric(pf[[nm]])) {
       vars[[sprintf("p16_%s_prior_%s", vol, nm)]] <- nc_auto(pf[[nm]], sprintf("bvars default prior %s (%s, probe_t2n5)", nm, vol))
@@ -4606,7 +4621,7 @@ stage_wbvars_p16 <- function(res) {
 }
 
 wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx) {
-  q <- wb_read("qd_small_levels.csv")
+  q <- wb_qd()
   Y <- q$Y
   N <- ncol(Y)
   p <- WB_LAGS
@@ -4620,7 +4635,7 @@ wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx) {
     if (!identical(rm$ours_cols, rmq$ours_cols)) stop("unexpected X row order")
     po <- wb_post(r$env$post)
     set.seed(seed + 500L + k)
-    fc <- unclass(forecast(r$env$post, horizon = WB_HORIZON))
+    fc <- as_data(forecast(r$env$post, horizon = WB_HORIZON))
     F <- draws_last(fc$forecasts, WB_DRAWS)
     if (dim(F)[1] != N && dim(F)[2] == N) F <- aperm(F, c(2, 1, 3))   # (N, H, S)
     message(sprintf("    wbvars_%s run %d: %.1fs", tolower(vol), k, r$seconds))
@@ -4692,7 +4707,7 @@ wb_parity_fixture <- function(vol, fixv, rmq, probe_answers, gating, idx) {
                                                 "Omega: the value at which V is held (P12)")
   attrs <- c(p3_meta("bvars", "wbvars"), list(
     vol = vol, lags = p, n = N, T = Tn, k = K, data_file = q$rel, data_md5 = q$md5,
-    data_transform = "none (FRED-QD small set as committed: 100 x log GDPC1, 100 x log GDPCTPI, FEDFUNDS)",
+    data_transform = "none (data/qd3_growth.csv as committed; see its generator for the transform of qd_small_levels.csv)",
     seed = seed, chain_seeds = I(seed + seq_len(WB_RUNS_N)), forecast_seeds = I(seed + 500L + seq_len(WB_RUNS_N)),
     state_seeds = I(seed + 50L + seq_len(WB_RUNS_N)), draws = WB_DRAWS, burnin = WB_BURN, chains = WB_RUNS_N,
     runs = "independent runs: a burn-in estimate() then an estimate() restarted from its last_draw",
@@ -4728,7 +4743,8 @@ stage_wbvars_probes <- function(res, gating, runs_txt) {
   attrs$p14_fix_scan <- paste(res$scan$text, collapse = "\n")
   attrs$data_choice <- paste(
     "FRED-QD small set: tests/parity/fixtures/qd_small_levels.csv (the Phase 1 parity data, n = 3,",
-    "GDPC1, GDPCTPI, FEDFUNDS, 1960Q1-2019Q4), p = 4, as committed")
+    "GDPC1, GDPCTPI, FEDFUNDS, 1960Q1-2019Q4) transformed to data/qd3_growth.csv (400 dlog GDPC1,",
+    "400 dlog GDPCTPI, FEDFUNDS), p = 4: on the levels bvars' ncSV sampler failed (iwishrnd)")
   vars <- pr$P11$vars %||% list()
   stage_probe_fixture("probe_wbvars", attrs, pr, names(PROBES_WB), vars)
 }
@@ -4750,7 +4766,7 @@ run_wbvars <- function() {
       next
     }
     r <- tryCatch({
-      wb_parity_fixture(WB_VOLS[i], res$probes$P12$fixv, rmq, answers, gating, i)
+      wb_parity_fixture(WB_VOLS[i], NULL, rmq, answers, gating, i)
       "staged"
     }, error = function(e) paste("failed:", conditionMessage(e)))
     runs_txt <- c(runs_txt, sprintf("%s: %s", name, r))

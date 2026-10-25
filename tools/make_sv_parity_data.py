@@ -22,7 +22,11 @@ R side only reads committed numbers (N02 §13.6, N03 §7.4):
   runs (bayesianVARs could not be built here, see the ``bvars`` section of the R script):
   ``y_t = c + Σ_l B_l y_{t−l} + A⁻¹ diag(e^{h_t/2}) ε_t`` with ``A`` unit lower triangular
   (``A u_t = e_t``, N04 §2) and independent AR(1) log-volatilities;
-* the bayesianVARs probe datasets of DESIGN §9.9 (P1–P5, N04 §9.8, §10 item 4).
+* the bayesianVARs probe datasets of DESIGN §9.9 (P1–P5, N04 §9.8, §10 item 4);
+* Phase 3 (docs/phase3/DESIGN.md §9.8, work package WP29): ``probe_gl`` (P8, iid normal,
+  ``n = 3``, ``T_eff = 8`` at ``p = 2``), ``probe_t2n5`` (P16, iid normal, ``n = 5``, ``T = 2`` at
+  ``p = 1``) and ``qd3_growth``, the FRED-QD small set (``qd_small_levels.csv``) as annualised
+  growth of GDPC1 and GDPCTPI (``4 Δ`` of the 100 × log levels) and FEDFUNDS, for the bvars runs.
 
 Every CSV has a ``date`` column (quarterly periods ending before 2020, so no COVID-sample warning
 fires) and float columns written with ``%.17g`` (R's ``read.csv`` and
@@ -197,6 +201,20 @@ DATASETS: dict[str, Dataset] = {
             "parameters that differ across equations, T = 400",
         ),
         Dataset(
+            "qd3_growth",
+            "qd",
+            "",  # dates come from qd_small_levels.csv
+            0,
+            {
+                "source": "qd_small_levels.csv (100 x log GDPC1, 100 x log GDPCTPI, FEDFUNDS)",
+                "transform": "4 * diff for GDPC1 and GDPCTPI (annualised growth, percent), FEDFUNDS as is",
+                "n": 3,
+                "T_raw": 239,
+            },
+            "bvars parity data (Phase 3 DESIGN sec. 9.8): the FRED-QD small set as annualised real-"
+            "GDP growth, GDP-deflator inflation and the federal funds rate, 1960Q2-2019Q4",
+        ),
+        Dataset(
             "probe_gl",
             "probe",
             "1990Q1",
@@ -358,8 +376,19 @@ def _probe_frame(ds: Dataset) -> pd.DataFrame:
     return frame
 
 
+def _qd_growth_frame(ds: Dataset) -> pd.DataFrame:
+    """``qd3_growth``: ``4 Δ(100 log level)`` of GDPC1 and GDPCTPI, FEDFUNDS in levels."""
+    raw = pd.read_csv(QD_FILE, float_precision="round_trip")
+    frame = pd.DataFrame({"date": raw["date"].to_numpy()[1:]})
+    for col in ("GDPC1", "GDPCTPI"):
+        frame[f"d{col}"] = 4.0 * np.diff(raw[col].to_numpy(np.float64))
+    frame["FEDFUNDS"] = raw["FEDFUNDS"].to_numpy(np.float64)[1:]
+    return frame
+
+
 _GENERATORS: dict[str, Callable[[Dataset], pd.DataFrame]] = {
     "sv": _sv_frame,
+    "qd": _qd_growth_frame,
     "var": _var_frame,
     "probe": _probe_frame,
 }
