@@ -162,7 +162,8 @@ jobs:
     runs-on: ubuntu-latest
     # Budget per shard: 40-56 min on an EPYC 9V45 (4 vCPU, run 40106532730); the EPYC 7763 (2 vCPU)
     # takes 2-3x as long, and a CPU-dependent Gandy-Scott rerun adds up to an hour (geweke shards:
-    # 160 and 113 min there in run 40052069815).
+    # 160 and 113 min there, summed from run 40052069815's per-row times; 120 and 82 min on a 4-vCPU
+    # 7763 in run 40140397848).
     timeout-minutes: 270
     strategy:
       fail-fast: false  # one failing shard must not cancel the others' records
