@@ -12,12 +12,21 @@ on:
         description: "Run only the BENCH-P2 pre-release benchmark (DESIGN §9.10, §10) instead of the weekly jobs"
         type: boolean
         default: false
+      r_fixtures:
+        description: "Run only the R oracle job r-fixtures (Phase 3 DESIGN D-54): parity fixtures as an artifact, no tests"
+        type: boolean
+        default: false
+      r_fixtures_args:
+        description: "Extra arguments for tools/make_r_fixtures.R in r-fixtures (e.g. --quick or --only=GLOB)"
+        type: string
+        default: ""
 
 concurrency:
   # the event is part of the group: a merge to main must not cancel the hours-long weekly run (or
   # a manual bench run) on the same ref; a new push to a PR still cancels that PR's older run. The
-  # bench input is too, so a bench dispatch and a weekly dispatch on one ref run side by side.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.bench }}
+  # bench and r_fixtures inputs are too, so bench, R-fixture and weekly dispatches on one ref run
+  # side by side.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.bench }}-${{ inputs.r_fixtures }}
   cancel-in-progress: true
 
 env:
@@ -26,7 +35,10 @@ env:
   TIER_MARKERS: "(slow or network) and not bench"
 
 jobs:
+  # lint and test run on every push and pull request; on a dispatch they stay out of an
+  # r_fixtures run, which runs nothing but the r-fixtures job
   lint:
+    if: github.event_name != 'workflow_dispatch' || !inputs.r_fixtures
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +50,7 @@ jobs:
       - run: uv run ruff format --check .
 
   test:
+    if: github.event_name != 'workflow_dispatch' || !inputs.r_fixtures
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -124,7 +137,7 @@ jobs:
           key: ${{ steps.xla.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
 
   macos:  # weekly: macOS minutes bill at 10x; local development runs on macOS anyway
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench && !inputs.r_fixtures)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +154,7 @@ jobs:
   # 2 vCPU). The plan job checks with `pytest --collect-only` that the shards partition the tier
   # (every test in exactly one shard) before any shard starts, and hands their arguments on.
   nightly-plan:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench && !inputs.r_fixtures)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -293,7 +306,7 @@ jobs:
   # geweke.jsonl, both sbc shards an sbc.jsonl, and every shard its own meta.json and junit.xml)
   nightly-record:
     needs: [nightly-plan, nightly]
-    if: always() && needs.nightly-plan.result == 'success'
+    if: always() && needs.nightly-plan.result == 'success' && !inputs.r_fixtures
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -305,7 +318,7 @@ jobs:
           retention-days: 90
 
   bench:  # pre-release tier (DESIGN §9.10): manual only (Actions > CI > Run workflow > bench)
-    if: github.event_name == 'workflow_dispatch' && inputs.bench
+    if: github.event_name == 'workflow_dispatch' && inputs.bench && !inputs.r_fixtures
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -328,3 +341,82 @@ jobs:
         with:
           name: bench-p2
           path: bench-p2.json
+
+  # Phase 3 R oracles (DESIGN D-54, §9.8; work package WP29). Dispatch-only (never on push, pull
+  # request or schedule) and no test job: it installs R and the GPL oracle packages (stochvol,
+  # bayesianVARs 0.1.8, bvars 1.1 with bsvars) as Linux binaries from one dated Posit Package
+  # Manager snapshot, runs tools/make_r_fixtures.R, packs the staged JSON into NetCDF and uploads
+  # the fixtures, the layout records and the logs as an artifact, which is downloaded with
+  # `gh run download` and committed. Test jobs never install R or touch the network.
+  #   gh workflow run ci.yml --ref <branch> -f r_fixtures=true [-f r_fixtures_args=--quick]
+  r-fixtures:
+    if: github.event_name == 'workflow_dispatch' && inputs.r_fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      R_VERSION: "4.5.3"
+      # snapshot dated after bvars 1.1 (2026-09-07); it serves bayesianVARs 0.1.8, bvars 1.1,
+      # bsvars 4.0, stochvol 3.2.9, factorstochvol 1.1.2, GIGrvg 0.8, RcppTN 0.2-2
+      RAI_BVAR_PPM_SNAPSHOT: "2026-10-20"
+      R_FIXTURES_ARGS: ${{ inputs.r_fixtures_args }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "OUT=$RUNNER_TEMP/r-fixtures" >> "$GITHUB_ENV"
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ env.R_VERSION }}
+          use-public-rspm: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      - name: R packages from the pinned snapshot
+        run: |
+          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          repo="https://packagemanager.posit.co/cran/__linux__/${codename}/${RAI_BVAR_PPM_SNAPSHOT}"
+          export RAI_BVAR_PPM_REPO="$repo"
+          echo "RAI_BVAR_PPM_REPO=$repo" >> "$GITHUB_ENV"
+          mkdir -p "$OUT"
+          cat > "$RUNNER_TEMP/install.R" <<'EOF'
+          repo <- Sys.getenv("RAI_BVAR_PPM_REPO")
+          # Posit Package Manager serves Linux binaries only to this user agent
+          options(repos = c(CRAN = repo), HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(),
+            paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"])))
+          lib <- Sys.getenv("R_LIBS_USER")
+          dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+          .libPaths(c(lib, .libPaths()))
+          pk <- c("jsonlite", "coda", "mvtnorm", "stochvol", "bayesianVARs", "bvars")
+          install.packages(pk, lib = lib, Ncpus = 4L)
+          cat(R.version.string, "\n", "repository:", repo, "\n")
+          for (p in c(pk, "bsvars", "factorstochvol", "GIGrvg", "RcppArmadillo", "Rcpp",
+                      "RcppProgress", "RcppTN", "R6", "generics", "lpSolveAPI")) {
+            d <- packageDescription(p)
+            cat(sprintf("%s %s (Built: %s; Repository: %s)\n", p, d$Version, d$Built, d$Repository))
+          }
+          stopifnot(packageVersion("bayesianVARs") == "0.1.8", packageVersion("bvars") == "1.1",
+                    packageVersion("stochvol") >= "3.2.5")
+          EOF
+          set -o pipefail
+          Rscript "$RUNNER_TEMP/install.R" 2>&1 | tee "$OUT/install.log"
+      - name: R fixtures (stochvol SV-t, bayesianVARs, bvars)
+        env:
+          RAI_BVAR_CI_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -o pipefail
+          read -r -a extra <<< "$R_FIXTURES_ARGS"
+          Rscript tools/make_r_fixtures.R --sections=stochvol,bvars,wbvars --sv-only=stochvol_v_t5 \
+            --no-swa --staging="$OUT/staging" "${extra[@]}" 2>&1 | tee "$OUT/make_r_fixtures.log"
+      - name: Pack into NetCDF
+        if: always()
+        run: |
+          set -o pipefail
+          mkdir -p "$OUT/fixtures"
+          uv run python -I tools/make_sv_parity_data.py pack "$OUT/staging" --out "$OUT/fixtures" 2>&1 | tee "$OUT/pack.log"
+      - name: Upload the fixtures, layout records and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r-fixtures-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/r-fixtures
+          if-no-files-found: warn
+          retention-days: 30

@@ -196,6 +196,24 @@ DATASETS: dict[str, Dataset] = {
             "bayesianVARs probe P4 (sv_para layout): VAR(1) with diagonal A and SV "
             "parameters that differ across equations, T = 400",
         ),
+        Dataset(
+            "probe_gl",
+            "probe",
+            "1990Q1",
+            20261031,
+            {"n": 3, "T_raw": 10, "lags": 2},
+            "bayesianVARs probe P8 (meaning of the global-local hyperparameters, Phase 3 "
+            "DESIGN sec. 9.8): iid N(0, 1), T_eff = 8 at p = 2, prior-sensitive",
+        ),
+        Dataset(
+            "probe_t2n5",
+            "probe",
+            "1990Q1",
+            20261032,
+            {"n": 5, "T_raw": 3, "lags": 1},
+            "bvars probe P16 (is the common-SV h sampler exact? Phase 3 DESIGN sec. 9.8): "
+            "iid N(0, 1), T = 2 at p = 1, n = 5",
+        ),
     )
 }
 
@@ -315,7 +333,7 @@ def _var_frame(ds: Dataset) -> pd.DataFrame:
 def _probe_frame(ds: Dataset) -> pd.DataFrame:
     g, rng = ds.dgp, np.random.default_rng(ds.seed)
     n, T_raw = g["n"], g["T_raw"]
-    if ds.name == "probe_tiny":
+    if ds.name in ("probe_tiny", "probe_gl", "probe_t2n5"):
         y = rng.standard_normal((T_raw, n))
     elif ds.name == "probe_corr":
         sd, corr = np.asarray(g["sd"]), g["corr"]
@@ -371,10 +389,14 @@ def md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
-def write_data(out: Path = DATA_DIR) -> list[Path]:
+def write_data(out: Path = DATA_DIR, only: list[str] | None = None) -> list[Path]:
+    """Write the CSVs (``only``: just these datasets, so a committed CSV that a newer NumPy or
+    BLAS would round differently, and the fixtures that record its md5, stay untouched)."""
     out.mkdir(parents=True, exist_ok=True)
     paths = []
     for name, ds in DATASETS.items():
+        if only and name not in only:
+            continue
         path = out / ds.file
         path.write_text(to_csv_text(generate(name)))
         paths.append(path)
@@ -501,7 +523,10 @@ def run_r(staging: Path, quick: bool) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("data", help="write tests/parity/fixtures/data/*.csv")
+    p_data = sub.add_parser("data", help="write tests/parity/fixtures/data/*.csv")
+    p_data.add_argument(
+        "--only", nargs="+", choices=sorted(DATASETS), help="write only these datasets"
+    )
     sub.add_parser("check", help="compare a fresh regeneration with the committed CSVs")
     p_pack = sub.add_parser("pack", help="convert staged R JSON into NetCDF fixtures")
     p_pack.add_argument("staging", type=Path)
@@ -516,7 +541,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "data":
-        write_data()
+        write_data(only=args.only)
     elif args.command == "check":
         return check_data()
     elif args.command == "pack":
