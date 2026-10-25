@@ -4567,18 +4567,32 @@ run_wbvars_probes <- function() {
         "(undecided) h has %s entries; scale experiment pass = %s; initial condition: cSV %s, ncSV %s",
         hlen, scale$pass, init[["cSV"]], init[["ncSV"]]),
     evidence = paste(c(paste("scale experiment:", scale$text), pit_txt), collapse = " || "))
-  rho_unif <- all(init %in% c("h_0 = 0", "stationary"))
+  # rho ~ U(-1, 1) is consistent when, for every volatility, some same-sweep conditional built on
+  # it passes; each SV variance prior is reported by the candidate conditionals that pass
+  rho_unif <- length(pit) == length(WB_VOLS) && all(vapply(WB_VOLS, function(vol) {
+    v <- unlist(same_only(pit[[vol]]$rho))
+    any(is.finite(v) & v > 1e-3)
+  }, logical(1)))
   s2o_pass <- vapply(names(pit), function(vol) {
-    v <- unlist(pit[[vol]]$s2o)
-    if (!length(v)) NA_character_ else if (any(is.finite(v) & v > 1e-3)) names(v)[which.max(v)] else "none"
+    v <- unlist(c(pit[[vol]]$s2o[grepl("omega same, s_ same", names(pit[[vol]]$s2o), fixed = TRUE)],
+                  pit[[vol]]$s2v))
+    if (!length(v)) NA_character_ else if (any(is.finite(v) & v > 1e-3))
+      paste(names(v)[is.finite(v) & v > 1e-3], collapse = " / ") else "no candidate passes"
   }, character(1))
+  ncsv_ok <- grepl("G(sv_a, scale s_)", s2o_pass[["ncSV"]] %||% "", fixed = TRUE) ||
+    grepl("G(sv_a, rate s_)", s2o_pass[["ncSV"]] %||% "", fixed = TRUE)
   pr$P14 <- list(
-    status = if (rho_unif && all(!is.na(s2o_pass))) "answered" else "unresolved",
-    answer = if (rho_unif) sprintf(
-      "rho ~ U(-1, 1) (PIT passes); sigma_omega^2 conditional: %s; a setting that fixes sigma_omega^2: %s",
-      paste(sprintf("%s %s", names(s2o_pass), s2o_pass), collapse = ", "),
+    status = if (rho_unif && ncsv_ok) "answered" else "unresolved",
+    answer = if (rho_unif && ncsv_ok) sprintf(paste(
+      "rho ~ U(-1, 1) for cSV and ncSV (its full conditional passes the PIT test); ncSV: omega ~",
+      "N(0, sigma_omega^2), sigma_omega^2 | s_ ~ G(sv_a, scale s_) with s_ a sampled state",
+      "(conditional passing: %s); cSV: %s; a setting that fixes sigma_omega^2 (or sigma2v): %s"),
+      s2o_pass[["ncSV"]], if (identical(s2o_pass[["cSV"]], "no candidate passes"))
+        "the prior of sigma2v is not identified by the candidates tried (sigma2v ~ sigma_omega^2 chi2_1; G(sv_a, s_) on sigma_omega^2 with omega^2 or sigma2v)"
+        else paste("passing:", s2o_pass[["cSV"]]),
       if (isTRUE(scan$fixed)) "found (see evidence)" else "none among those tried")
-      else "(undecided: the rho prior is not identified by the PIT tests)",
+      else sprintf("(undecided) rho uniform consistent: %s; ncSV sigma_omega^2: %s", rho_unif,
+                   s2o_pass[["ncSV"]] %||% "not tested"),
     evidence = paste(c(pit_txt, paste("fixing scan:", paste(scan$text, collapse = "; "))), collapse = " || "))
   pr$P16 <- if (inherits(p16, "error")) list(status = "unresolved", answer = "(extraction failed)",
                                             evidence = conditionMessage(p16)) else list(

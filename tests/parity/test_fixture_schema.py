@@ -1,6 +1,7 @@
-"""Schema of the Phase 2 parity fixtures (DESIGN §9.9, work package WP8).
+"""Schema of the parity fixtures of Phase 2 (DESIGN §9.9, work package WP8) and Phase 3
+(docs/phase3/DESIGN.md §9.8, work package WP29).
 
-The fixtures are generated offline and committed; nothing here runs R:
+The fixtures are generated outside every test job and committed; nothing here runs R:
 
 * ``fixtures/data/*.csv``: NumPy datasets written by ``tools/make_sv_parity_data.py data`` (the
   stochvol datasets (i)–(v), the VAR-SV datasets of the system-wide Gibbs oracle and the
@@ -11,6 +12,13 @@ The fixtures are generated offline and committed; nothing here runs R:
   importance sampling) instead of svsample's resampling;
 * ``fixtures/bvars_swa_*.nc``: the exact system-wide Gibbs oracle that replaces the bayesianVARs
   runs (section (f)); ``fixtures/probe_bayesianvars.nc``: the probes P1–P5.
+* Phase 3 (the dispatch-only ``r-fixtures`` job of ``.github/workflows/ci.yml``, D-54; R 4.5.3 and
+  one Posit Package Manager snapshot): ``bvars_bayesianvars_*.nc`` (bayesianVARs 0.1.8 runs R1,
+  R2 in the frozen ``bvars_swa`` format), ``bvars_gl_*.nc`` (R3–R9, global-local priors, with
+  the hyperparameter draws), ``probe_bayesianvars_p3.nc`` (P6–P10), ``probe_bvars_p8_*.nc`` (the
+  bayesianVARs side of P8), ``probe_wbvars.nc`` and ``probe_wbvars_p16.nc`` (bvars 1.1, P11–P16),
+  ``wbvars_csv.nc`` and ``wbvars_ncsv.nc`` (the bvars CommonSV runs); ``stochvol_v_t5.nc`` is
+  regenerated with stochvol 3.2.9 (P2 §2.10 Stage 4 amendment 1).
 
 Variables of a stochvol fixture (``quantile`` = 0.05, 0.25, 0.5, 0.75, 0.95; ``t`` = 0..T with
 ``t = 0`` the initial state ``h_0``; ``obs`` = 1..T; ``t_sel`` = {0, 1, T//4, T//2, T}): ``y``;
@@ -161,7 +169,9 @@ def test_sv_iv_is_the_standardised_gdp_ar4_residual():
     assert data["date"].iloc[0] == "1961Q2"  # growth drops one quarter, the AR(4) four more
 
 
-@pytest.mark.parametrize("name", ["var_sv_n3", "var_sv_n7", "probe_tiny", "probe_corr", "probe_sv"])
+@pytest.mark.parametrize(
+    "name", ["var_sv_n3", "var_sv_n7", "probe_tiny", "probe_corr", "probe_sv", "probe_gl", "probe_t2n5"]
+)
 def test_var_and_probe_data_shapes(name):
     ds = generator().DATASETS[name]
     data = frame(ds.file)
