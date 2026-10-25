@@ -20,6 +20,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.bench }}
   cancel-in-progress: true
 
+env:
+  # the weekly tier (jobs nightly-plan and nightly); bench (BENCH-P2, timing gates) is pre-release
+  # only: never in the weekly tier
+  TIER_MARKERS: "(slow or network) and not bench"
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -130,27 +135,56 @@ jobs:
       - name: Fast suite (unit, contract, integration)
         run: uv run pytest -m "not slow and not network and not bench"
 
-  nightly:  # weekly despite the name (DESIGN §9.10 nightly + weekly tiers, run together)
+  # The weekly tier runs as shards (tools/weekly_shards.py: a split directory is `-k E` and
+  # `-k "not E"` on one path, the rest is the suite minus those directories): one job did not finish
+  # within GitHub's 6 h job limit (run 40052069815: timed out at 330 min, 53% done, EPYC 7763 with
+  # 2 vCPU). The plan job checks with `pytest --collect-only` that the shards partition the tier
+  # (every test in exactly one shard) before any shard starts, and hands their arguments on.
+  nightly-plan:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench)
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    env:
-      # bench (BENCH-P2, timing gates) is pre-release only: never in the weekly tier
-      TIER_MARKERS: "(slow or network) and not bench"
+    timeout-minutes: 20
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
       - run: uv sync --group dev
-      # Same persistent XLA compilation cache and <isa> rule as the fast suite (own prefix: different
-      # programs).
+      - name: Shards partition the tier
+        id: plan
+        run: uv run python -I tools/weekly_shards.py check --markers "$TIER_MARKERS" --github-output "$GITHUB_OUTPUT"
+
+  nightly:  # weekly despite the name (DESIGN §9.10 nightly + weekly tiers, run together)
+    needs: nightly-plan
+    name: nightly (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    # Budget per shard: 40-56 min on an EPYC 9V45 (4 vCPU, run 40106532730); the EPYC 7763 (2 vCPU)
+    # takes 2-3x as long, and a CPU-dependent Gandy-Scott rerun adds up to an hour (geweke shards:
+    # 160 and 113 min there, summed from run 40052069815's per-row times; 120 and 82 min on a 4-vCPU
+    # 7763 in run 40140397848).
+    timeout-minutes: 270
+    strategy:
+      fail-fast: false  # one failing shard must not cancel the others' records
+      matrix: ${{ fromJSON(needs.nightly-plan.outputs.matrix) }}
+    env:
+      SHARD: ${{ matrix.shard }}
+      SHARD_ARGS: ${{ toJSON(matrix.args) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      # Same persistent XLA compilation cache and <isa> rule as the fast suite (own prefix per shard:
+      # different programs, and concurrent shards cannot save under one key).
       - name: XLA cache key
         id: xla
         run: |
           isa=$({ grep -m1 '^model name' /proc/cpuinfo; grep -m1 '^flags' /proc/cpuinfo; } | md5sum | cut -c1-12)
           echo "runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU, ISA $isa, XLA_FLAGS ${XLA_FLAGS:-none}"
-          echo "prefix=xla-slow-${RUNNER_OS}-py3.12-${isa}-${{ hashFiles('uv.lock') }}-" >> "$GITHUB_OUTPUT"
+          echo "prefix=xla-slow-${SHARD}-${RUNNER_OS}-py3.12-${isa}-${{ hashFiles('uv.lock') }}-" >> "$GITHUB_OUTPUT"
       - name: Restore XLA cache
         id: xla-restore
         uses: actions/cache/restore@v4
@@ -196,6 +230,8 @@ jobs:
               "run_attempt": int(env["GITHUB_RUN_ATTEMPT"]),
               "started_utc": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
               "markers": env["TIER_MARKERS"],
+              "shard": env["SHARD"],
+              "shard_args": json.loads(env["SHARD_ARGS"]),
               "runner": {"platform": platform.platform(), "cpu": cpu, "logical_cpus": os.cpu_count()},
               "python": platform.python_version(),
               "versions": {p: version(p) for p in ("jax", "jaxlib", "numpy", "scipy")},
@@ -210,30 +246,63 @@ jobs:
       # the step timeout leaves the job time to upload the record and save the cache (the jsonl
       # lines are appended per test, so a run cut short still records every finished row)
       - name: Slow and network tests
-        timeout-minutes: 330
+        timeout-minutes: 240
         env:
           JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-xla
           JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
           RAI_BVAR_VALIDATION_RECORD: ${{ runner.temp }}/validation-record
-        run: uv run pytest -m "$TIER_MARKERS" --durations=30 --junitxml="$RAI_BVAR_VALIDATION_RECORD/junit.xml"
+        run: |
+          mapfile -t args < <(jq -r '.[]' <<< "$SHARD_ARGS")
+          start=$(date +%s)
+          status=0
+          uv run pytest -m "$TIER_MARKERS" "${args[@]}" --durations=30 --junitxml="$RAI_BVAR_VALIDATION_RECORD/junit.xml" || status=$?
+          echo "PYTEST_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+          exit "$status"
       - name: Upload validation record
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: validation-record-${{ github.sha }}-${{ github.run_attempt }}
+          name: validation-record-${{ github.sha }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/validation-record
           if-no-files-found: warn
           retention-days: 90
+      # the measurement behind the shard budget: runner, cache entries and pytest wall time
       - name: XLA cache report
         id: xla-report
         if: always()
-        run: echo "added=$(( $(find "$RUNNER_TEMP/jax-xla" -type f | wc -l) - ${XLA_ENTRIES_BEFORE:-0} ))" >> "$GITHUB_OUTPUT"
+        env:
+          MATCHED: ${{ steps.xla-restore.outputs.cache-matched-key }}
+        run: |
+          added=$(( $(find "$RUNNER_TEMP/jax-xla" -type f | wc -l) - ${XLA_ENTRIES_BEFORE:-0} ))
+          echo "added=$added" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Weekly shard $SHARD"
+            echo "- selection: \`-m \"$TIER_MARKERS\" $(jq -r 'join(" ")' <<< "$SHARD_ARGS")\`"
+            echo "- runner: $(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//'), $(nproc) vCPU"
+            echo "- XLA cache restored: ${MATCHED:-nothing (cold run)}; entries restored ${XLA_ENTRIES_BEFORE:-0}, written $added"
+            echo "- pytest wall time: ${PYTEST_SECONDS:-not measured (step cut short)} s"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Save XLA cache
         if: always() && steps.xla-report.outputs.added != '0'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/jax-xla
           key: ${{ steps.xla.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+
+  # the whole weekly record in one artifact, one directory per shard (both geweke shards write a
+  # geweke.jsonl, both sbc shards an sbc.jsonl, and every shard its own meta.json and junit.xml)
+  nightly-record:
+    needs: [nightly-plan, nightly]
+    if: always() && needs.nightly-plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/upload-artifact/merge@v4
+        with:
+          name: validation-record-${{ github.sha }}-${{ github.run_attempt }}
+          pattern: validation-record-${{ github.sha }}-${{ github.run_attempt }}-*
+          separate-directories: true
+          retention-days: 90
 
   bench:  # pre-release tier (DESIGN §9.10): manual only (Actions > CI > Run workflow > bench)
     if: github.event_name == 'workflow_dispatch' && inputs.bench

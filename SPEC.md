@@ -499,7 +499,7 @@ Output per comparison: `better` / `worse` / `inconclusive`, with the reasons. Fo
 | DGP | Recovery and verdict-engine size/power (§10.5) | *not implemented*; at the Phase 3 exit (§13) |
 | Benchmarks | Speed and memory against targets (§13) | pre-release (manual CI job) |
 
-*As run in CI* (`.github/workflows/ci.yml`): the fast suite (`-m "not slow and not network and not bench"`, Python 3.12–3.14 on Linux) on every pull request and every push to `main`; the slow and network tiers (`-m "(slow or network) and not bench"`) plus the macOS fast suite weekly, on Sundays at 03:17 UTC (the CI job keeps the name `nightly`; DESIGN §9.10); the bench tier only when dispatched by hand. The mutation suite (DESIGN §9.7) runs in the weekly tier.
+*As run in CI* (`.github/workflows/ci.yml`): the fast suite (`-m "not slow and not network and not bench"`, Python 3.12–3.14 on Linux) on every pull request and every push to `main`; the slow and network tiers (`-m "(slow or network) and not bench"`) plus the macOS fast suite weekly, on Sundays at 03:17 UTC (the CI job keeps the name `nightly` and runs as parallel shards that partition the tier; DESIGN §9.10); the bench tier only when dispatched by hand. The mutation suite (DESIGN §9.7) runs in the weekly tier.
 
 ### 10.2 Analytic correctness
 
