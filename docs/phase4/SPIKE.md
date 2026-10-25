@@ -60,7 +60,7 @@ None of these blocks Phase 4.
 | Question | Answer | Evidence |
 | :--- | :--- | :--- |
 | 1. Swap the residual target and `1/λ_{i,t}` into `State` each sweep, in a jitted loop, correctly across releases? Public setter? | **Yes, with a caveat on churn.** `set_data` rewrites 13 fields and rebuilds the incremental per-leaf precision cache. It is bitwise equal to `init` (all written fields, and one `step` afterwards), and it reproduces bartz's own caches on grown forests. It is unchanged and exact on 0.12.0, 0.12.1, 0.13.0 and `main`. There is no public setter; `main` adds a private `rebuild_derived` that covers most of it | §Q1 |
-| 2. Does the float32 leaf step pass Geweke and SBC at realistic T and volatility ranges? | **Yes, but only with bartz traced under x64 off** (or with a 2-line patch; both pass). Geweke G-small passes for every row at T = 50–400 (n = 1–3, p = 1–2), including a wide-volatility prior and path (b), and G-full passes at T = 200; two mutants are caught. **SBC still running** when the PR opened (§Q2.3) | §Q2 |
+| 2. Does the float32 leaf step pass Geweke and SBC at realistic T and volatility ranges? | **Yes, but only with bartz traced under x64 off** (or with a 2-line patch; both pass). Geweke G-small passes for every row at T = 50–400 (n = 1–3, p = 1–2), including a wide-volatility prior and path (b), and G-full passes at T = 200; two mutants are caught. SBC passes (`bart_sv_T100`, at the Gandy–Scott stage 2 with N = 4000; ESS gates clean) | §Q2 |
 | 3. Is a fixed error precision (`Wishart(value=...)`) the right hook to leave volatility to the SV block? | **Yes.** `step` skips the σ update exactly when `error_cov_inv.nu is None`, and the per-observation weights are then the exact leaf-likelihood precisions (verified against the exact conditional). But `init` refuses that `Wishart` for continuous outcomes, so the adapter swaps it in after `init` | §Q3 |
 | Cost per sweep at n = 3–7, T = 200–400, 200 trees | 6.5–19 ms per sweep on one chain (minimum wall time, load 37–49), **13–17× `Linear × SV`** timed the same way (14–29× across the other measures and loads). The bartz tree loop dominates; `set_data` adds 3–10%; `vmap` gives no CPU parallelism. An idle-machine re-run is open (§5.1a) | §4 |
 
@@ -288,9 +288,15 @@ SV parameters and states, `g` at probe points and dates, `g` mean and mean squar
 depth, split counts, leaf sum of squares, tree log-prior, the log-likelihoods and `log p(θ)`. There
 is no predictive quantity, because forecasting is outside the spike.
 
+The record line, verbatim (`sbc.jsonl`):
+
+```json
+{"name": "bart_spike_sbc_bart_sv_T100", "row": "bart_sv_T100", "passed": true, "stage": 2, "q": [0.048978173394364645, 0.19409153175979296], "N": 4000, "L": 99, "burn": 300, "pilot": 1000, "t_max": 200, "alpha": 0.01, "forest": {"num_trees": 20, "max_depth": 5}, "Q": 53, "reasons": [], "failing": [], "min_p": 0.0036621043728262822, "argmin": "eq1.mean.tree_log_prior", "ess_ok": 1.0, "thin_max": 200, "ess_pooled_min": 97.36143107797184, "iat_median": 26.29319784493135, "iat_q99": 58.61908378306117, "iat_max": 112.59864006712185, "ess_fail": 0}
+```
+
 | Row | n, p, T | Result | Wall time |
 | :-- | :-- | :-- | --: |
-| `bart_sv_T100` | 2, 1, 100 | **running** (started 2026-10-25 12:48 on this PR's `src` and `tests/sbc`, both unchanged since; the result is appended here when it completes) | |
+| `bart_sv_T100` | 2, 1, 100 | **pass**, at stage 2 of the Gandy–Scott wrapper. Stage 1 (N = 1000) was marginal: Bonferroni p 0.049, which triggers a fresh run at 4 × N. Stage 2 (N = 4000) gave Bonferroni p 0.19: min p 0.0037 at `eq1.mean.tree_log_prior`, against the threshold α/Q = 0.01/53 = 1.9·10⁻⁴; nothing failing; per-replication ESS rule met by 100% of replications; pooled ESS ≥ 97.4 (gate 0.8 L = 79.2); pilot IAT median 26, 99th percentile 59, max 113; largest thinning 200 (the cap); 0 replications failing the ESS rule; 0 failed replications | 5 h 26 min (load average 23–205) |
 
 ### Q2.4 How large is the float32 error? (`benchmarks/phase4_float32_leaf_error.py`)
 
