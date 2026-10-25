@@ -3340,9 +3340,9 @@ PROBES_P3 <- list(
       "S (series 1 x 100, prior P) and T (data, the raw-unit image of P: s.d. x d_j/d_i,",
       "intercept s.d. / d_i), 4 runs x 10,000 draws each; S against (i) the equivariant image",
       "D PHI_B D^-1, (ii) PHI_B unchanged, (iii) the image of PHI_T, each under the Phase 2",
-      "rule: exactly (i) or exactly (ii) passes => both sides receive pre-standardised data",
-      "((y - mean)/sd) in R1-R9 and the SWA fixtures are regenerated on it; exactly (iii) =>",
-      "raw data")),
+      "rule: exactly (i) or exactly (ii) passes => both sides receive pre-standardised data in",
+      "bayesianVARs' convention in R1-R9 and the SWA fixtures are regenerated on it, after a",
+      "convention probe (not part of WP29); exactly (iii) => raw data")),
   P7 = list(
     question = "What are the grouping matrices of global_grouping = global, equation-wise, covariate-wise, olcl-lagwise?",
     documented = "manual: subgroups for semi-global shrinkage, or a lags*M x M indicator matrix",
@@ -3446,11 +3446,13 @@ probe_p6 <- function(L) {
     answer = switch(outcome,
       equivariant = paste(
         "PHI is equivariant (internal standardisation with back-transform): both sides receive",
-        "pre-standardised data in R1-R9, (y - colMeans(y)) / sd(y), and the SWA fixtures are",
-        "regenerated on the same data"),
+        "pre-standardised data in R1-R9 in bayesianVARs' convention and the SWA fixtures are",
+        "regenerated on the same data; the convention needs its own probe first, so R1-R9 are",
+        "not run in this run"),
       unchanged = paste(
         "PHI is unchanged (standardised output): both sides receive pre-standardised data in",
-        "R1-R9, (y - colMeans(y)) / sd(y), and the SWA fixtures are regenerated on the same data"),
+        "R1-R9 in bayesianVARs' convention and the SWA fixtures are regenerated on the same data;",
+        "the convention needs its own probe first, so R1-R9 are not run in this run"),
       raw = paste(
         "no internal standardisation: the scaled fit is the image of the raw-unit prior fit;",
         "both sides use the data as committed"),
@@ -3933,6 +3935,12 @@ run_bvars_p3 <- function(env) {
       run_txt <- c(run_txt, sprintf("%s (%s): not run, probes %s undecided (D-59: not met)", fx$name, fx$run, paste(open, collapse = ", ")))
       next
     }
+    if (isTRUE(L$standardise)) {   # P6: bayesianVARs' standardisation convention is unprobed
+      run_txt <- c(run_txt, sprintf(paste(
+        "%s (%s): not run - P6 calls for pre-standardised data in bayesianVARs' own convention,",
+        "which no probe establishes yet; a convention probe must precede the runs (D-59)"), fx$name, fx$run))
+      next
+    }
     kind <- if (fx$family == "normal") "bvars_bayesianvars" else "bvars_gl"
     r <- tryCatch({
       bv_run_fixture(fx, L, 20261500L + 100L * i, answers, kind, fx$run)
@@ -3977,8 +3985,7 @@ if ("bvars" %in% SECTIONS) {
     # P6 (review M11): pre-standardised data on both sides => the SWA fixtures are regenerated
     # on the same standardised data, so the three-way check of R1-R2 survives
     if (isTRUE(res_bv$L$standardise)) {
-      SWA_TRANSFORM <- function(Y) bv_transform(Y, list(standardise = TRUE))
-      message("  P6: standardised data; the SWA fixtures are regenerated on them")
+      message("  P6: standardised data needed; the runs wait for a convention probe (no SWA regeneration)")
     }
   } else {
     stage_probes(env)
@@ -4208,6 +4215,8 @@ wb_pit_rho <- function(runs, vol) {
   rho_all <- unlist(lapply(runs, function(st) as.numeric(state_matrix(st, "rho"))))
   in_support <- length(rho_all) > 0L && all(abs(rho_all) < 1)
   out <- list()
+  flat_q <- list()
+  support_txt <- list()
   combos <- if (vol == "cSV") {
     expand.grid(h = c("same", "prev"), s2 = c("sigma2v_same", "sigma2v_prev", "omega2_same",
                                                "omega2_prev"), stringsAsFactors = FALSE)
@@ -4245,13 +4254,18 @@ wb_pit_rho <- function(runs, vol) {
           list(hh = hh, s2 = s2)
         }
         if (cand == "flat, h0_zero") {
-          vapply(seq_along(idx), function(i) {
+          uq <- vapply(seq_along(idx), function(i) {
             cd <- cond(i)
             Tn <- length(cd$hh)
             sxx <- sum(cd$hh[-Tn]^2)
-            if (!is.finite(cd$s2) || any(!is.finite(cd$hh)) || !(sxx > 0)) return(NA_real_)
-            stats::pnorm(rho[idx[i]], sum(cd$hh[-1] * cd$hh[-Tn]) / sxx, sqrt(cd$s2 / sxx))
-          }, numeric(1))
+            if (!is.finite(cd$s2) || any(!is.finite(cd$hh)) || !(sxx > 0)) return(c(NA_real_, NA_real_))
+            m <- sum(cd$hh[-1] * cd$hh[-Tn]) / sxx
+            sd <- sqrt(cd$s2 / sxx)
+            c(stats::pnorm(rho[idx[i]], m, sd),                                     # the PIT
+              stats::pnorm(-1, m, sd) + stats::pnorm(1, m, sd, lower.tail = FALSE))  # P(|rho| >= 1)
+          }, numeric(2))
+          flat_q[[length(flat_q) + 1L]] <<- list(q = uq[2, ], out = abs(rho[idx]) >= 1)
+          uq[1, ]
         } else {
           pit_grid(rho[idx], function(i) {
             cd <- cond(i)
@@ -4260,9 +4274,23 @@ wb_pit_rho <- function(runs, vol) {
           }, RHO_GRID)
         }
       }))
-      out[[key]] <- ks_p(u)
+      p_ks <- ks_p(u)
+      if (cand == "flat, h0_zero") {
+        # the flat candidate must also predict the number of draws outside (-1, 1): a two-sided
+        # Poisson test of the observed count against the sum of the conditional masses outside
+        q <- unlist(lapply(flat_q, `[[`, "q"))
+        n_out <- sum(unlist(lapply(flat_q, `[[`, "out")))
+        lam <- sum(q, na.rm = TRUE)
+        p_pois <- min(1, 2 * min(stats::ppois(n_out, lam), stats::ppois(n_out - 1, lam, lower.tail = FALSE)))
+        support_txt[[key]] <- sprintf("%d draws outside (-1, 1), %.1f expected (Poisson p = %.3g)", n_out, lam, p_pois)
+        flat_q <- list()
+        out[[key]] <- min(p_ks, p_pois)
+      } else {
+        out[[key]] <- p_ks
+      }
     }
   }
+  attr(out, "support") <- support_txt
   attr(out, "in_support") <- in_support
   attr(out, "max_abs_rho") <- if (length(rho_all)) max(abs(rho_all)) else NA_real_
   out
@@ -4677,6 +4705,8 @@ run_wbvars_probes <- function() {
         if (vol == "cSV") stats::setNames(wb_pit_sigma2_omega(st, sva, "sigma2v"),
                                           paste("[w^2 = sigma2v]", names(wb_pit_sigma2_omega(st, sva, "sigma2v"))))),
       s2v = if (vol == "cSV") wb_pit_sigma2v(st) else list(),
+      frac_gt1 = mean(abs(unlist(lapply(st, function(x) as.numeric(state_matrix(x, "rho")))) ) > 1),
+      frac_gt10 = mean(abs(unlist(lapply(st, function(x) as.numeric(state_matrix(x, "rho")))) ) > 10),
       rep_rho = repeat_fraction(st, "rho"), rep_omega = repeat_fraction(st, "omega"),
       rep_h = repeat_fraction(st, "h"), rep_s2v = repeat_fraction(st, "sigma2v"),
       rep_s2o = repeat_fraction(st, "sigma2_omega"))
@@ -4698,11 +4728,14 @@ run_wbvars_probes <- function() {
   init <- vapply(rho_cand, function(x) if (endsWith(x, "h0_zero")) "h_0 = 0" else
     if (endsWith(x, "stationary")) "stationary" else "undecided", character(1))
   rho_prior <- vapply(rho_cand, function(x) if (startsWith(x, "U(-1, 1)")) "U(-1, 1)" else
-    if (startsWith(x, "flat")) "flat on the real line" else "undecided", character(1))
+    if (startsWith(x, "flat")) "untruncated: flat, or a normal prior too diffuse to detect at this size" else
+      "undecided", character(1))
   names(init) <- names(rho_prior) <- WB_VOLS
   pit_txt <- vapply(names(pit), function(vol) sprintf(
-    "%s: max |rho| %.4g; rho PIT %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
-    vol, attr(pit[[vol]]$rho, "max_abs_rho"), fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
+    "%s: max |rho| %.4g; fraction of rho draws with |rho| > 1: %.4g, > 10: %.4g; flat-candidate support tests %s; rho PIT %s; sigma2_omega PIT %s; sigma2v PIT %s; repeat fractions rho %.3g, omega %.3g, h %.3g, sigma2v %.3g, sigma2_omega %.3g",
+    vol, attr(pit[[vol]]$rho, "max_abs_rho"), pit[[vol]]$frac_gt1, pit[[vol]]$frac_gt10,
+    paste(sprintf("%s: %s", names(attr(pit[[vol]]$rho, "support")), unlist(attr(pit[[vol]]$rho, "support"))), collapse = "; "),
+    fmt_p(pit[[vol]]$rho), fmt_p(pit[[vol]]$s2o), fmt_p(pit[[vol]]$s2v), pit[[vol]]$rep_rho, pit[[vol]]$rep_omega,
     pit[[vol]]$rep_h, pit[[vol]]$rep_s2v, pit[[vol]]$rep_s2o), character(1))
   # P13 rule: decided iff the scale experiment passes (E h = 0, the level in Sigma) and, for each
   # volatility, exactly one initial condition passes; it maps onto CommonSV (stationary h_0 at the
@@ -4760,7 +4793,9 @@ run_wbvars_probes <- function() {
     status = "pending",
     answer = paste(
       "data committed (probe_wbvars_p16.nc), decision pending WP38 (quadrature oracle); a KS",
-      "failure is recorded as 'mapping or sampler, undetermined', never as 'approximate'"),
+      "failure is recorded as 'mapping or sampler, undetermined', never as 'approximate'; under",
+      "an untruncated rho prior the (h_1, rho) posterior at T = 2 may be improper, and WP38 must",
+      "establish propriety before any KS verdict (otherwise 'no proper posterior at T = 2')"),
     evidence = paste(vapply(WB_VOLS, function(vol) sprintf(
       "%s: %d runs x %d chained calls of estimate(post, S = %d)%s; extraction check max |z| %.2f over m = %d (bound %.2f, pass %s); %.4fs per call",
       vol, WB_RUNS_N, WB_P16_CALLS, p16[[vol]]$s, if (nzchar(p16[[vol]]$s_note)) paste0(" (", p16[[vol]]$s_note, ")") else "",
@@ -4787,8 +4822,9 @@ wb_gating <- function(res) {
       paste0(vol, ": branch 2 (", paste(c(if (!p12) "P12 does not hold", if (!m13) "P13 does not map",
                                        if (!m14) "P14 does not map", if (!p15) "P15 undecided"),
                                      collapse = ", "),
-             ") - the 1- and 4-step predictive quantiles under the Phase 2 rule; per review M6 ",
-             "(Q35, owner) evidence, not an equality gate: exact CommonSV parity not met (D-59)")
+             ") - the 1- and 4-step predictive quantiles under the Phase 2 rule; its role is ",
+             "pending the owner's answer to Q35 (review M6's recommended reading: evidence, not an ",
+             "equality gate)")
   }, character(1))
   paste(out, collapse = "; ")
 }
