@@ -5,7 +5,7 @@ with the multiplicity rule of the review erratum (M9, E117+; it replaces the per
 §3.5/D-60): on the pinned grid (``λ ∈ {0, ±1e-8, ±1e-3, ±0.5, ±1, ±10, ±50}``, every ``a − ½``
 and ``a − 1`` at the GK grid's first, middle and last points, ``½ − T_max/2`` for
 ``T_max ∈ {200, 600}``, crossed with ``log ω ∈ {−2000, …, 12}``; ``m`` cells, each with its own
-key ``fold_in(key, cell)``, the ``−λ`` mirrors included) one family of Kolmogorov–Smirnov tests
+random stream, the ``−λ`` mirrors included) one family of Kolmogorov–Smirnov tests
 (10⁴ draws per cell) of ``Y = log X − log η`` against the CDF of ``exp(λy − ω cosh y)`` from
 numerical integration in log space around the mode, passing iff ``min p > 1e-3/m``; and
 ``E log X`` against ``log η + ∂_λ log K_λ(ω)`` (mpmath, 50 digits) within 4 Monte Carlo s.e.,
@@ -125,17 +125,18 @@ def expected_log_y(lam: float, log_omega: float) -> float:
 @pytest.fixture(scope="module")
 def grid_draws():
     """``N_DRAWS`` draws at every grid cell: ``log ψ = log ω − log η``, ``log χ = log ω + log η``
-    with ``log η`` cycling over ``LOG_ETA``. Cell ``i`` has its own key ``fold_in(key(1), i)``
-    (the ``−λ`` mirror cells too: step 2's sign flip would make same-key mirrors identical) and
-    lane ``j`` uses ``fold_in(cell key, j)``. Returns ``Y = log X − log η``, ``ok``, attempts and
-    the sampling time."""
-    lanes = jnp.arange(N_DRAWS, dtype=jnp.uint32)
+    with ``log η`` cycling over ``LOG_ETA``; lane ``j`` of cell ``i`` uses the key
+    ``fold_in(key(1), i·N_DRAWS + j)``, so every cell has its own stream (the ``−λ`` mirror cells
+    too: step 2's sign flip would make same-key mirrors identical). These are the keys of the
+    first run, kept after the KS rule changed (P3 E124). Returns ``Y = log X − log η``, ``ok``,
+    attempts and the sampling time."""
+    base = key(1)
     Y, OK, ATT = [], [], []
     seconds = 0.0
     for i, (lam, lw) in enumerate(GRID):
         le = LOG_ETA[i % len(LOG_ETA)]
-        cell_key = jr.fold_in(key(1), i)
-        keys = jax.vmap(lambda c, ck=cell_key: jr.fold_in(ck, c))(lanes)
+        idx = jnp.arange(i * N_DRAWS, (i + 1) * N_DRAWS, dtype=jnp.uint32)
+        keys = jax.vmap(lambda c: jr.fold_in(base, c))(idx)
         args = (jnp.full((N_DRAWS,), v) for v in (lam, lw - le, lw + le))
         t0 = time.perf_counter()
         log_x, ok, att = jax.block_until_ready(_MANY(keys, *args))
