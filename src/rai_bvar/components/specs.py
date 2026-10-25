@@ -12,6 +12,12 @@ implement them live under ``components/{structure,mean,coef,vol}/`` and are load
   ``IW(diag ψ, n + 2)`` at ``contemp = 1`` (DESIGN §6.1, §11.1; N08 §0).
 * ``SV``: stochastic volatility ``h_t = log λ_t``, AR(1) (``φ ∈ (−1, 1)``) or random walk, with
   optional outlier and Student-t transitory scales (DESIGN §6.3–6.4; N02, N03).
+* ``CommonSV``: one stochastic volatility factor shared by every variance,
+  ``λ_{i,t} = λ_i e^{h_t}``, ``h_t`` a stationary AR(1) with mean 0 (P3 DESIGN §5; Carriero,
+  Clark & Marcellino 2016; Chan 2020).
+
+``Linear(prior=...)`` takes a ``Minnesota`` prior, a global-local prior (``Horseshoe``,
+``NormalGamma``, ``R2D2``, ``DirichletLaplace``, ``SSVS``) or ``AsymmetricConjugate`` (P3 §7.1).
 """
 
 from __future__ import annotations
@@ -22,6 +28,8 @@ from typing import Any, Literal
 
 import numpy as np
 
+from rai_bvar.priors.asymmetric import AsymmetricConjugate
+from rai_bvar.priors.global_local import GlobalLocalPrior
 from rai_bvar.priors.minnesota import Minnesota, _short
 from rai_bvar.priors.sv import (
     Beta,
@@ -30,6 +38,7 @@ from rai_bvar.priors.sv import (
     Normal,
     OutlierPrior,
     ScaledChi2,
+    TruncatedNormal,
     prior_from_spec,
     prior_to_spec,
 )
@@ -39,9 +48,10 @@ CONSTANT_PRIORS = ("auto", "iw", "ig", "iw_equivalent")
 
 @dataclass(frozen=True)
 class Linear:
-    """Linear conditional mean ``g(x_t) = B'x_t`` with a Minnesota-type prior."""
+    """Linear conditional mean ``g(x_t) = B'x_t`` with a Minnesota, global-local or asymmetric
+    conjugate prior."""
 
-    prior: Minnesota = field(default_factory=Minnesota)
+    prior: Minnesota | GlobalLocalPrior | AsymmetricConjugate = field(default_factory=Minnesota)
 
     @property
     def name(self) -> str:
@@ -307,3 +317,87 @@ def _offset(value: object) -> float:
     if not (np.isfinite(value) and value >= 0):
         raise ValueError(f"SV.offset must be 'relative' or a finite number ≥ 0, got {value!r}")
     return value
+
+
+# ---------------------------------------------------------------------------------- CommonSV
+
+_CSV_NESTED = {"rho_prior": (TruncatedNormal, Beta), "sigma2_prior": (InvGamma, ScaledChi2)}
+_CSV_RHO = TruncatedNormal(0.9, 0.04)  # ρ ~ N(0.9, 0.2²)·1(|ρ| < 1) (D-46; Chan 2020)
+_CSV_SIGMA2 = InvGamma(5.0, 0.04)  # σ_h² ~ IG(5, 0.04): prior mean 0.01 (D-46; Chan 2020)
+
+
+@dataclass(frozen=True)
+class CommonSV:
+    """Common stochastic volatility (P3 DESIGN §5.1, D-46): ``u_t ~ N(0, e^{h_t} Σ)``,
+    ``h_t = ρ h_{t−1} + σ_h η_t``, ``h_0 ~ N(0, σ_h²/(1 − ρ²))`` at the first data row.
+
+    * ``rho_prior``: a ``TruncatedNormal`` on ``(−1, 1)`` or a ``Beta`` on ``(ρ + 1)/2``.
+    * ``sigma2_prior``: ``InvGamma(shape, scale)`` or ``ScaledChi2(B)`` (``σ_h² ~ B·χ²₁``).
+    * ``block``: length of the blocks of the ``h`` independence MH step (D-48), at least 2.
+
+    With ``Minnesota(form="conjugate")`` the mean takes the shared-factor path at the conjugate
+    speed (§5.3); with every other prior each equation keeps its own variance ``λ_i`` (§5.2).
+    """
+
+    rho_prior: TruncatedNormal | Beta = _CSV_RHO
+    sigma2_prior: InvGamma | ScaledChi2 = _CSV_SIGMA2
+    block: int = 100
+
+    def __post_init__(self) -> None:
+        for name, classes in _CSV_NESTED.items():
+            value = getattr(self, name)
+            if isinstance(value, Mapping):
+                value = prior_from_spec(dict(value))
+                object.__setattr__(self, name, value)
+            if not isinstance(value, classes):
+                kinds = " or ".join(c.__name__ for c in classes)
+                raise TypeError(f"CommonSV.{name} must be a {kinds}, got {value!r}")
+        rho = self.rho_prior
+        if isinstance(rho, TruncatedNormal) and (rho.low, rho.high) != (-1.0, 1.0):
+            raise ValueError(
+                "CommonSV.rho_prior must be truncated to the stationary region (-1, 1), got "
+                f"({rho.low}, {rho.high})"
+            )
+        if isinstance(self.block, bool) or not isinstance(self.block, int | np.integer):
+            raise TypeError(f"CommonSV.block must be an int, got {self.block!r}")
+        if self.block < 2:
+            raise ValueError(f"CommonSV.block must be at least 2, got {self.block}")
+        object.__setattr__(self, "block", int(self.block))
+
+    @property
+    def name(self) -> str:
+        return "CommonSV"
+
+    @property
+    def label(self) -> str:
+        """``"CommonSV"`` plus every setting that differs from the defaults (nested priors as
+        short hashes, as in ``SV.label``)."""
+        changed = [
+            f"{f.name}={_short(getattr(self, f.name))}"
+            for f in fields(self)
+            if getattr(self, f.name) != _CSV_DEFAULTS[f.name]
+        ]
+        return f"CommonSV({', '.join(changed)})" if changed else "CommonSV"
+
+    def to_spec(self) -> dict[str, Any]:
+        """``{"class": "CommonSV", <fields>}`` with nested priors as ``{"class": …, …}``."""
+        return {
+            "class": "CommonSV",
+            "rho_prior": prior_to_spec(self.rho_prior),
+            "sigma2_prior": prior_to_spec(self.sigma2_prior),
+            "block": self.block,
+        }
+
+    @classmethod
+    def from_spec(cls, spec: Mapping[str, Any]) -> CommonSV:
+        """Inverse of :meth:`to_spec`; missing fields take their defaults."""
+        if spec.get("class", "CommonSV") != "CommonSV":
+            raise ValueError(f"not a CommonSV spec: {dict(spec)!r}")
+        kwargs = {k: v for k, v in spec.items() if k != "class"}
+        unknown = sorted(set(kwargs) - {f.name for f in fields(cls)})
+        if unknown:
+            raise ValueError(f"unknown CommonSV fields {unknown}")
+        return cls(**kwargs)
+
+
+_CSV_DEFAULTS = {f.name: f.default for f in fields(CommonSV)}

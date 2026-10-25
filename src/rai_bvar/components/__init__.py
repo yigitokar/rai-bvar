@@ -5,6 +5,6 @@ kernels in the subpackages ``structure``, ``mean``, ``coef`` and ``vol`` are loa
 ``engines/mcmc/registry.py``.
 """
 
-from rai_bvar.components.specs import SV, Constant, Linear
+from rai_bvar.components.specs import SV, CommonSV, Constant, Linear
 
-__all__ = ["SV", "Constant", "Linear"]
+__all__ = ["SV", "CommonSV", "Constant", "Linear"]

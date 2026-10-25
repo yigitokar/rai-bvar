@@ -20,10 +20,23 @@ engine rules then apply (first match wins):
 * ``reduced`` × ``Constant("iw_equivalent")``: MCMC, CCCM + Chan ``(a, λ)`` (order-invariant);
 * ``reduced`` × ``Constant("iw")``: ``ValueError``;
 
-and finally the MCMC-only rules (Lenza–Primiceri scaling and ``hierarchy="mh"`` arrive in Phase 3;
-ψ cannot be estimated by EB with ``cross ≠ 1`` in structural form) and the JAX-free legality check
-``engines.mcmc.config.validate_composition`` (DESIGN §3.8). Every error is raised at construction.
-SOC/SUR dummies run on both engines (MCMC: DESIGN §13 WP25; N05 §7.7, N04 §3.1).
+Phase 3 (P3 DESIGN §7.2) adds, in the same first-match table:
+
+* ``conjugate`` × ``CommonSV``: MCMC, structural Mode II at ``cross = contemp = 1`` (the NIW prior)
+  with coupled common cores and the shared-factor path (§5.3); ``form="auto"`` with ``CommonSV``
+  resolves to ``"structural"``, so the conjugate screen is explicit;
+* ``structural`` / ``reduced`` Minnesota × ``CommonSV``: MCMC, the per-equation program (§5.2);
+* a global-local prior (``form="auto"`` → ``"structural"``) × ``Constant("ig")``,
+  ``Constant("iw_equivalent")``, ``SV(...)`` or ``CommonSV``: MCMC; × ``Constant("iw")``:
+  ``ValueError``;
+* ``AsymmetricConjugate`` × ``Constant("iw")`` (``"auto"`` resolves to it): analytic, the
+  structural NIG closed form (§4); × anything else: ``ValueError``;
+
+and finally the MCMC-only rules (Lenza–Primiceri scaling and ``hierarchy="mh"`` are not available
+on the MCMC engine; ψ cannot be estimated by EB with ``cross ≠ 1`` in structural form) and the
+JAX-free legality check ``engines.mcmc.config.validate_composition`` (DESIGN §3.8). Every error is
+raised at construction. SOC/SUR dummies run on both engines (MCMC: DESIGN §13 WP25; N05 §7.7,
+N04 §3.1).
 """
 
 from __future__ import annotations
@@ -36,11 +49,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 import numpy as np
 
-from rai_bvar.components import SV, Constant, Linear
+from rai_bvar.components import SV, CommonSV, Constant, Linear
 from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import n_deterministic
 from rai_bvar.data.outliers import LenzaPrimiceri
 from rai_bvar.engines.analytic import AnalyticFit
+from rai_bvar.priors.asymmetric import AsymmetricConjugate
+from rai_bvar.priors.global_local import FAMILIES, GlobalLocalPrior
 from rai_bvar.priors.hyperpriors import (
     BetaPrior,
     GammaPrior,
@@ -49,7 +64,7 @@ from rai_bvar.priors.hyperpriors import (
     ParetoPrior,
 )
 from rai_bvar.priors.minnesota import MHSettings, Minnesota, _short
-from rai_bvar.priors.sv import InvGamma
+from rai_bvar.priors.sv import InvGamma, TruncatedNormal
 from rai_bvar.settings import FitPlan, MCMCSettings, Runtime
 
 if TYPE_CHECKING:
@@ -63,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 _CONJUGATE_VOL = ("auto", "iw")  # Constant priors under which form="auto" means "conjugate"
 _RESOLVE_MODULE = "rai_bvar.engines.mcmc.resolve"  # WP18: fit_bvar(model, data, *, seed, init, …)
+_NIG_MODULE = "rai_bvar.engines.structural_nig"  # P3 WP33: StructuralNIGFit(model, data, seed)
 
 
 @dataclass(frozen=True)
@@ -78,7 +94,7 @@ class BVAR:
     """
 
     mean: Linear = field(default_factory=Linear)
-    vol: Constant | SV = field(default_factory=Constant)
+    vol: Constant | SV | CommonSV = field(default_factory=Constant)
     lags: int = 1
     deterministic: str = "c"
     outliers: LenzaPrimiceri | str | None = None
@@ -106,6 +122,13 @@ class BVAR:
         prior = self.mean.prior
         if self.engine == "analytic":
             object.__setattr__(self, "mcmc", None)  # unused by the analytic engine (spec unchanged)
+            if isinstance(prior, AsymmetricConjugate):
+                if self.outliers is not None:
+                    raise ValueError(
+                        "Lenza-Primiceri scaling is not available with AsymmetricConjugate in this "
+                        "version; use Minnesota(form='conjugate')"
+                    )
+                return
             if (
                 isinstance(self.outliers, LenzaPrimiceri)
                 and self.outliers.fixed is None
@@ -115,7 +138,7 @@ class BVAR:
                     "Lenza-Primiceri scaling needs fixed=(s0, s1, s2, rho) with hierarchy='fixed'"
                 )
             return
-        settings = (settings or MCMCSettings()).with_default_draws(sv=isinstance(self.vol, SV))
+        settings = (settings or MCMCSettings()).with_default_draws(sv=_stochastic(self.vol))
         object.__setattr__(self, "mcmc", settings)
         self._check_mcmc_rules()
         from rai_bvar.engines.mcmc.config import MeanStatic, validate_composition
@@ -123,21 +146,41 @@ class BVAR:
         parts = static_parts(self)
         validate_composition(
             parts.struct,
-            MeanStatic(kind=parts.mean_kind, coef_scaling=parts.coef_scaling),
+            MeanStatic(
+                kind=parts.mean_kind, coef_scaling=parts.coef_scaling, coef_log=parts.coef_log
+            ),
             parts.coef,
             parts.vol,
         )
 
     def _resolve_auto(self) -> None:
         """Resolve ``form="auto"`` and ``Constant("auto")``, then apply the engine rules."""
-        if not isinstance(self.mean, Linear) or not isinstance(self.vol, Constant | SV):
+        if not isinstance(self.mean, Linear) or not isinstance(self.vol, Constant | SV | CommonSV):
             raise NotImplementedError(
-                "only Linear × Constant and Linear × SV compositions exist so far (Phase 2)"
+                "only Linear × Constant, Linear × SV and Linear × CommonSV compositions exist so "
+                "far (Phase 3)"
             )
         prior = self.mean.prior
-        if not isinstance(prior, Minnesota):
-            raise TypeError("Linear(prior=...) must be a Minnesota prior")
+        if not isinstance(prior, Minnesota | GlobalLocalPrior | AsymmetricConjugate):
+            raise TypeError(
+                "Linear(prior=...) must be a Minnesota, global-local (Horseshoe, NormalGamma, "
+                "R2D2, DirichletLaplace, SSVS) or AsymmetricConjugate prior"
+            )
         vol = self.vol
+        if isinstance(prior, GlobalLocalPrior):
+            self._resolve_global_local(prior, vol)
+            return
+        if isinstance(prior, AsymmetricConjugate):
+            if isinstance(vol, Constant) and vol.prior == "auto":
+                vol = replace(vol, prior="iw")
+                object.__setattr__(self, "vol", vol)
+            if not (isinstance(vol, Constant) and vol.prior == "iw"):
+                raise ValueError(
+                    "AsymmetricConjugate is conjugate only with constant volatility (Constant()); "
+                    "for stochastic volatility use Linear(prior=Minnesota(form='structural', "
+                    "cross=...)) with SV(), or Minnesota(form='conjugate') with CommonSV()"
+                )
+            return
         if prior.form == "auto":
             conjugate = isinstance(vol, Constant) and vol.prior in _CONJUGATE_VOL
             prior = replace(prior, form="conjugate" if conjugate else "structural")
@@ -145,9 +188,11 @@ class BVAR:
         if isinstance(vol, Constant) and vol.prior == "auto":
             vol = replace(vol, prior="iw" if prior.form == "conjugate" else "ig")
             object.__setattr__(self, "vol", vol)
-        if prior.form == "conjugate" and not (isinstance(vol, Constant) and vol.prior == "iw"):
+        if prior.form == "conjugate" and not (
+            (isinstance(vol, Constant) and vol.prior == "iw") or isinstance(vol, CommonSV)
+        ):
             raise ValueError(
-                "the conjugate Minnesota prior requires Constant(prior='iw'); use "
+                "the conjugate Minnesota prior requires Constant(prior='iw') or CommonSV(); use "
                 "form='structural' (the MCMC default) or 'reduced'"
             )
         if prior.form == "reduced" and isinstance(vol, Constant) and vol.prior == "iw":
@@ -156,23 +201,47 @@ class BVAR:
                 "'iw_equivalent' (Chan 2022) or 'ig'"
             )
 
+    def _resolve_global_local(self, prior: GlobalLocalPrior, vol: Constant | SV | CommonSV) -> None:
+        """A global-local prior: ``form="auto"`` → ``"structural"`` (D-43), ``Constant("auto")`` →
+        ``"ig"``; Mode II (``Constant("iw")``) is rejected (P3 §7.2 rows 11–12)."""
+        if prior.form == "auto":
+            object.__setattr__(
+                self, "mean", replace(self.mean, prior=replace(prior, form="structural"))
+            )
+        if isinstance(vol, Constant) and vol.prior == "auto":
+            object.__setattr__(self, "vol", replace(vol, prior="ig"))
+        elif isinstance(vol, Constant) and vol.prior == "iw":
+            raise ValueError(
+                "Constant('iw') makes the coefficient prior λ-scaled (Mode II, the conjugate "
+                "twin); global-local priors are independent priors: use Constant('ig'), "
+                "Constant('iw_equivalent'), SV() or CommonSV()"
+            )
+
     def _check_mcmc_rules(self) -> None:
-        """Compositions the Phase 2 MCMC engine rejects (DESIGN §11.1, D-21, §6.5)."""
+        """Compositions the MCMC engine rejects (DESIGN §11.1, D-21, §6.5; P3 §7.2–§7.3)."""
         prior = self.mean.prior
         if self.outliers is not None:
+            if isinstance(self.vol, CommonSV):
+                raise ValueError(
+                    "CommonSV already scales every variance by e^{h_t}; adding Lenza-Primiceri "
+                    "scaling is a double treatment"
+                )
             double = (
                 " (and SV(outliers=True) already models outliers: a double treatment)"
                 if isinstance(self.vol, SV) and self.vol.outliers
                 else ""
             )
             raise NotImplementedError(
-                "Lenza-Primiceri scaling runs on the analytic engine only; on the MCMC engine it "
-                f"arrives in Phase 3{double}. Use SV(outliers=True) for outlier-robust MCMC models"
+                f"Lenza-Primiceri scaling runs on the analytic engine only (DESIGN Q16){double}; "
+                "use SV(outliers=True) for outlier-robust MCMC models"
             )
+        if not isinstance(prior, Minnesota):
+            return
         if prior.hierarchy == "mh":
             raise NotImplementedError(
-                "hierarchical Minnesota inside MCMC arrives with the Phase 3 global-scale step; "
-                "use 'eb' or 'fixed'"
+                "hierarchy='mh' is not available on the MCMC engine in this version (DESIGN "
+                "Q15); use 'eb' or 'fixed', or the analytic engine (Minnesota(form='conjugate') "
+                "with Constant())"
             )
         if (
             prior.form == "structural"
@@ -190,8 +259,13 @@ class BVAR:
 
     @property
     def engine(self) -> str:
-        """``"analytic"`` for the conjugate form (always with ``Constant("iw")``), else ``"mcmc"``."""
-        return "analytic" if self.mean.prior.form == "conjugate" else "mcmc"
+        """``"analytic"`` for the conjugate Minnesota form with ``Constant`` volatility (always
+        ``"iw"``) and for ``AsymmetricConjugate``, else ``"mcmc"`` (P3 §7.2, E96)."""
+        prior = self.mean.prior
+        if isinstance(prior, AsymmetricConjugate):
+            return "analytic"
+        conjugate = isinstance(prior, Minnesota) and prior.form == "conjugate"
+        return "analytic" if conjugate and isinstance(self.vol, Constant) else "mcmc"
 
     @property
     def uses_fit_seed(self) -> bool:
@@ -231,14 +305,21 @@ class BVAR:
 
     def spec(self) -> dict[str, Any]:
         """Plain-JSON description (DESIGN §11.5). Phase 1 compositions keep their Phase 1 spec:
-        ``Minnesota.contemp`` is omitted at its default and ``mcmc`` appears only on MCMC models."""
-        prior = asdict(self.mean.prior)
-        if prior["contemp"] == 1.0:
-            del prior["contemp"]
+        ``Minnesota.contemp`` is omitted at its default and ``mcmc`` appears only on MCMC models.
+        Phase 3 priors and ``CommonSV`` carry a ``"class"`` key (absent: ``Minnesota`` /
+        ``Constant``), so every Phase 1 and Phase 2 spec is unchanged (P3 §7.4)."""
+        if isinstance(self.mean.prior, Minnesota):
+            prior = asdict(self.mean.prior)
+            if prior["contemp"] == 1.0:
+                del prior["contemp"]
+        else:
+            prior = self.mean.prior.to_spec()
         spec: dict[str, Any] = {
             "class": "BVAR",
             "mean": {"prior": prior},
-            "vol": self.vol.to_spec() if isinstance(self.vol, SV) else asdict(self.vol),
+            "vol": (
+                self.vol.to_spec() if isinstance(self.vol, SV | CommonSV) else asdict(self.vol)
+            ),
             "lags": self.lags,
             "deterministic": self.deterministic,
             "outliers": None if self.outliers is None else asdict(self.outliers),
@@ -251,15 +332,7 @@ class BVAR:
     def from_spec(cls, spec: dict[str, Any]) -> BVAR:
         """Rebuild a model from :meth:`spec` (the inverse of ``spec()``)."""
         spec = {k: v for k, v in spec.items() if k != "class"}
-        prior = dict(spec["mean"]["prior"])
-        hp = prior.get("hyperpriors", {})
-        prior["hyperpriors"] = GLPHyperpriors(
-            **{k: (InvGammaPrior if k == "psi" else GammaPrior)(**v) for k, v in hp.items()}
-        )
-        prior["mh"] = MHSettings(**prior.get("mh", {}))
-        for key in ("psi", "hyper"):
-            if isinstance(prior.get(key), list):
-                prior[key] = tuple(prior[key])
+        mean_prior = _prior_from_spec(dict(spec["mean"]["prior"]))
         outliers = spec.get("outliers")
         if isinstance(outliers, dict):
             outliers = LenzaPrimiceri(
@@ -272,13 +345,15 @@ class BVAR:
         vol_class = vol_spec.pop("class", "Constant")
         if vol_class == "SV":
             vol = SV.from_spec(vol_spec)
+        elif vol_class == "CommonSV":
+            vol = CommonSV.from_spec(vol_spec)
         elif vol_class == "Constant":
             vol = Constant(**vol_spec)
         else:
             raise ValueError(f"unknown volatility class {vol_class!r} in spec")
         mcmc = spec.get("mcmc")
         return cls(
-            mean=Linear(prior=Minnesota(**prior)),
+            mean=Linear(prior=mean_prior),
             vol=vol,
             lags=spec["lags"],
             deterministic=spec["deterministic"],
@@ -293,17 +368,21 @@ class BVAR:
         """Resolve ``auto`` components the same way in every arm of a grid (DESIGN §11.4, D-19).
 
         If any combination runs on the MCMC engine because of its volatility (a ``vol`` that is
-        not ``Constant`` with prior ``"auto"``/``"iw"``), every arm whose Minnesota prior has
-        ``form="auto"`` gets ``form="structural"`` (a missing ``mean`` counts as the default
-        ``Linear()``). Then ``Constant(prior="auto")`` becomes ``"ig"`` in every arm whose form
-        is ``"structural"`` or ``"reduced"`` (what ``BVAR`` resolves anyway, so the grid entry is
+        not ``Constant`` with prior ``"auto"``/``"iw"``; a ``CommonSV`` only with an ``auto``
+        Minnesota form, since with an explicit conjugate form it is the conjugate screen) or has
+        a global-local prior (P3 D-53), every arm whose Minnesota prior has ``form="auto"`` gets
+        ``form="structural"`` (a missing ``mean`` counts as the default ``Linear()``).
+        ``AsymmetricConjugate`` arms stay analytic: they neither trigger nor are rewritten, and
+        global-local arms are never rewritten (they are structural already). Then
+        ``Constant(prior="auto")`` becomes ``"ig"`` in every Minnesota arm whose form is
+        ``"structural"`` or ``"reduced"`` (what ``BVAR`` resolves anyway, so the grid entry is
         labelled ``Constant(ig)`` and named apart from a Mode II ``Constant("iw")`` arm). The
         SPEC §9.5 grid ``vol=[Constant(), SV(), SV(outliers=True)]`` then compares one axis
         (structural Mode I in every arm); a grid of ``Constant()`` arms stays analytic. Explicit
         settings are never changed; the rewritten arms are listed in an INFO note.
         """
         out = [dict(c) for c in combos]
-        mcmc_grid = not all(_conjugate_vol(c.get("vol", Constant())) for c in out)
+        mcmc_grid = any(_forces_mcmc(c) for c in out)
         notes = []
         for i, c in enumerate(out):
             rewrites = []
@@ -350,6 +429,7 @@ class BVAR:
 
         Analytic compositions: ``seed`` overrides the MH seed of ``hierarchy="mh"`` (recorded in
         forecast attrs as ``mh_seed``); ``init``, ``runtime`` and ``plan`` must be ``None``.
+        ``AsymmetricConjugate`` is analytic and fitted by ``StructuralNIGFit`` (P3 §4.2).
         MCMC compositions: ``seed`` overrides ``MCMCSettings.seed``; ``init`` (a ``FinalState`` or
         an ``MCMCFit``) warm-starts the chains; ``runtime`` defaults to ``Runtime()``; ``plan``
         requests in-loop forecasts. Returns an ``AnalyticFit`` or an ``MCMCFit``.
@@ -362,6 +442,8 @@ class BVAR:
             ]
             if given:
                 raise ValueError(f"{given} apply to MCMC compositions only; this model is analytic")
+            if isinstance(self.mean.prior, AsymmetricConjugate):
+                return _structural_nig_fit()(self, data, seed)
             return AnalyticFit(self, data, seed)
         if seed is not None and (
             isinstance(seed, bool)
@@ -393,25 +475,55 @@ class StaticParts(NamedTuple):
     coef_scaling: str  # "lambda" in Mode II only
     coef: CoefPriorStatic
     vol: VolStatic
+    coef_log: bool = False  # the deviation path of a varying (global-local) prior (P3 §3.4)
 
 
-def static_parts(model: BVAR) -> StaticParts:
-    """Static choices of an MCMC composition (JAX-free; DESIGN §2.4, §4.7, §6.1).
+def static_parts(model: BVAR, n: int | None = None) -> StaticParts:
+    """Static choices of an MCMC composition (JAX-free; DESIGN §2.4, §4.7, §6.1; P3 §7.2).
 
-    Mode II (``structural`` × ``Constant("iw")``) λ-scales both ``a_i`` and ``δ_i``;
-    ``Constant("iw_equivalent")`` λ-scales ``a_i`` only; both couple the Constant core.
+    Mode II (``structural`` × ``Constant("iw")``, and the conjugate form × ``CommonSV``, which is
+    Mode II at ``cross = contemp = 1``) λ-scales both ``a_i`` and ``δ_i``;
+    ``Constant("iw_equivalent")`` λ-scales ``a_i`` only; all three couple the Constant core.
+    ``n`` (the number of variables) fixes a global-local prior's group count ``G``; without it
+    (the construction-time legality check, whose rules do not read ``G``) ``G = 1`` stands in.
     """
     from rai_bvar.engines.mcmc.config import CoefPriorStatic, StructStatic, VolStatic
 
     if model.engine != "mcmc":
         raise ValueError(f"{model.name} runs on the analytic engine: it has no MCMC static parts")
     prior, vol = model.mean.prior, model.vol
-    coupled = isinstance(vol, Constant) and vol.prior in ("iw", "iw_equivalent")
+    conjugate_common = _conjugate_common(model)
+    coupled = (isinstance(vol, Constant) and vol.prior in ("iw", "iw_equivalent")) or (
+        conjugate_common
+    )
     struct = StructStatic(kind="recursive", contemp_scaling="lambda" if coupled else "none")
-    mean_kind = {"structural": "linear_structural", "reduced": "linear_reduced"}[prior.form]
-    coef_scaling = "lambda" if _mode_ii(model) else "none"
+    form = "structural" if conjugate_common else prior.form
+    mean_kind = {"structural": "linear_structural", "reduced": "linear_reduced"}[form]
+    coef_scaling = "lambda" if _mode_ii(model) or conjugate_common else "none"
+    if isinstance(prior, GlobalLocalPrior):
+        coef = CoefPriorStatic(
+            kind=prior.kind,
+            n_groups=1 if n is None else prior.n_groups(n, model.lags),
+            a_grid=prior.a_grid,
+            p_beta=prior.p_beta,
+        )
+    else:
+        coef = CoefPriorStatic()
     if isinstance(vol, Constant):
         vstatic = VolStatic(persistent="constant", coupled=coupled)
+    elif isinstance(vol, CommonSV):
+        vstatic = VolStatic(
+            persistent="constant",
+            coupled=coupled,
+            common=True,
+            csv_block=vol.block,
+            csv_rho_prior=(
+                "truncated_normal" if isinstance(vol.rho_prior, TruncatedNormal) else "beta"
+            ),
+            csv_sigma2_prior=(
+                "inv_gamma" if isinstance(vol.sigma2_prior, InvGamma) else "scaled_chi2"
+            ),
+        )
     else:
         transitory = {
             (False, False): "none",
@@ -436,26 +548,86 @@ def static_parts(model: BVAR) -> StaticParts:
             zero_offset=vol.offset == 0.0,
             coupled=False,
         )
-    return StaticParts(struct, mean_kind, coef_scaling, CoefPriorStatic(), vstatic)
+    return StaticParts(
+        struct, mean_kind, coef_scaling, coef, vstatic, isinstance(prior, GlobalLocalPrior)
+    )
 
 
-def default_mcmc(vol: Constant | SV) -> MCMCSettings:
+def default_mcmc(vol: Constant | SV | CommonSV) -> MCMCSettings:
     """The resolved default ``MCMCSettings`` of an MCMC composition with volatility ``vol``
-    (D-35): ``MCMCSettings()`` with ``draws`` = 10,000 for ``SV``, 2,000 for ``Constant``."""
-    return MCMCSettings().with_default_draws(sv=isinstance(vol, SV))
+    (D-35, D-51): ``MCMCSettings()`` with ``draws`` = 10,000 for ``SV`` and ``CommonSV``, 2,000
+    for ``Constant``."""
+    return MCMCSettings().with_default_draws(sv=_stochastic(vol))
+
+
+def _stochastic(vol: Any) -> bool:
+    """Whether ``vol`` is a stochastic-volatility component for D-35 (``CommonSV`` is, D-51)."""
+    return isinstance(vol, SV | CommonSV)
 
 
 def _mode_ii(model: BVAR) -> bool:
-    """Structural Minnesota × ``Constant("iw")``: the λ-scaled NIG prior (D-10)."""
-    vol = model.vol
-    return model.mean.prior.form == "structural" and isinstance(vol, Constant) and vol.prior == "iw"
+    """Structural Minnesota × ``Constant("iw")``: the λ-scaled NIG prior (D-10). This is also
+    the label predicate (``scaling=conjugate``); the conjugate form × ``CommonSV`` is Mode II in
+    its static parts but keeps the conjugate prior's label (P3 §7.4, E96)."""
+    prior, vol = model.mean.prior, model.vol
+    return (
+        isinstance(prior, Minnesota)
+        and prior.form == "structural"
+        and isinstance(vol, Constant)
+        and vol.prior == "iw"
+    )
+
+
+def _conjugate_common(model: BVAR) -> bool:
+    """The conjugate Minnesota form × ``CommonSV`` (P3 §5.3: Mode II at ``cross = contemp = 1``,
+    the shared-factor path)."""
+    prior = model.mean.prior
+    return (
+        isinstance(prior, Minnesota)
+        and prior.form == "conjugate"
+        and isinstance(model.vol, CommonSV)
+    )
 
 
 def _conjugate_vol(vol: Any) -> bool:
     return isinstance(vol, Constant) and vol.prior in _CONJUGATE_VOL
 
 
-def _vol_label(vol: Constant | SV) -> str:
+def _forces_mcmc(combo: Mapping[str, Any]) -> bool:
+    """Whether a grid arm forces ``form="auto"`` arms onto the MCMC engine (D-19, P3 D-53)."""
+    prior = getattr(combo.get("mean", Linear()), "prior", None)
+    vol = combo.get("vol", Constant())
+    if isinstance(prior, AsymmetricConjugate):
+        return False
+    if isinstance(prior, GlobalLocalPrior):
+        return True
+    if isinstance(vol, CommonSV):
+        return isinstance(prior, Minnesota) and prior.form == "auto"
+    return not _conjugate_vol(vol)
+
+
+def _prior_from_spec(prior: dict[str, Any]) -> Minnesota | GlobalLocalPrior | AsymmetricConjugate:
+    """The mean prior of a spec: dispatch on ``"class"`` (absent means ``Minnesota``; P3 §7.4)."""
+    name = prior.get("class", "Minnesota")
+    if name in FAMILIES:
+        return GlobalLocalPrior.from_spec(prior)
+    if name == "AsymmetricConjugate":
+        return AsymmetricConjugate.from_spec(prior)
+    if name != "Minnesota":
+        raise ValueError(f"unknown prior class {name!r} in spec")
+    prior = {k: v for k, v in prior.items() if k != "class"}
+    hp = prior.get("hyperpriors", {})
+    prior["hyperpriors"] = GLPHyperpriors(
+        **{k: (InvGammaPrior if k == "psi" else GammaPrior)(**v) for k, v in hp.items()}
+    )
+    prior["mh"] = MHSettings(**prior.get("mh", {}))
+    for key in ("psi", "hyper"):
+        if isinstance(prior.get(key), list):
+            prior[key] = tuple(prior[key])
+    return Minnesota(**prior)
+
+
+def _vol_label(vol: Constant | SV | CommonSV) -> str:
     return f"Constant({vol.prior})" if isinstance(vol, Constant) else vol.label
 
 
@@ -486,6 +658,19 @@ def _mcmc_entry_point():
             "Constant('iw')) can be fitted"
         )
     return fit_bvar
+
+
+def _structural_nig_fit():
+    """``engines.structural_nig.StructuralNIGFit`` (P3 WP33), the analytic fit of
+    ``AsymmetricConjugate``; ``NotImplementedError`` while it is not part of the build."""
+    module = importlib.import_module(_NIG_MODULE)
+    fit = getattr(module, "StructuralNIGFit", None)
+    if fit is None:
+        raise NotImplementedError(
+            f"AsymmetricConjugate is fitted by {_NIG_MODULE}.StructuralNIGFit, which is not yet "
+            "available in this build"
+        )
+    return fit
 
 
 def _outlier_label(outliers: LenzaPrimiceri) -> str:
