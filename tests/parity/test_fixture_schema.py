@@ -781,10 +781,16 @@ def test_gl_fixture_layout(name):
     if run == "R9":
         support, weight = ds["ng_grid_support"].values, ds["ng_grid_weight"].values
         assert "NG_a = ng_grid" in a["call"] and np.isclose(weight.sum(), 1.0)
-        np.testing.assert_array_equal(ds["grid_support"].values, support)
-        prob = ds["grid_prob"].values
-        assert prob.shape == (1, len(support)) and np.isclose(prob.sum(), 1.0)
-        assert list(ds["grid_param"].values) == ["a1"]
+        k = names.index("a1")
+        if "grid_prob" in ds:  # a moved over the grid: its posterior probabilities
+            np.testing.assert_array_equal(ds["grid_support"].values, support)
+            prob = ds["grid_prob"].values
+            assert prob.shape == (1, len(support)) and np.isclose(prob.sum(), 1.0)
+            assert list(ds["grid_param"].values) == ["a1"]
+        else:  # a never left one grid point in any stored draw: a constant column, on the grid
+            values = np.unique(draws.values[:, :, k])
+            assert len(values) == 1 and np.isclose(support, values[0]).any()
+            assert "a1: constant" in a["hyper_columns"]
 
 
 @pytest.mark.parametrize("name", P8_FIXTURES)
