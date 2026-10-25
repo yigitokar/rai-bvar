@@ -1226,19 +1226,27 @@ def test_common_sv_only_runs_the_common_step_alone(monkeypatch):
     np.testing.assert_allclose(lv, expect, rtol=1e-15)
 
 
-def test_p3_steps_wait_for_the_kernels():
+@pytest.mark.parametrize(
+    "name",
+    [
+        "structural_constant_hs",
+        "structural_commonsv",
+        "conjugate_commonsv_parity",
+        "common_sv_only",
+    ],
+)
+def test_p3_steps_wait_for_the_kernels(name):
     """Building a P3 spec never composes; stepping composes and, until WP31/WP32 land, reports
     the missing kernels (the GL kinds through the registry; CommonSV through the program's missing
-    G_COMMON_SV step, which compose itself does not detect)."""
-    for name in ("structural_constant_hs", "structural_commonsv", "conjugate_commonsv_parity",
-                 "common_sv_only"):  # fmt: skip
-        spec, st, data = a_dataset(name)
-        try:
-            spec.step(random.key(2), jnp.uint32(0), st, data)
-        except NotImplementedError as err:
-            assert "WP31" in str(err) or "WP32" in str(err), err
-        else:  # pragma: no cover - once the kernels exist this is the production sweep
-            pytest.skip("Phase 3 kernels available")
+    G_COMMON_SV step, which compose itself does not detect). Each row skips on its own once its
+    kernels exist (the step is then the production kernel, validated by WP31/WP32/WP35)."""
+    spec, st, data = a_dataset(name)
+    try:
+        spec.step(random.key(2), jnp.uint32(0), st, data)
+    except NotImplementedError as err:
+        assert "WP31" in str(err) or "WP32" in str(err), err
+    else:  # pragma: no cover - once the kernels exist this is the production sweep
+        pytest.skip("the Phase 3 kernels of this row are available")
 
 
 # --------------------------------------------------------------------------- 7. explosive mass
