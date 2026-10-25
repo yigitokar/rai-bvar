@@ -117,7 +117,7 @@ if the owner accepts it.
 | D-51 | **Budgets** (extends D-35): `CommonSV` is a stochastic-volatility composition for D-35 (default 4 × 10,000 kept draws, warning below). GL compositions: the default is frozen by the WP35 pilot (§8; Q21, D-58); until then they take the D-35 default of their volatility. The convergence gate (P2 §8.2) is unchanged | P2 D-35, Q14 | — |
 | D-52 | **Monitors** (extends D-33): GL group log scales are **primary** when the number of groups `G ≤ max(2p, n)` (global, olcl-lagwise, equation-wise), secondary otherwise; local scales, SSVS indicators and hyperprior indices are secondary. `CommonSV`: `h_T`, `ρ`, `σ_h` primary (with every `log λ_i`, as for `Constant`). They are monitor fields of `fit.posterior["monitor"]` | SPEC §10.6 ("monitored on hyperparameters") | — |
 | D-53 | **Grid harmonisation** (extends D-19): if any arm resolves to MCMC through a non-conjugate volatility (`SV`, or `CommonSV` with an `auto` form) or a GL prior, every `Minnesota(form="auto")` arm becomes `"structural"` and its `Constant("auto")` becomes `"ig"`. GL arms are structural already; `AsymmetricConjugate` arms are never rewritten (they stay analytic) and do not trigger the rewrite | P2 §11.4 | — |
-| D-54 | **Oracle environment** (pending Q22). Option 1: a local R ≥ 4.5 with CRAN's macOS binaries of `bayesianVARs` 0.1.8, `bvars` 1.1 and `stochvol`, installed from a pinned Posit Package Manager snapshot. Option 2: an input-gated job `r_fixtures` in the existing `ci.yml` (GitHub dispatches only workflows on the default branch), `workflow_dispatch` only, `ubuntu-latest`, the same pinned snapshot, uploading the fixtures as an artifact. Fixtures are committed with R, package and snapshot versions in their attributes; test workflows never install R or touch the network (SPEC §5.8, §10.4 reworded to say so) | SPEC §10.4 | P2 failed on R 4.1.2 (no binary, no gfortran); E37 |
+| D-54 | **Oracle environment** (Q22, resolved by the owner on 2026-10-25: "(a) CI job + artifact"). An input-gated job `r_fixtures` in the existing `ci.yml` (GitHub dispatches only workflows on the default branch), run by `workflow_dispatch` only (never on push, pull request or schedule), on `ubuntu-latest`, installs R and `bayesianVARs` 0.1.8, `bvars` 1.1 and `stochvol` from a pinned Posit Package Manager snapshot (CRAN sources built with gfortran), runs `tools/make_r_fixtures.R` and uploads the fixtures as an artifact, which is downloaded with `gh run download` and committed with R, package and snapshot versions in the fixtures' attributes. No local R and no container image. Test workflows never install R or touch the network (SPEC §5.8, §10.4 reworded to say so) | SPEC §10.4 | P2 failed on R 4.1.2 (no binary, no gfortran); E37 |
 | D-55 | **Numbering** continues Phase 2 (Conventions); SPEC §14 points at both registers | — | — |
 | D-56 | **Validation designs for heavy-tailed coefficient priors.** GL composition rows run Geweke and SBC on an exogenous fixed design: `X` of shape `(T_eff, k)` with a column of ones for each deterministic term and `N(0, 1)` entries elsewhere, drawn once from the configuration seed and held fixed, `Y` simulated given `θ` without lag feedback (N08 §A11). The lagged-path GL rows use families with exponential or Gaussian tails and a scale knob (NG, SSVS; DL has no scale parameter) with scales whose explosive prior mass, measured by prior simulation in WP30, is ≤ 2e-4 (P2 §9.2); the horseshoe's half-Cauchy tail makes that mass ≈ 0.4 at `global_scale = 0.1` (Ra8), so no lagged HS row runs with sampled scales | N06 §3.4; N08 §A11 | E46 |
 | D-57 | **Branches and PRs.** One PR per work package. Each work-package branch starts from the branch of the work package it depends on (named in §13), and its PR targets that branch, so the diff is the work package alone; GitHub retargets it to `main` when its base merges. Merging is the owner's | task brief | E58 |
@@ -142,7 +142,7 @@ share one.
 | E34 | Rc1: an unresolved probe would be "replaced by the exact oracles", and the bayesianVARs test skips when a fixture is missing | D-59: not met, owner decides, SPEC amendment named; the release run must show no skips | D-59, §9.8 |
 | E35 | Rc2: the bvars fallback tolerance was deferred, and A8/A11 share the `h` kernel | Tolerance stated now (the Phase 2 rule on 1- and 4-step predictive quantiles and on `(Π, Σ)`); A8/A11 are evidence, never the criterion | §9.8 |
 | E36 | Rc3: the DGP exit could not fail, and its full study may never run | Exit met only if the registered full study's readings pass (both null pairs and the not-worse pair "not above nominal" at `h = 1` and `h = 4`); compute question Q28; scope stated (one cell, volatility axis) | §9.9 |
-| E37 | Rc15: CRAN now ships macOS binaries for R 4.5/4.6; the workflow must pin versions; SPEC wording | D-54 rewritten (local option first, pinned snapshot, SPEC §5.8/§10.4 reworded) | D-54 |
+| E37 | Rc15: CRAN now ships macOS binaries for R 4.5/4.6; the workflow must pin versions; SPEC wording | D-54 rewritten (a pinned snapshot; SPEC §5.8/§10.4 reworded); the owner chose the dispatch-only CI job with an artifact download (Q22) | D-54 |
 | E38 | Rc9: A9, A10, A11, A13, P8 and GK had no tolerance | D-60 and each test's rule | §9 |
 | E39 | Rc4: BoE `bvar` re-draws parameters from the conditional path, so it is no end-to-end oracle | BoE used per draw (`draw_constrained_forecasts` at fixed `(beta, sigma)`, A10b); "as in BoE/bvars" removed | D-50, §9.7 |
 | E40 | Rc5: bvars samples the common SV with auxiliary mixture indicators (approximate), has hierarchical `σ_ω²` and `V`, one chain, undocumented initial condition | Probe P16 (is bvars exact?); P11–P15 reworded to data fields; the decision tree gates only the quantities an exact oracle can gate; R-side MCSE from `k` seeded runs | §9.8 |
@@ -251,7 +251,7 @@ src/rai_bvar/evaluation/scores.py                [WP34] refuses ConditionalForec
 src/rai_bvar/validation/{reference,simulate,log_joint,testfns,joint}.py  [WP30] §9.1 (separate registry, D-61)
 tools/make_r_fixtures.R                          [WP29] sections bvars (bayesianVARs P1–P10, R1–R9), wbvars (P11–P16)
 tools/make_sv_parity_data.py                     [WP29] packing of the new fixtures
-.github/workflows/ci.yml                         [WP29] r_fixtures job (option 2 of D-54)  [WP36] weekly shards  [WP41] tiers
+.github/workflows/ci.yml                         [WP29] r_fixtures job (D-54)  [WP36] weekly shards  [WP41] tiers
 tools/weekly_shards.py                           [WP36] Phase 3 shards
 benchmarks/pilot/phase3_*.py               new   [WP35] pilot; docs/phase3/pilot.md
 benchmarks/phase3_perf.py                  new   [WP35] BENCH-P3 (reported)
@@ -1234,7 +1234,7 @@ Estimates to be replaced by WP35's measurements (`docs/phase3/pilot.md`):
 | :- | :--- | :--- |
 | R18 | GL mixing (HS global scale; small `a` on the grid) leaves fits unconverged | WP35 pilot; group scales primary (D-52); budget D-58; warnings |
 | R19 | GIG sampler wrong at extreme parameters | Devroye (2014) §6 with a uniform bound, log-space evaluation, the pinned Tier U grid, M34 |
-| R20 | `bayesianVARs` cannot be built, or a probe stays undecided | D-54 options; an undecided probe is recorded with its evidence and its runs are **not met** (D-59); the owner decides |
+| R20 | `bayesianVARs` cannot be built, or a probe stays undecided | D-54 (Linux with gfortran); an undecided probe is recorded with its evidence and its runs are **not met** (D-59); the owner decides |
 | R21 | bvars is approximate (auxiliary mixture) or its `V` cannot be fixed | P16 and P12 select the gating comparison before it runs (§9.8) |
 | R22 | CommonSV `h` acceptance falls with `T` and `σ_h²` (N08 §A5.2) | blocks of 100 dates; acceptance warning; pilot at `T = 600` |
 | R23 | Conditional forecasts near rank deficiency | the `R₁` diagonal check of E-16; never jitter |
@@ -1242,7 +1242,7 @@ Estimates to be replaced by WP35's measurements (`docs/phase3/pilot.md`):
 | R25 | Contract additions change Phase 2 draws | `Empty` defaults; golden templates and hashes; bitwise before/after tests |
 | R26 | Parallel sessions edit shared files | ownership of §1.2; rebase on their merges; `ci.yml` edits named per WP |
 | R27 | GK sample details (UMCSENTx gaps) | the sample start fixed in the pre-registration |
-| R28 | GitHub Actions minutes for R builds (option 2) | dispatch-only job with a cached library |
+| R28 | GitHub Actions minutes for R builds | dispatch-only job with a cached library |
 | R29 | The shared-factor path's two-block `(θ_i, λ_i)` Gibbs mixes slowly when `q_i ≈ T` | WP35 measures; Q32 (a collapsed `λ_i` draw) |
 | R30 | The DGP full study's compute (≈ 10 h) is not scheduled | Q28 |
 
@@ -1259,7 +1259,7 @@ Estimates to be replaced by WP35's measurements (`docs/phase3/pilot.md`):
 | Q19 | `solver="bcm"` for `q > T` | Defer (the Cholesky path is exact, only slower) |
 | Q20 | `HMP` (bayesianVARs' hierarchical Minnesota) | Not in v0.3.0; a GL-family member later if wanted |
 | Q21 | Default MCMC budget of GL compositions | Decide from WP35 (D-58); gate unchanged |
-| Q22 | R environment for the oracles, and permission to download it (a local R ≥ 4.5 with CRAN binaries, or the dispatch-only CI job's artifact) | Option 1 for fast probe iterations, option 2 as the reproducible record; both are downloads and need the owner's yes |
+| Q22 | R environment for the oracles, and permission to download it | **Resolved (owner, 2026-10-25): "(a) CI job + artifact"**: the dispatch-only `r_fixtures` job and `gh run download` of its artifact; no Docker image, no local R (D-54) |
 | Q23 | GL defaults: GK's semi-global with hyperpriors, or `bayesianVARs`' global with fixed `a` | GK's (§3.2); parity sets `bayesianVARs`' values explicitly |
 | Q24 | CommonSV extensions (Student-t, random walk, outliers) and the t part of the bvars oracle row | Defer (N08 §A5.4, §A9) |
 | Q25 | Conditional forecasts: soft conditions, parameter updating (Waggoner–Zha Gibbs), weighting by `w_s` | Defer; the weights are stored |
@@ -1286,7 +1286,7 @@ is named below. The stack is linear because the WPs share files; only WP29 branc
 | WP26 | Contracts (§2): config rules, state classes, prior arrays, keys, registry, protocols, compose hooks, goldens | this design (`phase-3-design`) | rules tested; Phase 2 templates, hashes (and the DGP arms') and short runs bitwise unchanged |
 | WP27 | Specs and API (§7): GL classes, `DiscreteGrid`, `AsymmetricConjugate`, `CommonSV`, `TruncatedNormal`; resolution, engine table, E-1…E-16, spec/hash, labels, harmonise; the `test_api_resolution.py` amendment | WP26 | every §7.2 row and §7.3 message tested; Phase 1–2 golden hashes unchanged; `import rai_bvar` imports no JAX |
 | WP28 | Numerics (§3.4, §3.5, §5.3, §5.4): `log_gig`, `precision_draw_log`, `shared_factor_*`, tridiagonal Newton | WP27 | §9.2 item 1 green |
-| WP29 | Oracle environment and fixtures (D-54, §9.8): `make_r_fixtures.R` sections `bvars` (P1–P10, R1–R9) and `wbvars` (P11–P16 and its runs), packing, the `r_fixtures` CI job (option 2), the SV-t fixture if `stochvol` ≥ 3.2.5 | this design; needs Q22 | fixtures committed with versions; every probe decided or recorded undecided with evidence; the bvars gating comparison recorded |
+| WP29 | Oracle environment and fixtures (D-54, §9.8): `make_r_fixtures.R` sections `bvars` (P1–P10, R1–R9) and `wbvars` (P11–P16 and its runs), packing, the dispatch-only `r_fixtures` CI job, the SV-t fixture if `stochvol` ≥ 3.2.5 | this design (Q22 resolved) | fixtures committed with versions; every probe decided or recorded undecided with evidence; the bvars gating comparison recorded |
 | WP30 | References (§9.1), the exogenous design, `COMPOSITIONS_P3`, `BLOCK_CONFIGS_P3`; explosive-mass measurement for the lagged rows | WP28 | prior moments vs closed forms; simulators vs NumPy loops (1e-12); `log_joint` vs SciPy (1e-10) |
 | WP31 | GL kernels and `GLScaleStep`, deviation paths, builders, resolve, monitors, runner init order, storage (§3) | WP30 | Tier U, B green; rows 301 and 311 G-small green; A12, A13 green |
 | WP32 | CommonSV (§5): common cores, `CommonSVStep`, the shared-factor path, forecasts, warm starts, monitors, storage | WP31 | Tier U, B green; rows 320 and 321 G-small green; A8 (`n = 3`), A11 green |
