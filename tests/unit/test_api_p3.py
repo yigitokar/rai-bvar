@@ -154,10 +154,10 @@ def test_row_13_asymmetric_conjugate_is_analytic(vol):
         static_parts(model)
 
 
-E3 = (
-    "AsymmetricConjugate is conjugate only with constant volatility (Constant()); for "
-    "stochastic volatility use Linear(prior=Minnesota(form='structural', cross=...)) with SV(), "
-    "or Minnesota(form='conjugate') with CommonSV()"
+E3 = (  # amended by P3 E141
+    "AsymmetricConjugate is conjugate only with Constant('iw') (Constant() resolves to it); for "
+    "Constant('ig') or stochastic volatility use Linear(prior=Minnesota(form='structural', "
+    "cross=...)) with that volatility, or Minnesota(form='conjugate') with CommonSV()"
 )
 
 
@@ -379,10 +379,11 @@ def test_a_global_local_arm_moves_auto_arms_to_structural():
     assert p2 == rb.AsymmetricConjugate() and v2 == rb.Constant()  # nor AC arms
 
 
-def test_common_sv_triggers_only_with_an_auto_form():
-    grid = rb.BVAR.harmonise_grid([{}, {"vol": rb.CommonSV()}])
-    assert [p.form for p, _ in arms(grid)] == ["structural", "structural"]
-    assert arms(grid)[0][1] == rb.Constant("ig")
+@pytest.mark.parametrize("form", ["auto", "structural", "reduced"])
+def test_common_sv_triggers_unless_its_form_is_explicitly_conjugate(form):  # E119
+    grid = rb.BVAR.harmonise_grid([{}, {"mean": mn(form), "vol": rb.CommonSV()}])
+    assert arms(grid)[0][0].form == "structural" and arms(grid)[0][1] == rb.Constant("ig")
+    assert arms(grid)[1][0].form == ("structural" if form == "auto" else form)
     screen = [{}, {"mean": mn("conjugate"), "vol": rb.CommonSV()}]
     assert rb.BVAR.harmonise_grid(screen) == screen  # the explicit conjugate screen
     assert rb.BVAR(**rb.BVAR.harmonise_grid(screen)[0]).engine == "analytic"
@@ -393,9 +394,13 @@ def test_asymmetric_conjugate_arms_do_not_trigger():
     assert rb.BVAR.harmonise_grid(grid) == grid
 
 
-def test_phase_2_harmonisation_is_unchanged():
+def test_phase_2_harmonisation_is_unchanged():  # P2 §11.4's trigger is kept (E119)
     grid = rb.BVAR.harmonise_grid([{}, {"vol": rb.SV()}])
     assert [p.form for p, _ in arms(grid)] == ["structural", "structural"]
+    every_constant = [{"vol": rb.Constant(v)} for v in ("ig", "iw", "iw_equivalent")]
+    models = [rb.BVAR(**c) for c in rb.BVAR.harmonise_grid(every_constant)]
+    assert [m.engine for m in models] == ["mcmc"] * 3
+    assert [m.mean.prior.form for m in models] == ["structural"] * 3
     assert rb.BVAR.harmonise_grid([{}, {"vol": rb.Constant("iw")}]) == [
         {},
         {"vol": rb.Constant("iw")},

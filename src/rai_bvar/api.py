@@ -176,9 +176,10 @@ class BVAR:
                 object.__setattr__(self, "vol", vol)
             if not (isinstance(vol, Constant) and vol.prior == "iw"):
                 raise ValueError(
-                    "AsymmetricConjugate is conjugate only with constant volatility (Constant()); "
-                    "for stochastic volatility use Linear(prior=Minnesota(form='structural', "
-                    "cross=...)) with SV(), or Minnesota(form='conjugate') with CommonSV()"
+                    "AsymmetricConjugate is conjugate only with Constant('iw') (Constant() resolves "
+                    "to it); for Constant('ig') or stochastic volatility use Linear(prior=Minnesota("
+                    "form='structural', cross=...)) with that volatility, or "
+                    "Minnesota(form='conjugate') with CommonSV()"
                 )
             return
         if prior.form == "auto":
@@ -368,9 +369,9 @@ class BVAR:
         """Resolve ``auto`` components the same way in every arm of a grid (DESIGN §11.4, D-19).
 
         If any combination runs on the MCMC engine because of its volatility (a ``vol`` that is
-        not ``Constant`` with prior ``"auto"``/``"iw"``; a ``CommonSV`` only with an ``auto``
-        Minnesota form, since with an explicit conjugate form it is the conjugate screen) or has
-        a global-local prior (P3 D-53), every arm whose Minnesota prior has ``form="auto"`` gets
+        not ``Constant`` with prior ``"auto"``/``"iw"``, P2's trigger; a ``CommonSV`` unless its
+        Minnesota form is explicitly ``"conjugate"``, the conjugate screen) or has a global-local
+        prior (P3 D-53, E119), every arm whose Minnesota prior has ``form="auto"`` gets
         ``form="structural"`` (a missing ``mean`` counts as the default ``Linear()``).
         ``AsymmetricConjugate`` arms stay analytic: they neither trigger nor are rewritten, and
         global-local arms are never rewritten (they are structural already). Then
@@ -601,8 +602,8 @@ def _forces_mcmc(combo: Mapping[str, Any]) -> bool:
         return False
     if isinstance(prior, GlobalLocalPrior):
         return True
-    if isinstance(vol, CommonSV):
-        return isinstance(prior, Minnesota) and prior.form == "auto"
+    if isinstance(vol, CommonSV):  # the explicit conjugate screen is the one narrowing (E119)
+        return not (isinstance(prior, Minnesota) and prior.form == "conjugate")
     return not _conjugate_vol(vol)
 
 
