@@ -1,15 +1,16 @@
 # arXiv submission of the rai-bvar paper
 
 What to paste into the arXiv form, which file to upload, and how that file was tested with arXiv's
-engine (pdfLaTeX). State of 2026-10-24, from the sources of the latest commit that changes this
-file on branch `paper-draft` (first written in 8511b6c; Sections 0, 1 and 4 updated after the final
-adversarial check of the same day; Sections 0, 1, 2, 4, 5 and 6 updated after the post-release F1
-edits of cd8d605, and again after the weekly-tier edits of the next commit). Every number below comes from a build or a command run that
-day; the commands are given so that they can be repeated.
+engine (pdfLaTeX). State of 2026-10-25, from the sources of the latest commit that changes this
+file on branch `paper-draft` (first written on 2026-10-24 in 8511b6c; Sections 0, 1 and 4 updated
+after the final adversarial check of that day; Sections 0, 1, 2, 4, 5 and 6 updated after the
+post-release F1 edits of cd8d605; Sections 0, 1 and 4 updated on 2026-10-25 after the weekly-tier
+edits of fae94d7). Every number below comes from a build or a command run on 2026-10-24 or
+2026-10-25; the commands are given so that they can be repeated.
 
 ## 0. Before you submit
 
-Done on 2026-10-24:
+Done on 2026-10-24 and 2026-10-25:
 - **Repository public:** https://github.com/yigitokar/rai-bvar (`gh repo view --json visibility` returns `PUBLIC`).
 - **Tag and release:** tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093, with a GitHub release (https://github.com/yigitokar/rai-bvar/releases/tag/v0.2.0). The install line in App. G uses `@v0.2.0`.
 - **Branch pushed:** `paper-draft`, which holds the paper's sources, figure and table scripts and data that App. F, App. G and Fig. F.1 point to.
@@ -23,9 +24,9 @@ Still yours, both optional:
 
 ## 1. The file to upload
 
-`docs/paper/arxiv.tar.gz`: 48 files, 507,855 bytes, SHA-256
-`8dd62127f7af2216ce6387f0c310ef5e55d2ddd88ac44c5f478197452023957a` (the tarball tested below,
-built 2026-10-24 17:05Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1` from the sources of
+`docs/paper/arxiv.tar.gz`: 48 files, 508,418 bytes, SHA-256
+`0b15764d87e37a08d601d1ba8384c4638ae0a324238dcec014287bf2a48391c2` (the tarball tested below,
+built 2026-10-25 13:30Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1` from the sources of
 the commit that records this checksum).
 
 arXiv publishes the source files of a submission, so `make_arxiv.sh` ships its 31 `.tex` files
@@ -37,7 +38,7 @@ tags, stay on the branch `paper-draft`. Checked on 2026-10-24:
   gitignored; the test's TeX Live 2026 BibTeX regenerates it byte for byte);
 - the stripped tarball typesets to the same PDF as an unstripped one: the pdfLaTeX builds of both
   have 107 pages with byte-identical page content streams (compared with pypdf; re-checked for the
-  tarball above, the unstripped files taken from cd8d605);
+  tarball above, the unstripped files taken from fae94d7);
 - the shipped `.tex` files hold no comment text; the only local path left in the tarball is in the
   header comments of `code/ex_a.py` and `code/ex_b.py`, lines the listings do not print.
 
@@ -134,22 +135,22 @@ Compared by text extraction (PyMuPDF) and by the `.aux` label tables of the two 
 1. **The same document.** Both have 107 pages. In both, the main text runs from p. 1 to p. 35,
    App. A starts on p. 36, and the appendices end and the references start on p. 98. Both have 11
    figures, 29 tables, 6 listings, 13 algorithms and 129 references. All 245 labels have the same
-   numbers in both builds. (Re-measured on 2026-10-24 for the tarball of Section 1, the tectonic
-   side being `build.sh`'s converged build of cd8d605.)
-2. **Page drift.** 232 of the 245 labels fall on the same page. Thirteen are one page off, all
-   pdfLaTeX one page earlier except three: `sec:walk-mcmc` (p. 19 in tectonic, p. 18 in pdfLaTeX),
+   numbers in both builds. (Re-measured on 2026-10-25 for the tarball of Section 1, the tectonic
+   side being `build.sh`'s converged build of fae94d7.)
+2. **Page drift.** 234 of the 245 labels fall on the same page. Eleven are one page off, all
+   pdfLaTeX one page earlier except one: `sec:walk-mcmc` (p. 19 in tectonic, p. 18 in pdfLaTeX),
    `sec:validation-cost` and `sec:validation-tiers` (20, 19), `sec:robustness-f3` (26, 25),
    `sec:replication-prereg` and `sec:replication-first-run` (29, 28), `sec:replication-caveats`
-   (31, 32), Fig. 6 (`Fig6`, `fig:Fig6`, `fig:cr-orderings`: 32, 31), `sec:conclusion` (35, 34),
-   `app:licensing` (93, 94) and `app:errata` (94, 95). (An earlier version of this note listed
-   five; measured the same way, the sources of 59573af already gave fifteen.)
-   - Pages 1–18, 36–41 and 44–90 have the same text, up to the extraction differences of item 4
+   (31, 32, the exception), Fig. 6 (`Fig6`, `fig:Fig6`, `fig:cr-orderings`: 32, 31) and
+   `sec:conclusion` (35, 34). (Earlier versions of this note listed five and then thirteen; measured
+   the same way, the sources of 59573af gave fifteen and those of 4ed7de2 thirteen.)
+   - Pages 1–18, 36–41, 44–90 and 94–107 have the same text, up to the extraction differences of item 4
      (a word-sequence similarity of at least 0.97 per page: PyMuPDF text, whitespace-split words,
      Python's difflib). On pp. 41–42 one line of App. B.5 crosses the page break (pdfLaTeX sets it
      on p. 41), which, with the math of App. B.5 and B.6, puts pp. 42–43 at 0.956 and 0.960; no
      label moves there.
    - The drift starts after Listings 1 and 2 (pp. 18–19) and after Listings G.1–G.4
-     (pp. 88–92). It ends at the page break before the appendices and at the end of the document.
+     (pp. 88–92). It ends at the page break before the appendices and at p. 94.
    - The code listings use different typewriter fonts in the two engines: DejaVu Sans Mono under
      XeTeX and Latin Modern Typewriter under pdfTeX (`\lstfontfamily` in `main.tex`).
 3. **Visible glyph differences, in the listings only.** tectonic prints `-` and `*` as a minus
