@@ -1308,16 +1308,18 @@ class JointSpecP3(JointSpec):
         return new
 
 
-# ---- explosive prior mass of the lagged rows (P2 §9.2 bound ≤ 2e-4; P3 D-56, E93)
+# ---- explosive prior mass of the lagged rows (P3 D-56 target 2e-4, E93: the level Phase 2
+# measured for its corrected prior at n = 3, p = 2; Phase 2's bound is P(ρ > 1) < 1e-3, N06 §9.1)
 
 EXPLOSIVE_BOUND = 2e-4
 EXPLOSIVE_DRAWS = 1_000_000
 # Measured by prior simulation (WP30, 2026-10-25): explosive_mass(joint_spec(name, size), 10**6,
-# seed=0); counts of draws whose companion matrix has spectral radius >= 1. P3 §9.4 expects 316:
-# 1.7e-5, 319: 4.6e-5, 330: 1.3e-5 and 1.2e-4 for the conjugate rows at p = 2. Above the bound
-# (findings, not retuned): 320/full 2.38e-4, 323/full 2.04e-4, 408/full 2.39e-4 (the conjugate
-# prior with the SOC/SUR rows; without them 325/full 1.36e-4, 329/full 1.13e-4) and 321/full
-# 2.07e-4 (the Phase 2 §9.2 Mode I test prior; its twin 407/full 1.89e-4).
+# seed=0); counts of draws whose companion matrix has spectral radius >= 1. P3 §9.4 expected 316:
+# 1.7e-5, 319: 4.6e-5, 330: 1.3e-5 (superseded: 0 measured, E150) and 1.2e-4 for the conjugate rows
+# at p = 2. Above the target by the Monte Carlo rule of E150 (findings, not retuned): 320/full
+# 2.38e-4 and 408/full 2.39e-4 (the conjugate prior with the SOC/SUR rows; without them 325/full
+# 1.36e-4, 329/full 1.13e-4). Within it: 323/full 2.04e-4 and 321/full 2.07e-4 (the Phase 2 §9.2
+# Mode I test prior, reproducing Phase 2's measured level; its twin 407/full 1.89e-4).
 EXPLOSIVE_MASS_P3: dict[str, dict[str, int]] = {
     "reduced_sv_ng_lagged": {"small": 4, "full": 18},
     "structural_sv_ng_lagged": {"small": 0, "full": 0},

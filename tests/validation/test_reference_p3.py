@@ -1252,43 +1252,41 @@ def test_p3_steps_wait_for_the_kernels(name):
 # --------------------------------------------------------------------------- 7. explosive mass
 
 
-# Finding E150 (P3 DESIGN Amendment 1, open question Q36): these rows measure above the D-56 bound
-# at full size. The test priors are not retuned here; the owner decides. Strict xfail: a row that
-# moves within the bound, or any other row that moves above it, fails the suite.
-OVER_BOUND_E150 = (
-    "conjugate_commonsv_dummies",  # 320
-    "structural_commonsv",  # 321 (at the bound: 2.04e-4 ± 0.07e-4 at 4·10⁶ draws)
-    "conjugate_commonsv_dummies_weighted",  # 323
-    "conjugate_niw_only",  # 408
+# Finding E150 (P3 DESIGN Amendment 1, open question Q36): D-56's target 2e-4 is decided by a Monte
+# Carlo rule, a row exceeding it iff its count is above the upper 99% Poisson limit at the target
+# (234 of 10⁶ draws). Rows 320 and 408 do; the test priors are not retuned here, the owner decides.
+# Strict xfail: a row that moves within the target, or any other row that moves above it, fails.
+OVER_TARGET_E150 = (
+    "conjugate_commonsv_dummies",  # 320: 238
+    "conjugate_niw_only",  # 408: 239
 )
 _E150 = pytest.mark.xfail(
     strict=True,
-    reason="E150/Q36: explosive prior mass above the 2e-4 bound at full size; owner decision",
+    reason="E150/Q36: explosive prior mass above the 2e-4 target at full size; owner decision",
 )
 
 
-def _over_bound(name: str) -> dict[str, float]:
-    return {
-        size: count / EXPLOSIVE_DRAWS
-        for size, count in EXPLOSIVE_MASS_P3[name].items()
-        if count / EXPLOSIVE_DRAWS > J.EXPLOSIVE_BOUND
-    }
+def _over_target(name: str) -> dict[str, int]:
+    from scipy.stats import poisson
+
+    limit = poisson.ppf(0.99, J.EXPLOSIVE_BOUND * EXPLOSIVE_DRAWS)  # E150's Monte Carlo rule
+    return {size: count for size, count in EXPLOSIVE_MASS_P3[name].items() if count > limit}
 
 
 def test_explosive_mass_is_recorded_for_every_lagged_row():
     assert set(EXPLOSIVE_MASS_P3) == set(J.LAGGED_P3)
-    assert set(OVER_BOUND_E150) <= set(J.LAGGED_P3)
+    assert set(OVER_TARGET_E150) <= set(J.LAGGED_P3)
     for by_size in EXPLOSIVE_MASS_P3.values():
         assert set(by_size) == {"small", "full"}
 
 
 @pytest.mark.parametrize(
     "name",
-    [pytest.param(n, marks=_E150) if n in OVER_BOUND_E150 else n for n in J.LAGGED_P3],
+    [pytest.param(n, marks=_E150) if n in OVER_TARGET_E150 else n for n in J.LAGGED_P3],
 )
-def test_explosive_mass_is_within_the_bound(name):
-    over = _over_bound(name)
-    assert not over, f"{name} above the explosive-mass bound {J.EXPLOSIVE_BOUND}: {over}"
+def test_explosive_mass_is_within_the_target(name):
+    over = _over_target(name)
+    assert not over, f"{name} above the explosive-mass target {J.EXPLOSIVE_BOUND}: {over}"
 
 
 def test_spectral_radius_and_reduced_form():
@@ -1323,7 +1321,7 @@ def test_explosive_mass_measurement_reproduces_the_record():
 @pytest.mark.parametrize("name", J.LAGGED_P3)
 def test_explosive_mass_full_measurement(name):
     """The recorded measurement itself (10⁶ draws per size, seed 0; weekly tier); the bound is
-    checked by :func:`test_explosive_mass_is_within_the_bound` on the record."""
+    checked by :func:`test_explosive_mass_is_within_the_target` on the record."""
     for size in ("small", "full"):
         c, _ = J.explosive_mass(J.joint_spec(name, size), EXPLOSIVE_DRAWS, seed=0, chunk=50_000)
         assert abs(c - EXPLOSIVE_MASS_P3[name][size]) <= 2, (name, size, c)
