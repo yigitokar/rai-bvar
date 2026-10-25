@@ -10,7 +10,8 @@ forecast; every array of ``fit.posterior``, of the forecast and of ``fit.hyper``
   registry's own definitions so that no row can fall out of the gate (``ROWS`` maps each case to
   its row; ``tests/mcmc/unit/test_contracts_p3.py`` checks the coverage);
 * **options** a composition row does not pin: ``const_path="cholesky"`` (the branch E65 changes),
-  ``gram="batched"``, ``store="paths"``, ``deterministic="ct"``, ``SV(exact=False)``,
+  ``gram="batched"`` on the two paths that read the Gram layout (the weighted structural step and
+  the reduced-form CCCM step), ``store="paths"``, ``deterministic="ct"``, ``SV(exact=False)``,
   ``SV(mixture="ksc7")``, ``SV(tails="t", t_scale="unit")`` and a structural ``cross != 1`` at
   ``hierarchy="fixed"``;
 * **the EB plug-in**: the structural ``cross != 1`` compositions at the default ``hierarchy="eb"``
@@ -23,9 +24,10 @@ forecast; every array of ``fit.posterior``, of the forecast and of ``fit.hyper``
     python -I tools/phase3_bitwise_ab.py run OUT.json        # on the parent, then on the head
     python -I tools/phase3_bitwise_ab.py compare A.json B.json
 
-``compare`` exits non-zero and lists the cases whose digests differ. Run it in a checkout whose
-``src`` is the code under test (``uv run`` in that worktree); a PR records the head commit, the
-machine and the sha256 of both JSON files with the result.
+``compare`` exits non-zero and lists the cases whose digests differ; ``run`` exits non-zero when
+two MCMC cases share a posterior digest (a case that exercises nothing of its own). Run it in a
+checkout whose ``src`` is the code under test (``uv run`` in that worktree); a PR records the head
+commit, the machine and the sha256 of both JSON files with the result.
 """
 
 from __future__ import annotations
@@ -106,7 +108,9 @@ def _models():
         "opt-const-path-cholesky": bv(
             rb.Constant("ig"), "structural", mcmc=opt(const_path="cholesky")
         ),
-        "opt-gram-batched": bv(rb.Constant("ig"), "structural", 2, mcmc=opt(gram="batched")),
+        # gram is read only by the weighted structural step and the CCCM step (not by eigen etc.)
+        "opt-gram-batched-structural-sv": bv(rb.SV(), "structural", mcmc=opt(gram="batched")),
+        "opt-gram-batched-reduced": bv(rb.Constant("ig"), "reduced", 2, mcmc=opt(gram="batched")),
         "opt-store-paths": bv(rb.SV(), "structural", mcmc=opt(store="paths")),
         "opt-det-ct": bv(rb.Constant("ig"), "structural", det="ct"),
         "opt-sv-inexact": bv(rb.SV(exact=False), "structural"),
@@ -194,6 +198,17 @@ def run(out: str) -> None:
         json.dump(result, fh, indent=1, sort_keys=True)
     rows = sum(r is not None for r in ROWS.values())
     print(f"{len(result)} cases ({rows} composition rows) written to {out}")
+    seen: dict[str, str] = {}
+    duplicates = []
+    for name, digest in sorted(result.items()):
+        post = digest.get("posterior")
+        if post is not None and post in seen:
+            duplicates.append((seen[post], name))
+        seen.setdefault(post, name)
+    for a, b in duplicates:
+        print(f"DUPLICATE posterior digest: {a} and {b}")
+    if duplicates:
+        sys.exit(2)
 
 
 def compare(a: str, b: str) -> int:
