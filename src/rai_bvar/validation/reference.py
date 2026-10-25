@@ -1433,10 +1433,9 @@ class CommonSVRef(_Base):
         _, rest = jax.lax.scan(body, h0, (eta[1:], tmask[1:]))
         h = jnp.where(tmask > 0, jnp.concatenate([h0[None], rest]), 0.0)
         z, zt = jnp.zeros((), _F64), jnp.zeros((T_pad,), _F64)
-        return CommonSVGlobal(
-            h=h, rho=rho, log_sigma=log_sigma, acc_h=z, acc_rho=z, acc_newton=z, rb_ch_sum=zt,
-            rb_ch_sq=zt,
-        )  # fmt: skip
+        # positional (field order h, ρ, log σ, three scalar accumulators, rb_ch_sum, rb_ch_sq):
+        # independent of the accumulators' names (WP26 erratum E132 renames them)
+        return CommonSVGlobal(h, rho, log_sigma, z, z, z, zt, zt)
 
     def log_prior_global(self, part, prior, static, *, tmask=None):
         if tmask is None:

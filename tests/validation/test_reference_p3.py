@@ -631,7 +631,12 @@ def test_common_sv_prior_truncated_normal_and_inverse_gamma():
     for label, x in (("z_0²", z0**2), ("mean η²", (eta**2).mean(1)), ("mean η", eta.mean(1))):
         assert_uncorrelated(x, {"ρ": gv.rho, "log σ": gv.log_sigma}, label)
     assert np.all(h[:, T:] == 0.0)
-    for leaf in (gv.acc_h, gv.acc_rho, gv.acc_newton, gv.rb_ch_sum, gv.rb_ch_sq):
+    accumulators = [  # by prefix: the scalar accumulators' names change with E132
+        x for p, x in jax.tree_util.tree_flatten_with_path(gv)[0]
+        if leaf_path(p).startswith(("acc_", "rb_"))
+    ]  # fmt: skip
+    assert len(accumulators) == 5
+    for leaf in accumulators:
         assert np.all(leaf == 0.0)
     for i in range(spec.static.shapes.n):
         assert_ks(np.exp(st.eq.vol.core.log_lam[:, i]), stats.invgamma(5.0, scale=4.0).cdf, "λ")
