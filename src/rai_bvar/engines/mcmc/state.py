@@ -447,9 +447,10 @@ class CommonSVGlobal:
     h: Array  # f64[T_pad]
     rho: Array  # f64[]
     log_sigma: Array  # f64[]
-    acc_h: Array  # f64[]: accepted fraction of the non-empty h blocks, summed over sweeps
-    acc_rho: Array  # f64[]
-    acc_newton: Array  # f64[]: Newton iterations that hit the cap
+    # per-chain scalars, named apart from SV's per-equation acc_h (P3 E132)
+    acc_csv_h: Array  # f64[]: accepted fraction of the non-empty h blocks, summed over sweeps
+    acc_csv_rho: Array  # f64[]
+    acc_csv_newton: Array  # f64[]: Newton iterations that hit the cap
     rb_ch_sum: Array  # f64[T_pad]
     rb_ch_sq: Array  # f64[T_pad]
 
@@ -775,7 +776,7 @@ def _coef_templates(static: StaticConfig) -> tuple[PyTree, PyTree]:
 def _common_sv_template(static: StaticConfig) -> CommonSVGlobal:
     T = static.shapes.T_pad
     return CommonSVGlobal(
-        h=_f(T), rho=_f(), log_sigma=_f(), acc_h=_f(), acc_rho=_f(), acc_newton=_f(),
+        h=_f(T), rho=_f(), log_sigma=_f(), acc_csv_h=_f(), acc_csv_rho=_f(), acc_csv_newton=_f(),
         rb_ch_sum=_f(T), rb_ch_sq=_f(T),
     )  # fmt: skip
 

@@ -290,7 +290,7 @@ def test_common_sv_templates_and_accumulators():
     assert isinstance(S.draw_template(st).glob.vol, S.CommonSVDraw)
     filled = jax.tree.map(lambda x: np.ones_like(x), tmpl)
     zeroed = S.zero_accumulators(filled)
-    for name in ("acc_h", "acc_rho", "acc_newton", "rb_ch_sum", "rb_ch_sq"):
+    for name in ("acc_csv_h", "acc_csv_rho", "acc_csv_newton", "rb_ch_sum", "rb_ch_sq"):
         assert np.all(getattr(zeroed.glob.vol, name) == 0)
     for name in ("h", "rho", "log_sigma"):
         assert np.all(getattr(zeroed.glob.vol, name) == 1)
@@ -318,7 +318,7 @@ NG5 = CoefPriorStatic("normal_gamma", n_groups=2, a_grid=5)
         (NG5, COMMON, "glob.vol.rho", _set(1.0), "\\|ρ\\| must be < 1"),
         (NG5, COMMON, "glob.vol.rho", _set(-1.2), "\\|ρ\\|"),
         (NG5, COMMON, "glob.vol.h", _set(0.5, (25,)), "padded states"),
-        (NG5, COMMON, "glob.vol.acc_h", _set(-1.0), "negative accumulator"),
+        (NG5, COMMON, "glob.vol.acc_csv_h", _set(-1.0), "negative accumulator"),
         (NG5, COMMON, "glob.vol.h", _set(np.nan, (3,)), "non-finite"),
         (NG5, COMMON, "eq.mean.dev_log", _set(np.inf, (0, 1)), "non-finite"),
         (NG5, COMMON, "eq.coef.log_w", _set(0.3, (1, 0)), "deterministic slots"),

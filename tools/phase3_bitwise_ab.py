@@ -2,8 +2,14 @@
 
 Committed draws cannot be bitwise across CPU models (P2 §9.10), so every Phase 3 work package
 that touches the engine (WP26–WP34) records a same-machine comparison of its parent commit and
-its head: each Phase 2 MCMC composition is fitted with a short fixed budget on one simulated
-dataset, forecast, and every array of ``fit.posterior`` and of the forecast is hashed.
+its head. On one simulated dataset (E118):
+
+* each Phase 2 MCMC composition at ``hierarchy="fixed"`` is fitted with a short fixed budget and
+  forecast; every array of ``fit.posterior`` and of the forecast is hashed;
+* the structural ``cross != 1`` compositions at the default ``hierarchy="eb"`` (Constant and SV:
+  the ``eb_hyper -> eb_structural`` plug-in) likewise, with ``fit.hyper`` in the digest;
+* ``AnalyticFit`` at ``hierarchy`` ``fixed``, ``eb`` and ``mh``: ``log_ml``, ``hyper``, the MH
+  chains and the forecast's arrays.
 
     python -I tools/phase3_bitwise_ab.py run OUT.json        # on the parent, then on the head
     python -I tools/phase3_bitwise_ab.py compare A.json B.json
@@ -43,13 +49,21 @@ def _models():
     M = rb.Minnesota
     settings = rb.MCMCSettings(chains=2, draws=40, burn=30, seed=5)
 
-    def bv(vol, form, lags=1, **prior):
+    def bv(vol, form, lags=1, hierarchy="fixed", **prior):
         return rb.BVAR(
-            mean=rb.Linear(prior=M(form=form, hierarchy="fixed", **prior)),
+            mean=rb.Linear(prior=M(form=form, hierarchy=hierarchy, **prior)),
             vol=vol,
             lags=lags,
             mcmc=settings,
         )
+
+    mh = rb.MHSettings(draws=200, burn=100, chains=2, seed=3)
+    analytic = {
+        f"analytic-{h}": rb.BVAR(
+            mean=rb.Linear(prior=M(form="conjugate", hierarchy=h, mh=mh, soc=1.0)), lags=2
+        )
+        for h in ("fixed", "eb", "mh")
+    }
 
     return {
         "structural-constant-ig": bv(rb.Constant("ig"), "structural"),
@@ -68,6 +82,10 @@ def _models():
         "reduced-sv-outliers-t": bv(rb.SV(outliers=True, tails="t"), "reduced"),
         "reduced-sv-rw": bv(rb.SV(rw=True), "reduced"),
         "reduced-constant-dummies": bv(rb.Constant("ig"), "reduced", soc=1.0),
+        # the EB plug-in through structural_nig.eb_structural (cross != 1; E118)
+        "structural-constant-eb-cross": bv(rb.Constant("ig"), "structural", 2, "eb", cross=0.5),
+        "structural-sv-eb-cross": bv(rb.SV(), "structural", 1, "eb", cross=0.5),
+        **analytic,
     }
 
 
@@ -78,8 +96,13 @@ def _digest_arrays(items) -> str:
         h.update(name.encode())
         h.update(str(arr.dtype).encode())
         h.update(str(arr.shape).encode())
-        h.update(arr.tobytes())
+        # object arrays (e.g. a None hyperparameter) would hash memory addresses: hash their repr
+        h.update(repr(arr.tolist()).encode() if arr.dtype == object else arr.tobytes())
     return h.hexdigest()
+
+
+def _hyper_items(hyper) -> list:
+    return [(f"hyper/{k}", np.asarray(hyper[k])) for k in sorted(hyper)]
 
 
 def _fit_digest(model, data) -> dict[str, str]:
@@ -87,14 +110,22 @@ def _fit_digest(model, data) -> dict[str, str]:
         warnings.simplefilter("ignore")
         fit = model.fit(data, seed=11)
         fc = fit.forecast(3, draws=40, seed=2)
+    ds = fc.dataset
+    fcast = sorted((name, ds[name].values) for name in ds.data_vars)
+    out = {"forecast": _digest_arrays(fcast), "hyper": _digest_arrays(_hyper_items(fit.hyper))}
+    if model.engine == "analytic":
+        fixed = [("log_ml", np.asarray(fit.log_ml()))]
+        if fit.mh is not None:
+            fixed.append(("mh/chains", np.asarray(fit.mh.chains)))
+        out["fit"] = _digest_arrays(fixed)
+        return out
     post = []
     for node in fit.posterior.subtree:
         for name, var in node.ds.data_vars.items():
             post.append((f"{node.path}/{name}", var.values))
     post.sort(key=lambda kv: kv[0])
-    ds = fc.dataset
-    fcast = sorted((name, ds[name].values) for name in ds.data_vars)
-    return {"posterior": _digest_arrays(post), "forecast": _digest_arrays(fcast)}
+    out["posterior"] = _digest_arrays(post)
+    return out
 
 
 def run(out: str) -> None:

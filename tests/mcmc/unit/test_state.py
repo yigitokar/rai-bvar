@@ -88,7 +88,7 @@ DOCUMENTED = {
     S.DLGlobal: "a_idx",
     S.SSVSEq: "gamma rb_incl",
     S.SSVSGlobal: "log_p log1m_p",
-    S.CommonSVGlobal: "h rho log_sigma acc_h acc_rho acc_newton rb_ch_sum rb_ch_sq",
+    S.CommonSVGlobal: "h rho log_sigma acc_csv_h acc_csv_rho acc_csv_newton rb_ch_sum rb_ch_sq",
     S.CommonSVDraw: "h_T rho sigma",
     S.GaussianLogDiag: "mean log_prec cmask",
     S.OutlierDraw: "log_p log1m_p",
