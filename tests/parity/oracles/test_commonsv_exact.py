@@ -587,14 +587,19 @@ def fixture(name: str):
 
 
 def test_c2_data_regenerate_from_the_stated_process():
-    """The committed C2 CSV equals the tool's simulation from ``default_rng(20261026)``."""
+    """The committed C2 CSV equals the tool's simulation from ``default_rng(20261026)``: the same
+    draws, so equal up to floating-point rounding, which differs across CPU models and BLAS builds
+    (the file was written on arm64; x86 differs by ≈ 4e-16). The committed file is the dataset of
+    record (§9.8)."""
     t = tool()
     committed = pd.read_csv(t.DATA_DIR / "commonsv_n3.csv", float_precision="round_trip")
     fresh, h = t.simulate_c2()
     assert list(committed.columns) == ["date", "y1", "y2", "y3"]
     assert len(committed) == 202 and h.shape == (200,)
     np.testing.assert_array_equal(committed["date"], fresh["date"])
-    np.testing.assert_array_equal(committed.drop(columns="date"), fresh.drop(columns="date"))
+    np.testing.assert_allclose(
+        committed.drop(columns="date"), fresh.drop(columns="date"), rtol=1e-12, atol=1e-12
+    )
     assert t.C2_DGP["seed"] == 20261026
 
 
