@@ -471,6 +471,11 @@ def conditional_forecast(
                 f"{int(horizon)} (they must be the same)"
             )
         variables, origin = base.variables, base.origin
+        if data is not None and hasattr(data, "last") and origin != data.last:
+            raise ValueError(
+                f"base forecasts from {origin}; this fit's sample ends at {data.last} (base must be "
+                "a forecast of this fit: the levels are inverted against its history)"
+            )
         expected = _fit_variables(fit)
         if expected is not None and list(expected) != list(variables):
             raise ValueError(

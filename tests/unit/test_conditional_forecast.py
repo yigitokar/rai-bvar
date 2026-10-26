@@ -388,6 +388,15 @@ def test_same_seed_reproduces_bitwise_and_the_entry_points_agree(leg):
             np.testing.assert_array_equal(other.dataset[name].values, res.dataset[name].values)
 
 
+@pytest.mark.parametrize("leg", ["analytic"], indirect=True)
+def test_base_from_another_sample_is_refused(leg):
+    """A ``base`` whose origin is not the fit's last period is refused (its levels would be
+    inverted against the wrong history; the R6 review of PR #28)."""
+    shifted = ForecastResult(leg.base.dataset.assign_attrs(origin=str(leg.base.origin - 1)))
+    with pytest.raises(ValueError, match="base forecasts from"):
+        rb.conditional_forecast(leg.fit, leg.base.horizon, leg.conditions, base=shifted)
+
+
 # --------------------------------------------------------------------------- A10b
 
 
