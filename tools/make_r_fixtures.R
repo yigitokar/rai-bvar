@@ -3157,6 +3157,35 @@ bv_homo <- function(L, shape = 3, scale = 2) {
   } else stop("the scale convention of cholesky_priorhomoscedastic is undecided (P5)")
 }
 
+# The SV predictive from bayesianVARs' own posterior draws by the joint path (E173; Q42, owner
+# 2026-10-26), the structure of Phase 2's swa_forecast: one path per kept draw. Per draw, the SPEC
+# model with the conventions P1-P5 recorded: h_{T+s} = mu + phi (h_{T+s-1} - mu) + sigma eta
+# (P4: sigma is the s.d.), e_{T+s} ~ N(0, diag(exp(h_{T+s}))), u solves A u = e (P2: A = t(U),
+# unit lower triangular), y_{T+s} = Pi' x_{T+s} + u (P3: x = (1, y_{T+s-1}', ..., y_{T+s-p}')').
+# Pi is D x K x M in that regressor order, A D x M x M, mu, phi, sigma and h_T D x M.
+BV_PATH_SEED_OFFSET <- 500000L
+bv_path_forecast <- function(Pi, A, mu, phi, sigma, hT, Y, p, H) {
+  D <- dim(Pi)[1]
+  n <- dim(Pi)[3]
+  stopifnot(dim(Pi)[2] == 1L + n * p, all(dim(A) == c(D, n, n)), all(dim(mu) == c(D, n)),
+            all(dim(phi) == c(D, n)), all(dim(sigma) == c(D, n)), all(dim(hT) == c(D, n)))
+  last <- as.vector(t(Y[nrow(Y):(nrow(Y) - p + 1L), , drop = FALSE]))
+  lags <- matrix(rep(last, each = D), D)
+  h <- hT
+  paths <- array(NA_real_, c(D, H, n))
+  for (s in seq_len(H)) {
+    x <- cbind(1, lags)
+    m <- vapply(seq_len(n), function(j) rowSums(x * Pi[, , j]), numeric(D))
+    h <- mu + phi * (h - mu) + sigma * matrix(rnorm(D * n), D)
+    u <- exp(h / 2) * matrix(rnorm(D * n), D)
+    for (i in seq_len(n)[-1]) for (j in seq_len(i - 1L)) u[, i] <- u[, i] - A[, i, j] * u[, j]
+    y <- m + u
+    paths[, s, ] <- y
+    lags <- cbind(y, lags[, seq_len(n * (p - 1L)), drop = FALSE])
+  }
+  paths
+}
+
 bv_extract <- function(r, L, p, vol, t_sel, H, fc_seed, hyper = TRUE, vprior = FALSE) {
   fit <- r$fit
   f <- unclass(fit)
@@ -3212,6 +3241,16 @@ bv_extract <- function(r, L, p, vol, t_sel, H, fc_seed, hyper = TRUE, vprior = F
     pred <- draws_last(pr$predictions, D)
     if (dim(pred)[1] != H && dim(pred)[2] == H) pred <- aperm(pred, c(2, 1, 3))
     out$fc <- aperm(pred, c(3, 1, 2))                                  # D x H x M
+    if (vol == "sv") {
+      # E173 (Q42): the compared SV predictive at h >= 2 is the joint path from these draws
+      # (bv_path_forecast); predict()'s own h >= 2 output is kept as evidence (fc_predict)
+      out$fc_predict <- out$fc
+      set.seed(fc_seed + BV_PATH_SEED_OFFSET)
+      path <- bv_path_forecast(out$Pi, out$A, out$mu, out$phi, out$sigma,
+                               out$h_sel[, length(t_sel), , drop = TRUE], Y, p, H)
+      out$fc_path_h1 <- path[, 1L, , drop = TRUE]
+      if (H >= 2L) out$fc[, 2:H, ] <- path[, 2:H, , drop = FALSE]
+    }
   }
   if (hyper && !is.null(f$phi_hyperparameter)) {
     hm <- draws_last(f$phi_hyperparameter, D)
@@ -3256,13 +3295,47 @@ stage_reduced_fixture <- function(name, chains, info, extra_vars = list(), extra
     a_free = nc_array(sprintf("a%d%d", free[, 1], free[, 2]), "a_free"),
     a_row = nc_array(as.integer(free[, 1]), "a_free"),
     a_col = nc_array(as.integer(free[, 2]), "a_free"))
+  extra <- list()
+  fc_attrs <- list()
   if (H > 0L) {
+    sv_path <- info$vol == "sv" && !is.null(chains[[1]]$fc_predict)
     blocks <- c(blocks, list(summary_vars(
       "forecast", function(ix) lapply(chains, function(ch) ch$fc[, ix[1], ix[2]]), c(H, M),
-      c("horizon", "equation"), "predictive y_{T+s}, one path per stored draw")))
+      c("horizon", "equation"), if (sv_path) paste(
+        "predictive y_{T+s}, one path per stored draw: s = 1 from predict(), s >= 2 by the path",
+        "recursion from bayesianVARs' own draws (E173, Q42)") else
+        "predictive y_{T+s}, one path per stored draw")))
     coords$horizon <- nc_array(seq_len(H), "horizon")
+    if (sv_path) {
+      # predict()'s native predictive, all horizons: evidence only, never compared (E173)
+      ev <- summary_vars("forecast_predict", function(ix) lapply(chains, function(ch)
+        ch$fc_predict[, ix[1], ix[2]]), c(H, M), c("horizon", "equation"), paste(
+          "evidence only, never compared (E173, Q42): predict(..., simulate_predictive = TRUE)'s",
+          "own predictive y_{T+s}, one path per stored draw"))
+      extra <- c(extra, ev$vars)
+      # the path recursion's own s = 1 against predict()'s, a check of the conventions it uses
+      # (both are draws of the same s = 1 predictive)
+      h1 <- parity_compare(lapply(seq_len(M), function(j) list(
+        a = mc_summary(lapply(chains, function(ch) ch$fc_path_h1[, j])),
+        b = mc_summary(lapply(chains, function(ch) ch$fc_predict[, 1L, j])))))
+      note_check(sprintf("%s: forecast s = 1, path recursion vs predict(), max |z| - bound", name),
+                 h1$max_abs_z - h1$bound, 0)
+      fc_attrs <- list(
+        forecast_source = "h1: predict(); h>=2: path recursion from own draws (E173, Q42)",
+        forecast_path_seeds = I(info$attrs$forecast_seeds + BV_PATH_SEED_OFFSET),
+        forecast_h1_check_max_abs_z = h1$max_abs_z, forecast_h1_check_m = h1$m,
+        forecast_h1_check_bound = h1$bound, forecast_h1_check_pass = as.integer(h1$pass))
+      if (H >= 2L) {
+        ev2 <- parity_compare(unlist(lapply(2:H, function(s) lapply(seq_len(M), function(j) list(
+          a = mc_summary(lapply(chains, function(ch) ch$fc[, s, j])),
+          b = mc_summary(lapply(chains, function(ch) ch$fc_predict[, s, j]))))), recursive = FALSE))
+        fc_attrs$forecast_predict_vs_path_max_abs_z <- ev2$max_abs_z
+        fc_attrs$forecast_predict_vs_path_note <- sprintf(paste(
+          "evidence only: predict()'s s >= 2 quantiles against the path recursion's, max |z| %.2f",
+          "over m = %d (Phase 2 bound %.2f)"), ev2$max_abs_z, ev2$m, ev2$bound)
+      }
+    }
   }
-  extra <- list()
   if (info$vol == "sv") {
     sv_names <- c("mu", "phi", "sigma")
     t_sel <- info$t_sel
@@ -3302,7 +3375,7 @@ stage_reduced_fixture <- function(name, chains, info, extra_vars = list(), extra
       sprintf("%s (max R-hat %.4f, min ESS %.0f)", prefix_of(b), rh, es)
   })), hyper_mixing$failed)
   vars <- c(unlist(lapply(covered, `[[`, "vars"), recursive = FALSE), extra, extra_vars)
-  attrs <- c(p3_meta("bayesianVARs", info$kind), info$attrs)
+  attrs <- c(p3_meta("bayesianVARs", info$kind), info$attrs, fc_attrs)
   attrs$mixing_max_rhat <- mix$max_rhat
   attrs$mixing_min_ess <- mix$min_ess
   attrs$mixing_ok <- as.integer(!length(failed))

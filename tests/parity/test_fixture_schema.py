@@ -830,6 +830,26 @@ def test_sv_parameters_are_per_equation(name):
         assert len(np.unique(np.round(mean[k], 12))) == mean.shape[1], params[k]
 
 
+@pytest.mark.parametrize("name", BV_SV_FIXTURES)
+def test_sv_predictive_sources(name):
+    """E173 (Q42): the compared SV predictive (`forecast_*`) is predict()'s at h = 1 and the path
+    recursion from bayesianVARs' own draws at h >= 2; predict()'s native predictive is kept as
+    evidence (`forecast_predict_*`), outside the mixing record and never compared."""
+    ds = fixture(name)
+    a = ds.attrs
+    assert a["forecast_source"] == "h1: predict(); h>=2: path recursion from own draws (E173, Q42)"
+    assert ds["forecast_predict_q"].dims == ds["forecast_q"].dims
+    assert ds["forecast_predict_q"].shape == ds["forecast_q"].shape
+    for suffix in SUMMARY_SUFFIXES:  # h = 1: the same draws in both blocks
+        np.testing.assert_array_equal(
+            ds[f"forecast{suffix}"].values[0], ds[f"forecast_predict{suffix}"].values[0]
+        )
+    assert "forecast_predict" not in [c.strip() for c in a["mixing_covers"].split(",")]
+    assert int(a["forecast_h1_check_pass"]) in (0, 1)
+    assert np.isfinite(float(a["forecast_h1_check_max_abs_z"]))
+    assert np.asarray(a["forecast_path_seeds"]).shape == (4,)
+
+
 @pytest.mark.parametrize("name", GL_RUNS)
 def test_gl_fixture_layout(name):
     """R3–R9: the global-local runs, their hyperparameter draws and the compared extras."""
