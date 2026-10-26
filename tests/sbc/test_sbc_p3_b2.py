@@ -1,12 +1,11 @@
-"""Tier S of Phase 3, weekly shard ``sbc-p3b2``: SBC of the CommonSV rows 320–325, 328, 329
-(docs/phase3/DESIGN.md §9.5, §9.11; WP35).
+"""Tier S of Phase 3, weekly shard ``sbc-p3b2``: SBC of rows 313, 316, 327 (docs/phase3/DESIGN.md
+§9.5, §9.11; WP35).
 
-Rows ``sbc_p3.SBC_ROWS["b2"]``: the conjugate shared-factor path (320 with SOC/SUR rows, 323 its
-weighted twin, 325 the parity options, 329 blocks of 7 dates), structural Mode I (321; × HS: 324)
-and reduced (322; × NG: 328); the lagged rows (320–323, 325, 329) with ``y_{T+1}`` through the
-production forecast core, the truth from the common ``h`` of the ``T + 1`` prior draw
-(``sbc_p3.CommonSVPredictiveJoint``). The P2 §9.6 configuration (``N = 1000, L = 99``;
-``sbc_p3.SBC_CONFIG``); the pilot-IAT tail behind the ESS rule is recorded (``iat_*``,
+Rows ``sbc_p3.SBC_ROWS["b2"]``, a part of the reduced and CommonSV rows (``sbc-p3b`` of §9.11,
+split further: estimated 78 min before the first dispatch, ``sbc_p3.SBC_ESTIMATE_MIN``), at the P2
+§9.6 configuration (``N = 1000, L = 99``; ``sbc_p3.SBC_CONFIG``) with the joint models of
+``sbc_p3.py`` (exogenous rows without a predictive; lagged rows with ``y_{T+1}`` through the
+production forecast core). The pilot-IAT tail behind the ESS rule is recorded (``iat_*``,
 ``ess_fail``).
 """
 

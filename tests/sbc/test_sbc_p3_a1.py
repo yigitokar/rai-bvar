@@ -1,10 +1,11 @@
-"""Tier S of Phase 3, weekly shard ``sbc-p3a1``: SBC of the structural rows 301–308
-(docs/phase3/DESIGN.md §9.5, §9.11; WP35).
+"""Tier S of Phase 3, weekly shard ``sbc-p3a1``: SBC of rows 303, 317 (docs/phase3/DESIGN.md §9.5,
+§9.11; WP35).
 
-Rows ``sbc_p3.SBC_ROWS["a1"]``: the global-local families on the exogenous design: the horseshoe
-with ``Constant("ig")`` (301) and ``SV`` (302), NG (303, 304), R2D2 (305, 306) and DL (307, 308),
-fixed and grid ``a``. The P2 §9.6 configuration (``N = 1000, L = 99``; ``sbc_p3.SBC_CONFIG``); the
-pilot-IAT tail behind the ESS rule is recorded (``iat_*``, ``ess_fail``).
+Rows ``sbc_p3.SBC_ROWS["a1"]``, a part of the structural rows (``sbc-p3a`` of §9.11, split further:
+estimated 80 min before the first dispatch, ``sbc_p3.SBC_ESTIMATE_MIN``), at the P2 §9.6
+configuration (``N = 1000, L = 99``; ``sbc_p3.SBC_CONFIG``) with the joint models of ``sbc_p3.py``
+(exogenous rows without a predictive; lagged rows with ``y_{T+1}`` through the production forecast
+core). The pilot-IAT tail behind the ESS rule is recorded (``iat_*``, ``ess_fail``).
 """
 
 from __future__ import annotations

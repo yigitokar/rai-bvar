@@ -893,9 +893,41 @@ _ALL: tuple[Mutant, ...] = (
            (_u(R320, u_common_core), _g(R320))),
 )  # fmt: skip
 
-#: the statistics of every confirmed check (mutant / control), filled from the runs of
-#: ``test_mutants_p3.py`` (U: error / control error against the tolerance; G: max |z| / control)
-EVIDENCE: dict[str, str] = {m.id: "" for m in _ALL}
+#: The statistics of every confirmed check (mutant / control): U the error of the mutant and of
+#: the control against the check's tolerance; G max |z| (its function) of the mutant / of the
+#: control, at the G-small t_crit. Recorded on 2026-10-26 on an Apple M5 Max (arm64, macOS 26.6,
+#: load average 140–170 from other jobs) at WP35's head; every control passed, every mutant was
+#: caught by every check listed.
+EVIDENCE: dict[str, str] = {
+    "M19": "U 0.209 / 6.1e-15 (tol 1e-08); G row 301 118 (glob.coef.log_tau[0]) / 2.7 (t_crit 4.25)",
+    "M20": "U 0.354 / 1.6e-15 (tol 1e-08); G row 301 85.2 (glob.coef.log_tau[0]) / 2.7 (t_crit 4.25)",
+    "M21": (
+        "U 0.136 / 4.7e-15 (tol 1e-08); G row 303 152 (eq1.coef.small_dev[3]) / 2.32 (t_crit 4.40)"
+    ),
+    "M22": "U 0.465 / 2e-15 (tol 1e-08); G row 326 117 (glob.coef.a_idx[0]) / 1.68 (t_crit 4.41)",
+    "M23": (
+        "U 0.0845 / 3.7e-15 (tol 1e-08); G row 305 39.8 (eq0.coef.log_varrho[1]) / 3.13 (t_crit "
+        "4.40)"
+    ),
+    "M24": (
+        "U 0.131 / 2e-15 (tol 1e-08); G row 307 154 (glob.coef.mean_log_v[1]) / 2.61 (t_crit 4.44)"
+    ),
+    "M25": "U 0.845 / 3e-15 (tol 1e-08); G row 309 946 (glob.coef.N1[1]) / 3.23 (t_crit 4.44)",
+    "M26": "G row 301 41.3 (eq1.coef.atan_dev[2]) / 2.7 (t_crit 4.25)",
+    "M27": "U 0.17 / 1.6e-15 (tol 1e-08); G row 301 32.1 (eq1.coef.log_nu[1]) / 2.7 (t_crit 4.25)",
+    "M28": "U 1.11 / 0 (tol 0); G row 321 11.6 (glob.vol.atan_mean_h) / 1.8 (t_crit 4.24)",
+    "M29": "U 0.563 / 4e-15 (tol 1e-08); G row 321 131 (glob.vol.rho) / 1.8 (t_crit 4.24)",
+    "M30": "U 0.387 / 4.5e-15 (tol 1e-10); G row 321 6.01 (glob.vol.rho^2) / 1.8 (t_crit 4.24)",
+    "M31": "U 1.13 / 2.2e-14 (tol 1e-08); G row 320 136 (log_prior) / 2.56 (t_crit 4.37)",
+    "M32": "U 4.1e+11 / 0.0016 (tol 1); G row 320 5.52 (eq0.mean.delta1) / 2.56 (t_crit 4.37)",
+    "M33": "U 0.439 / 4.3e-16 (tol 1e-10)",
+    "M34": "U 5.6e+29 / 0.0027 (tol 1)",
+    "M35": (
+        "G row 304 10.2 (glob.coef.a*log_xi[0]) / 2.9 (t_crit 4.41); G row 306 11.2 "
+        "(glob.coef.a*log_xi[0]) / 3.24 (t_crit 4.41)"
+    ),
+    "M36": "U 0.541 / 2.2e-14 (tol 1e-08); G row 320 147 (eq2.core.log_lam) / 2.56 (t_crit 4.37)",
+}
 MUTANTS: dict[str, Mutant] = {m.id: dataclasses.replace(m, evidence=EVIDENCE[m.id]) for m in _ALL}
 
 

@@ -18,45 +18,21 @@ The selection is by directory and composition only, from the per-test times of r
 (EPYC 7763, 2 vCPU; up to the timeout) and 40106532730 (EPYC 9V45, 4 vCPU; complete); minutes on
 the 9V45, cold XLA cache:
 
-=====================  =====================================================  =========
-shard                  contents                                               9V45 min
-=====================  =====================================================  =========
-``geweke-structural``  G-full, inexact and G-small rows of structural models  55
-``geweke-other``       reduced and ``zero_sv`` rows, the block configurations 40
-``sbc-structural``     SBC of structural models, the structural-step tier B   43
-``sbc-other``          SBC of the other models, the rest of the block tier    41
-``unit``               ``tests/unit`` (EB convergence: 47 min)                53
-``rest``               analytic, contract, integration, mcmc, mutation,       41
-                       parity, priors, validation
-=====================  =====================================================  =========
+=========================  ============================================================================
+shard                  contents (estimate, min)
+=====================  ============================================================================
+``geweke-p3a1``        G-full of the structural rows 301–308 (≈ 75)
+``geweke-p3a2``        G-full of 309, 310, 317–319, 326, 330; G-small of 401–408 (≈ 80)
+``geweke-p3b1``        G-full of the reduced rows 311–316, 327 (≈ 75)
+``geweke-p3b2``        G-full of the CommonSV rows 320–325, 328, 329 (≈ 85)
+``sbc-p3a1``–``a5``    SBC of the structural rows, 2–4 rows each (51–86)
+``sbc-p3b1``–``b8``    SBC of the reduced and CommonSV rows, 1–3 rows each (36–78);
+                       ``b8`` also the predictive-map checks
+``mutation-p3``        M19–M36: U checks and G-small mutant/control pairs (≈ 40)
+=====================  ============================================================================
 
-The EPYC 7763 takes 2.0–2.9× as long, and a Gandy–Scott rerun (DESIGN §9.5) of an ``outliers_t``
-row adds up to an hour there (the reruns depend on the CPU's rounding).
-
-**Phase 3** (docs/phase3/DESIGN.md §9.11; WP35): shards by file (:data:`P3_SHARDS`), and the Phase
-2 shards of ``tests/geweke`` and ``tests/sbc`` ``--ignore`` every Phase 3 file (their ``-k
-structural`` would otherwise collect rows such as ``structural_constant_hs``); ``rest`` ignores the
-Phase 3 mutation file, which runs as its own shard:
-
-=================  ==============================================================================
-shard              contents
-=================  ==============================================================================
-``geweke-p3a``     G-full of the structural rows without CommonSV (301–310, 317–319, 326, 330)
-``geweke-p3b``     G-full of the reduced (311–316, 327) and CommonSV rows (320–325, 328, 329); the
-                   G-small block configurations 401–408
-``sbc-p3a1``       SBC of the structural rows 301–308
-``sbc-p3a2``       SBC of the structural rows 309, 310, 317–319, 326, 330
-``sbc-p3b1``       SBC of the reduced rows 311–316, 327
-``sbc-p3b2``       SBC of the CommonSV rows 320–325, 328, 329; the predictive-map checks
-``mutation-p3``    M19–M36: their U checks and G-small mutant/control pairs
-=================  ==============================================================================
-
-§9.11 names ``sbc-p3a`` and ``sbc-p3b`` (the Geweke split, by file); each is split once more before
-the first dispatch ("each shard ≤ 200 min on a 2-vCPU EPYC 7763, split further if not"): Phase 2's
-SBC shards ran about 9 rows in 72–79 min on an EPYC 7763 (4 vCPU, run 40140397848), and a Phase 3
-row carries more quantities, the global-local GIG steps or the CommonSV Newton blocks, so 15 rows
-in one shard would be near the 240-min step timeout. The weekly contract tests and the
-ordering-invariance test of conjugate × ``CommonSV`` (row 27) stay in ``rest``.
+The weekly contract tests and the ordering-invariance test of conjugate × ``CommonSV`` (row 27)
+stay in ``rest`` (local: 13 min for the 18 weekly contract compositions).
 """
 
 from __future__ import annotations
@@ -73,16 +49,19 @@ SPLIT = ("tests/geweke", "tests/sbc", "tests/unit")  # the directories with shar
 #: Phase 3 (P3 DESIGN §9.11, WP35): shards by file; the Phase 2 shards of the same directory
 #: ``--ignore`` every Phase 3 file, so ``-k structural`` never reaches them
 P3_SHARDS: dict[str, list[str]] = {
-    "geweke-p3a": ["tests/geweke/test_geweke_p3_full_a.py"],
-    "geweke-p3b": [
-        "tests/geweke/test_geweke_p3_full_b.py",
+    "geweke-p3a1": ["tests/geweke/test_geweke_p3_full_a1.py"],
+    "geweke-p3a2": [
+        "tests/geweke/test_geweke_p3_full_a2.py",
         "tests/geweke/test_geweke_p3_blocks.py",
-        "tests/geweke/test_geweke_p3.py",
     ],
-    "sbc-p3a1": ["tests/sbc/test_sbc_p3_a1.py"],
-    "sbc-p3a2": ["tests/sbc/test_sbc_p3_a2.py"],
-    "sbc-p3b1": ["tests/sbc/test_sbc_p3_b1.py"],
-    "sbc-p3b2": ["tests/sbc/test_sbc_p3_b2.py", "tests/sbc/test_sbc_p3.py"],
+    "geweke-p3b1": ["tests/geweke/test_geweke_p3_full_b1.py", "tests/geweke/test_geweke_p3.py"],
+    "geweke-p3b2": ["tests/geweke/test_geweke_p3_full_b2.py"],
+    **{f"sbc-p3{g}": [f"tests/sbc/test_sbc_p3_{g}.py"] for g in ("a1", "a2", "a3", "a4", "a5")},
+    **{
+        f"sbc-p3{g}": [f"tests/sbc/test_sbc_p3_{g}.py"]
+        for g in ("b1", "b2", "b3", "b4", "b5", "b6", "b7")
+    },
+    "sbc-p3b8": ["tests/sbc/test_sbc_p3_b8.py", "tests/sbc/test_sbc_p3.py"],
     "mutation-p3": ["tests/mutation/test_mutants_p3.py"],
 }
 P3_FILES = tuple(f for args in P3_SHARDS.values() for f in args)

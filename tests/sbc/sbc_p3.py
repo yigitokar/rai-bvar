@@ -60,14 +60,36 @@ SEED = 20261026  # the Phase 2 SBC seed (tests/sbc); the keys fold the CRC-32 of
 SBC_N = int(os.environ.get("RAI_BVAR_SBC_N", "1000"))
 SBC_CONFIG: dict[str, Any] = {"L": 99, "burn": 300, "pilot": 1000, "t_max": 200, "alpha": 1e-2}
 #: P3 §9.11: ``sbc-p3a`` the structural rows, ``sbc-p3b`` the reduced and CommonSV rows (the
-#: Geweke split, by file), each split once more ("split further if not": ≤ 200 min per shard on
-#: a 2-vCPU EPYC 7763; ``tools/weekly_shards.py`` gives the estimate): one file per shard
+#: Geweke split, by file), split further so that every shard stays within 200 min on a 2-vCPU EPYC
+#: 7763 ("split further if not"): one file per group, ``test_sbc_p3_<group>.py``. The groups are
+#: balanced on a pre-dispatch estimate of each row's SBC time (``SBC_ESTIMATE_MIN``; module
+#: docstring), at most about 87 min each.
 SBC_ROWS: dict[str, tuple[int, ...]] = {
-    "a1": (301, 302, 303, 304, 305, 306, 307, 308),  # structural: HS, HS × SV, NG, R2D2, DL
-    "a2": (309, 310, 317, 318, 319, 326, 330),  # structural: SSVS, the HS variants, lagged rows
-    "b1": (311, 312, 313, 314, 315, 316, 327),  # reduced form
-    "b2": (320, 321, 322, 323, 324, 325, 328, 329),  # CommonSV
+    "a1": (317, 303),
+    "a2": (308, 302),
+    "a3": (306, 304, 305),
+    "a4": (326, 319, 318, 309),
+    "a5": (301, 307, 330, 310),
+    "b1": (315, 314),
+    "b2": (313, 316, 327),
+    "b3": (311, 312, 329),
+    "b4": (325,),
+    "b5": (324,),
+    "b6": (320, 321),
+    "b7": (322, 323),
+    "b8": (328,),
 }
+#: The pre-dispatch estimate of each row's SBC time in minutes (Apple M5 Max under a load average
+#: of 140–170, about as fast as the 4-vCPU EPYC 7763 runner on Phase 2's G-full of row 2): the
+#: pilot of 200 replications (burn 300, pilot 1000) gives the pilot IATs, hence the thinning
+#: ``⌈2·IAT⌉ ≤ 200`` and the ten sorted production blocks of 100 replications, at the measured
+#: time of a sweep of 100 replications, plus the compilation; Gandy–Scott reruns are not included.
+SBC_ESTIMATE_MIN: dict[int, float] = {
+    301: 14.7, 302: 27.7, 303: 3.9, 304: 25.3, 305: 8.6, 306: 48.5, 307: 13.2, 308: 56.9,
+    309: 8.8, 310: 9.6, 311: 29.4, 312: 21.4, 313: 31.9, 314: 37.1, 315: 40.9, 316: 32.5,
+    317: 76.1, 318: 23.3, 319: 26.2, 320: 35.6, 321: 33.3, 322: 35.2, 323: 31.5, 324: 67.3,
+    325: 74.4, 326: 27.5, 327: 13.8, 328: 36.2, 329: 25.2, 330: 13.2,
+}  # fmt: skip
 BY_ID: dict[int, str] = {composition_id(n): n for n in COMPOSITIONS_P3}
 
 
@@ -158,6 +180,7 @@ def iat_summary(res: Any, min_ess: float, L: int) -> dict[str, float | int | Non
 __all__ = [
     "BY_ID",
     "SBC_CONFIG",
+    "SBC_ESTIMATE_MIN",
     "SBC_N",
     "SBC_ROWS",
     "SEED",

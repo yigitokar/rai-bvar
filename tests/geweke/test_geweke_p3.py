@@ -8,9 +8,10 @@ Test                          Rows                                              
                               M₁ = 2·10⁵, α = 1e-3``
 ``test_g_full`` (rows)        301–330, ``size="full"``; ``C = 4000,             weekly
                               M_c = 500, M₁ = 10⁶, α = 1e-2``                   (``slow``)
-                              (``test_geweke_p3_full_a.py``: the structural
-                              rows; ``…_full_b.py``: the reduced and CommonSV
-                              rows; one shard each, P3 §9.11)
+                              (``test_geweke_p3_full_a1.py``, ``…_a2.py``:
+                              the structural rows; ``…_b1.py``, ``…_b2.py``:
+                              the reduced and CommonSV rows; one shard each,
+                              P3 §9.11)
 ``test_g_small_block``        401–408 (``test_geweke_p3_blocks.py``)            weekly
 ============================  ================================================  ==============
 
@@ -29,8 +30,7 @@ import pytest
 from geweke_p3 import (
     BLOCK_IDS,
     BY_ID,
-    FULL_ROWS_A,
-    FULL_ROWS_B,
+    FULL_ROWS,
     G_SMALL,
     PR_ROWS_P3,
     ROW_IDS,
@@ -59,16 +59,15 @@ def test_registry_is_the_design_table():
     the TruncatedNormal-ρ rows."""
     assert [composition_id(n) for n in COMPOSITIONS_P3] == list(ROW_IDS)
     assert [composition_id(n) for n in BLOCK_CONFIGS_P3] == list(BLOCK_IDS)
-    assert sorted(FULL_ROWS_A + FULL_ROWS_B) == list(ROW_IDS)
-    assert not set(FULL_ROWS_A) & set(FULL_ROWS_B)
+    assert sorted(r for rows in FULL_ROWS.values() for r in rows) == list(ROW_IDS)  # once each
     assert PR_COMPOSITIONS_P3 == (
         "structural_constant_hs", "reduced_sv_hs_global", "conjugate_commonsv_dummies",
         "structural_commonsv",
     )  # fmt: skip
-    for r in FULL_ROWS_A:  # geweke-p3a: the structural rows without CommonSV
+    for r in FULL_ROWS["a1"] + FULL_ROWS["a2"]:  # geweke-p3a*: structural rows without CommonSV
         st = p3_spec(BY_ID[r]).static
         assert st.mean.kind == "linear_structural" and not st.vol.common, r
-    for r in FULL_ROWS_B:  # geweke-p3b: the reduced rows and the CommonSV rows
+    for r in FULL_ROWS["b1"] + FULL_ROWS["b2"]:  # geweke-p3b*: the reduced and CommonSV rows
         st = p3_spec(BY_ID[r]).static
         assert st.mean.kind == "linear_reduced" or st.vol.common, r
     s320 = p3_spec(BY_ID[320]).static

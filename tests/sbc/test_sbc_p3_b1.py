@@ -1,10 +1,11 @@
-"""Tier S of Phase 3, weekly shard ``sbc-p3b1``: SBC of the reduced-form rows 311–316, 327
-(docs/phase3/DESIGN.md §9.5, §9.11; WP35).
+"""Tier S of Phase 3, weekly shard ``sbc-p3b1``: SBC of rows 314, 315 (docs/phase3/DESIGN.md §9.5,
+§9.11; WP35).
 
-Rows ``sbc_p3.SBC_ROWS["b1"]``: reduced × ``SV`` with every family (311–315, global groups), the
-lagged 316 (NG, tight scales; ``y_{T+1}`` and ``h_{T+1}`` through the production forecast core) and
-reduced × ``Constant("ig")`` × HS (327). The P2 §9.6 configuration (``N = 1000, L = 99``;
-``sbc_p3.SBC_CONFIG``); the pilot-IAT tail behind the ESS rule is recorded (``iat_*``,
+Rows ``sbc_p3.SBC_ROWS["b1"]``, a part of the reduced and CommonSV rows (``sbc-p3b`` of §9.11,
+split further: estimated 78 min before the first dispatch, ``sbc_p3.SBC_ESTIMATE_MIN``), at the P2
+§9.6 configuration (``N = 1000, L = 99``; ``sbc_p3.SBC_CONFIG``) with the joint models of
+``sbc_p3.py`` (exogenous rows without a predictive; lagged rows with ``y_{T+1}`` through the
+production forecast core). The pilot-IAT tail behind the ESS rule is recorded (``iat_*``,
 ``ess_fail``).
 """
 

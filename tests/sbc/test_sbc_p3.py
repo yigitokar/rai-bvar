@@ -1,8 +1,9 @@
 """Tier S of Phase 3: the joint models' checks (docs/phase3/DESIGN.md §9.5; WP35).
 
-The SBC runs themselves are weekly, one shard file each (P3 §9.11): ``test_sbc_p3_a1.py`` and
-``…_a2.py`` (the structural rows, ``sbc-p3a1``, ``sbc-p3a2``), ``…_b1.py`` (the reduced rows) and
-``…_b2.py`` (the CommonSV rows); the joint models are ``sbc_p3.py``'s. Here:
+The SBC runs themselves are weekly, one shard file per row group (P3 §9.11: ``sbc-p3a`` the
+structural rows, ``sbc-p3b`` the reduced and CommonSV rows, each split further:
+``test_sbc_p3_a1.py`` … ``…_a5.py``, ``…_b1.py`` … ``…_b8.py``; ``sbc_p3.SBC_ROWS``); the joint
+models are ``sbc_p3.py``'s. Here:
 
 * ``test_quantity_selection_p3`` (PR): every row has a joint model of the right kind (exogenous:
   the row itself, no predictive; lagged: ``y_{T+1}``, and ``h_{T+1}`` with SV); the quantities are

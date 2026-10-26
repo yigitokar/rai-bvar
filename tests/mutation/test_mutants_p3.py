@@ -43,7 +43,7 @@ def test_registry_p3():
     assert list(MUTANTS) == [f"M{i}" for i in range(19, 37)]
     for m in MUTANTS.values():
         assert m.checks, f"{m.id} is caught by no tier"
-        assert m.title and m.injected and m.design, m.id
+        assert m.title and m.injected and m.design and m.evidence, m.id
         assert set(m.internals) <= INTERNALS, m.id
         assert m.injected.split()[0] in (*m.internals, "_update"), m.id
         for c in m.checks:

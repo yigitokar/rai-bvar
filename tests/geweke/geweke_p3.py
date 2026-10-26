@@ -62,9 +62,14 @@ ROW_IDS = tuple(range(301, 331))
 BLOCK_IDS = tuple(range(401, 409))
 BY_ID: dict[int, str] = {composition_id(n): n for n in (*COMPOSITIONS_P3, *BLOCK_CONFIGS_P3)}
 #: the G-full rows of each weekly shard file (P3 §9.11: ``geweke-p3a`` the structural rows,
-#: ``geweke-p3b`` the reduced and CommonSV rows; ``tools/weekly_shards.py``)
-FULL_ROWS_A = (301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 317, 318, 319, 326, 330)
-FULL_ROWS_B = (311, 312, 313, 314, 315, 316, 327, 320, 321, 322, 323, 324, 325, 328, 329)
+#: ``geweke-p3b`` the reduced and CommonSV rows, each split once more to stay within 200 min on a
+#: 2-vCPU EPYC 7763; ``tools/weekly_shards.py``)
+FULL_ROWS: dict[str, tuple[int, ...]] = {
+    "a1": (301, 302, 303, 304, 305, 306, 307, 308),  # structural: HS, HS × SV, NG, R2D2, DL
+    "a2": (309, 310, 317, 318, 319, 326, 330),  # structural: SSVS, the HS variants, lagged rows
+    "b1": (311, 312, 313, 314, 315, 316, 327),  # reduced form
+    "b2": (320, 321, 322, 323, 324, 325, 328, 329),  # CommonSV
+}
 
 #: E170(c): the functions with no power under the TruncatedNormal ρ prior (SBC-only there)
 _NO_POWER_TN = re.compile(r"^(joint\.W|eq\d+\.joint\.rss_std)$")
@@ -156,6 +161,7 @@ def emit(kind: str, tier: str, out: dict[str, Any], record_property: Any) -> Non
 __all__ = [
     "BLOCK_IDS",
     "BY_ID",
+    "FULL_ROWS",
     "G_FULL",
     "G_SMALL",
     "PR_ROWS_P3",
