@@ -408,11 +408,21 @@ def test_compose_collects_the_volatility_blocks_global_steps():
 
 
 def test_compose_refuses_common_volatility_without_its_step():  # P3 E149
-    with pytest.raises(NotImplementedError, match="G_COMMON_SV"):
-        compose_mod.compose(make(vol=COMMON))
+    # WP32 amendment: the production volatility block now brings CommonSVStep, so the guard is
+    # exercised with a block that brings no step (as every block did before WP32)
     st = make(vol=COMMON)
+    assert any(g.block == Block.G_COMMON_SV for g in compose_mod.compose(st).global_post)
     base_static = make(vol=VolStatic("constant"))
     base = compose_mod.compose(base_static)
+    fields = {f.name: getattr(base.vol, f.name) for f in dataclasses.fields(base.vol)}
+    fields.update(static=COMMON, core=None, transitory=None)  # rebuilt for the common static
+
+    class WithoutGlobal(type(base.vol)):
+        def global_steps(self):
+            return ()
+
+    with pytest.raises(NotImplementedError, match="G_COMMON_SV"):
+        compose_mod.compose(st, overrides={"vol": WithoutGlobal(**fields)})
     step = _ToyCommonStep()
 
     class WithGlobal(type(base.vol)):
