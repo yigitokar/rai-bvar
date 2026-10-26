@@ -301,34 +301,38 @@ package source (none was needed: every package came as a binary).
 
 **Rules first.** The decision rule of every probe was fixed before any comparison on the rai-bvar
 side, after discovery runs of the R side only (their run ids and what they changed are in the WP29
-PR); the rules are implemented at commit `1c2fb9d` and carried into the design by the errata PR
-(E117+). A probe that cannot be decided is recorded as `unresolved` with its evidence, and the
-runs that depend on it are **not met** (D-59). P8 and P16 need rai-bvar-side code that does not
-exist yet (WP30, WP38): their R data are committed and their status is `pending`.
+PR) and carried into the design by the errata PR (E117+). A probe that cannot be decided is
+recorded as `unresolved` with its evidence, and the runs that depend on it are **not met**
+(D-59). P8 and P16 need rai-bvar-side code that does not exist yet (WP30, WP38): their R data are
+committed and their status is `pending`.
 
 The rules themselves are in `docs/phase3/DESIGN.md` §9.8 as amended by the errata PR #16
-(Amendment 1, commit `224fb86`, E117–E147), pinned to `tools/make_r_fixtures.R` at `7f4e570`;
-that PR is not merged yet. If the owner's review of it changes a rule, the affected probes are
-rerun and this section is updated. Here each probe's outcome under its rule is recorded, from the
-final run of the job.
+(Amendment 1; §9.8 at commit `d427f6e`, which pins them to `tools/make_r_fixtures.R` at
+`d281276`); that PR is not merged yet, and merging it is the owner's decision. If the owner's
+review of it changes a rule, the affected probes are rerun and this section is updated. Here each
+probe's outcome under its rule is recorded, from the final run of the job.
 
-The fixtures and every number below are from the final run of the job, **run 40234562983**
-(commit `83c13b4`; `tools/make_r_fixtures.R` identical to `7f4e570`), downloaded with
-`gh run download` and committed unchanged. The job ended with exit status 1 for one recorded
-reason: the hard mixing check of `wbvars_ncsv` (§7.3); every fixture was staged and packed.
+The fixtures and every number below are from the final run of the job at that pin, **run
+40243289623** (commit `d281276`), downloaded with `gh run download` and committed unchanged. It
+replaces the fixtures of the first final run (40234562983, at `83c13b4`), as PR #16 §9.8 states
+(commit `982a5e3`). Every probe's status and answer, and the gating comparison, are the same in
+both runs; the WP29 PR lists the comparison and the numbers that differ. The job ended with exit
+status 1 for three recorded reasons, the hard mixing checks of the bvars parity runs (§7.3):
+split R-hat − 1 of `wbvars_csv` (0.0125) and of `wbvars_ncsv` (0.0278), each above 0.01, and the
+minimum ESS of `wbvars_ncsv` (198, below 400). Every fixture was staged and packed.
 
 ### 7.1 bayesianVARs 0.1.8: probes P1–P10
 
 | probe | question | outcome under its rule | status |
 | :--- | :--- | :--- | :--- |
 | P1 | `normal_sds`, `cholesky_normal_sds`: variance or s.d.; fill order | both are **prior standard deviations** (the manual calls `cholesky_normal_sds` variances); `normal_sds` fills **column-major** over (PHI lag rows × equations). Slot numbers as s.d. 0.99, 1.99, 2.97, 4.01 (as variance 0.001–0.016); free-U posterior variance 1.0e-6; `V_prior` = (1e-6, 4e-6, 9e-6, 1.6e-5) and 1e6 for the intercept | answered |
-| P2 | U vs U⁻¹, layout, sign | U is the **vector of its free elements** (names `yi~yj`: (2,1), (3,1), (3,2), …), **A = t(U)** (A u_t = e_t): (a) relative error of Σ_t against `vcov()` 4.4e-16 for this reading (and its identical lower-row-major twin), ≥ 0.74 for every other; (b) `probe_corr3`: 0.001 for A = U′ against 1.51 for 2I − U′ and (U′)⁻¹; (c) corr(u1, u2) = 0.806 by `vcov()` and by the mapping | answered |
+| P2 | U vs U⁻¹, layout, sign | U is the **vector of its free elements** (names `yi~yj`: (2,1), (3,1), (3,2), …), **A = t(U)** (A u_t = e_t): (a) relative error of Σ_t against `vcov()` 1.6e-16 for this reading (and its identical lower-row-major twin), ≥ 0.39 for every other; (b) `probe_corr3`: 0.001 for A = U′ against 1.51 for 2I − U′ and (U′)⁻¹; (c) corr(u1, u2) = 0.806 by `vcov()` and by the mapping | answered |
 | P3 | intercept row, lag order | PHI row r is X column r; the **intercept is the last row**; the lag rows follow rai-bvar's order (lag 1 of y1..yM, …); OLS check 0.015 (probe_corr) and 0.0035 (var_sv_n3), limit 0.05 | answered |
 | P4 | `sv_para` layout | (parameter, equation, draw), equations in data order: slice 1 = μ, 2 = φ, 3 = **σ (the s.d.)**, **no h_0 slice**; 1 of 12 (orientation, permutation) pairs satisfies the rule | answered |
 | P5 | `cholesky_priorhomoscedastic` | column 2 is the **inverse-gamma scale** (posterior mean λ = 2.01 against 100/49 = 2.04); the NA default substitutes `cbind(0.01, 0.01)` (the prior object's field) | answered |
-| P6 | internal standardisation | **none**: the scaled fit matches the image of the raw-unit-prior fit (max \|z\| 2.81, bound 4.00) and neither the equivariant image (956) nor the unchanged fit (620); both sides use the data as committed and the SWA fixtures stand | answered |
+| P6 | internal standardisation | **none**: the scaled fit matches the image of the raw-unit-prior fit (max \|z\| 2.91, bound 4.00) and neither the equivariant image (956) nor the unchanged fit (604); both sides use the data as committed and the SWA fixtures stand | answered |
 | P7 | grouping matrices | the field `general_settings$i_mat` holds the group ids; global (1 group), equation-wise (3), covariate-wise (6), olcl-lagwise (4 at p = 2) all **equal D-38** as partitions (`probe_bayesianvars_p3.nc` `p7_groups`) | answered |
-| P8 | meaning of the GL hyperparameters | data committed (`probe_bvars_p8_*.nc`, all mixed: R-hat ≤ 1.001, ESS ≥ 7,334); the decision is WP30's | pending |
+| P8 | meaning of the GL hyperparameters | data committed (`probe_bvars_p8_*.nc`, all mixed: max R-hat 1.001, min ESS 7,074); the decision is WP30's | pending |
 | P9 | SSVS semi-automatic τ | **differs from D-44** and from every variant tried (τ₀/(c₀ ŝ) ranges 7.4–24 across coefficients); the runs use `SSVS_semiautomatic = FALSE` with explicit τ (R7) | answered |
 | P10 | intercept, `prior_intercept`, floors | `prior_intercept` is an **s.d.** (max \|z\| 1.95 against N(0, s²), 5,421 against the variance reading); the intercept is **outside the shrinkage** (HS: 1.38); **every tolerance accepts 0** (no draw at a floor in any family; in every parity run `floor_fraction_phi = floor_fraction_u = 0`) | answered |
 
@@ -345,21 +349,23 @@ of Π, A, h_t (t ≥ 1), μ, φ, σ or λ and the 1–4-step predictive):
 
 | run | fixture | mixing (max R-hat / min ESS over the compared summaries) |
 | :--- | :--- | :--- |
-| R1 | `bvars_bayesianvars_n3p2_sv`, `bvars_bayesianvars_n7p4_sv` | 1.001 / 4,538; 1.000 / 16,175 |
+| R1 | `bvars_bayesianvars_n3p2_sv`, `bvars_bayesianvars_n7p4_sv` | 1.001 / 4,631; 1.000 / 15,808 |
 | R2 | `bvars_bayesianvars_n3p2_const` | 1.000 / 155,657 |
-| R3 HS | `bvars_gl_r3_hs_global_n{3,7}p2` | 1.001 / 4,564; 1.000 / 15,260 |
-| R4 NG (0.1, 1, 1) | `bvars_gl_r4_ng_global_n{3,7}p2` | 1.002 / 4,484; 1.001 / 5,907 |
-| R5 R2D2 (0.1, 0.5) | `bvars_gl_r5_r2d2_global_n{3,7}p2` | 1.001 / 4,586; 1.001 / 5,710 |
-| R6 DL (0.5) | `bvars_gl_r6_dl_global_n{3,7}p2` | 1.001 / 4,715; 1.000 / 16,431 |
-| R7 SSVS (0.01, 1, fixed p = 0.5) | `bvars_gl_r7_ssvs_global_n{3,7}p2` | 1.001 / 4,364; 1.003 / 2,767 |
-| R8 HS olcl-lagwise | `bvars_gl_r8_hs_olcl_n7p4` | 1.003 / 2,569 |
-| R9 NG, grid on a | `bvars_gl_r9_nggrid_global_n7p2` | 1.002 / 1,806 |
+| R3 HS | `bvars_gl_r3_hs_global_n{3,7}p2` | 1.001 / 4,849; 1.000 / 14,567 |
+| R4 NG (0.1, 1, 1) | `bvars_gl_r4_ng_global_n{3,7}p2` | 1.001 / 4,816; 1.001 / 5,419 |
+| R5 R2D2 (0.1, 0.5) | `bvars_gl_r5_r2d2_global_n{3,7}p2` | 1.001 / 4,595; 1.001 / 5,753 |
+| R6 DL (0.5) | `bvars_gl_r6_dl_global_n{3,7}p2` | 1.001 / 4,638; 1.001 / 16,065 |
+| R7 SSVS (0.01, 1, fixed p = 0.5) | `bvars_gl_r7_ssvs_global_n{3,7}p2` | 1.001 / 4,601; 1.002 / 2,554 |
+| R8 HS olcl-lagwise | `bvars_gl_r8_hs_olcl_n7p4` | 1.001 / 2,696 |
+| R9 NG, grid on a | `bvars_gl_r9_nggrid_global_n7p2` | 1.003 / 1,694 |
 
 The GL fixtures also hold:
 - the thinned draws of every `phi_hyperparameter` column (`hyper_draws`, 500 per run);
 - summaries of the global scales (`hypersel`: HS ζ_g, NG and R2D2 ξ_g);
 - the SSVS inclusion probabilities (`incl_prob`, all lags·M² indicators, MCSE sd/√ESS);
-- R9's posterior of a on its grid (`grid_prob`: 0.9915 at a = 0.05, 0.0085 at 0.1).
+- for R9, a's draws on its grid: in this run a stayed at 0.05 in all 4 × 50,000 draws, so a1 is
+  recorded as constant (`hyper_columns`: "a1: constant") and the fixture has no `grid_prob`; in the
+  first final run it was 0.9915 at 0.05 and 0.0085 at 0.1 (binomial MCSE 0.0059).
 
 R7 uses c1 = 1 (raw s.d.), not bayesianVARs' default 100, which mixed badly with
 `semiautomatic = FALSE` in a discovery run. That choice was made before any comparison.
@@ -374,10 +380,10 @@ FEDFUNDS, 1960Q2–2019Q4), p = 4. On the levels data bvars' ncSV sampler stoppe
 | :--- | :--- | :--- | :--- |
 | P11 | defaults | recorded as data (`p11_*` variables): A0 = 1 on the own first lags, S0 = I₃, ν₀ = 6, Ψ, Γ (K × K), λ = 4, sv_a = 1, sv_s = 0.1; starting values ρ = 0.5, ω = 0.1, σ_v² = 0.01, σ_ω² = 1, s_ = 0.05, h a T-vector, V the Minnesota V (K × K) | answered |
 | P12 | can V be held fixed? | **holds, trivially**: the V draws equal the starting value exactly (sd 0) under every concentrated matrix-GIG setting and under the default prior; a starting V of 2Ω stays at 2Ω, so bvars 1.1 never moves V. The runs keep the default starting V and record it (`V_mean`, `V_sd` = 0) | answered |
-| P13 | E h = 0, initial condition | **undecided**: h has T entries (no h_0 state); the scale experiment passes for ncSV (max \|z\| 2.25) but **fails for cSV** (8.93, bound 4.08); cSV's ρ conditional fits ρ ~ U(−1, 1) with **h_0 = 0** (PIT p = 0.058; stationary p = 3e-62; flat rejected: 0 draws outside (−1, 1) against 25,552 expected); for ncSV no candidate fits (below) | unresolved |
-| P14 | ρ, ω / σ_ω² priors; fixing σ_ω² | **undecided**: cSV ρ ~ U(−1, 1); **ncSV ρ is not confined to (−1, 1)** (0.93% of draws with \|ρ\| > 1, 0.15% > 10, max 1.7e5), yet a flat prior predicts far more draws outside (25,495 expected, 371 observed), so no candidate fits; ncSV σ_ω² \| ω, s_ fits σ_ω² ~ G(sv_a, scale s_) with s_ a sampled state (p = 0.057); cSV σ_v²'s prior matches none of the candidates; no setting fixes the variance that drives h: for ncSV σ_ω² keeps CV 0.021 and 0.195, and three settings stopped with a GIG parameter error; for cSV σ_v² keeps CV > 1 in every setting, although cSV's σ_ω² reaches CV 2e-4 at sv_a × 1e8 | unresolved |
+| P13 | E h = 0, initial condition | **undecided**: h has T entries (no h_0 state); the scale experiment passes for ncSV (max \|z\| 2.52) but **fails for cSV** (10.46, bound 4.08); cSV's ρ conditional fits ρ ~ U(−1, 1) with **h_0 = 0** (PIT p = 0.058; stationary p = 3e-62; flat rejected: 0 draws outside (−1, 1) against 25,552 expected); for ncSV no candidate fits (below) | unresolved |
+| P14 | ρ, ω / σ_ω² priors; fixing σ_ω² | **undecided**: cSV ρ ~ U(−1, 1); **ncSV ρ is not confined to (−1, 1)** (0.87% of draws with \|ρ\| > 1, 0.15% > 10, max 4,661), yet a flat prior predicts far more draws outside (25,361 expected, 349 observed), so no candidate fits; ncSV σ_ω² \| ω, s_ fits σ_ω² ~ G(sv_a, scale s_) with s_ a sampled state (p = 0.655); cSV σ_v²'s prior matches none of the candidates; no setting fixes the variance that drives h: for ncSV σ_ω² keeps CV 0.015 and 0.195, and three settings stopped with a GIG parameter error; for cSV σ_v² keeps CV > 1 in every setting that ran (sv_a × 1e6, sv_s × 1e6 stopped with an `iwishrnd` error), although cSV's σ_ω² reaches CV 2e-4 at sv_a × 1e8 | unresolved |
 | P15 | Σ, prior mean, intercept | Σ is the **error covariance** (posterior mean within 1.0% of the residual covariance); stationary = FALSE gives A0 = 1 on every own first lag, TRUE gives 0; the **intercept is the last row of X** (column K of A; posterior mean (3.72, −3.05) on probe_corr) | answered |
-| P16 | is bvars' h sampler exact? | data committed (`probe_wbvars_p16.nc`): 4 runs × 10,000 chained `estimate(post, S = 2)` calls per volatility (bvars refuses S = 1), h_1, h_2, ρ, ω, σ_v², σ_ω², s_ and S after each; the extraction check passes (max \|z\| 2.74 cSV, 3.34 ncSV, bound 4.08); the decision is WP38's, which must first establish that the T = 2 posterior is proper under ncSV's untruncated ρ | pending |
+| P16 | is bvars' h sampler exact? | data committed (`probe_wbvars_p16.nc`): 4 runs × 10,000 chained `estimate(post, S = 2)` calls per volatility (bvars refuses S = 1), h_1, h_2, ρ, ω, σ_v², σ_ω², s_ and S after each; the extraction check passes (max \|z\| 2.74 cSV, 3.02 ncSV, bound 4.08); the decision is WP38's, which must first establish that the T = 2 posterior is proper under ncSV's untruncated ρ | pending |
 
 **Gating comparison** (§9.8, per volatility): both cSV and ncSV take **branch 2**. P12 holds and P15
 is decided, but P13 and P14 do not map bvars' SV prior onto a CommonSV option. The initial
@@ -393,12 +399,14 @@ owner's answer to Q35 (review M6's recommended reading: evidence, not an equalit
   the 1–4-step predictive;
 - the prior arrays: B0, S0, ν₀, V (`V_mean`, `V_sd`);
 - from 4 separate state runs (1,000 chained calls of S = 50 each), h_t at t_sel and the SV
-  states, with a check that their B and Σ agree with the main runs (max |z| 2.55 and 2.65, pass).
+  states, with a check that their B and Σ agree with the main runs (max |z| 2.09 cSV and 2.96 ncSV, pass).
 
-Mixing: `wbvars_csv` 1.005 / 484 (Σ). **`wbvars_ncsv` does not meet the mixing requirement**:
-Σ has max split R-hat 1.013 and min ESS 190. The draw counts are the design's, and the fixture
-records `mixing_ok = 0`. A comparison that needs Σ of ncSV is not met at these draw counts
-(D-59). B (7,405) and the predictive (196,375) mix.
+Mixing: **neither run meets the mixing requirement in Σ** (split R-hat − 1 ≤ 0.01 and ESS ≥ 400).
+In `wbvars_csv` Σ has max split R-hat 1.013 (min ESS 570); in `wbvars_ncsv` it has 1.028 and
+min ESS 198. The draw counts are the design's, and both fixtures record `mixing_ok = 0`. A
+comparison that needs Σ is not met at these draw counts (D-59). B (min ESS 11,765 cSV, 6,244
+ncSV) and the predictive (163,760; 198,170) mix. In the first final run `wbvars_csv` met the
+requirement (1.005 / 484) and `wbvars_ncsv` did not (1.013 / 190).
 
 ### 7.4 stochvol 3.2.9: the SV-t row
 
