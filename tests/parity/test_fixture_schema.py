@@ -124,8 +124,13 @@ def summary_prefixes(ds) -> set[str]:
 # ------------------------------------------------------------------------------------------------
 
 
+# Datasets written by other generators: the exact CommonSV oracle's C2 data (Phase 3 DESIGN §9.8,
+# tools/make_commonsv_oracle.py; checked in tests/parity/oracles/test_commonsv_exact.py).
+OTHER_DATA = {"commonsv_n3.csv"}
+
+
 def test_data_files_match_the_generator_registry():
-    expected = {ds.file for ds in generator().DATASETS.values()}
+    expected = {ds.file for ds in generator().DATASETS.values()} | OTHER_DATA
     assert {p.name for p in DATA.glob("*.csv")} == expected
 
 
