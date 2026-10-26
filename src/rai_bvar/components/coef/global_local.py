@@ -127,7 +127,6 @@ __all__ = [
 
 LOG2 = math.log(2.0)
 _LOG_2PI = math.log(2.0 * math.pi)
-_LGAMMA_HALF = float(gammaln(0.5))
 INIT_LOG_VAR = math.log(0.04)  # λ² at λ = 0.2: the Mode I own-lag-1 variance in units of r_j
 INIT_A = 0.1  # a_g starts at the grid point nearest this value (P3 §3.7)
 INIT_JITTER_SD = 0.5  # per-chain N(0, 0.5²) jitter of every group log scale
@@ -346,17 +345,19 @@ def gl_a_conditional(
     glob: PyTree,
     info: GroupInfo,
     gl: Any,
-) -> tuple[Array, Array | None]:
+) -> tuple[Array, Array | None, Array]:
     """The collapsed hyper block (P3 §3.2): ``a_g`` from its ``ξ``-marginal (one inverse-CDF
-    categorical on :func:`a_log_weights`, key ``keys_a[g]``) and **then** ``log ξ_g | a_g`` from
-    :func:`xi_params` (key ``keys_xi[g]``; NG, R2D2); DL draws ``a_g | θ̃`` only (``None``).
-    Returns ``(a_idx, log_xi)``. Overridable (mutants M22, M35)."""
+    categorical on the log weights of :func:`a_log_weights`, key ``keys_a[g]``) and **then**
+    ``log ξ_g | a_g`` from :func:`xi_params` (key ``keys_xi[g]``; NG, R2D2); DL draws ``a_g | θ̃``
+    only (``None``). Returns ``(a_idx, log_xi, log_weights)``: the draws and the conditional's
+    categorical log weights (``G × A``; DESIGN §3.1 rule 3: the conditional is exposed).
+    Overridable as one block, so a mutant can change the weights (M22) or the order (M35)."""
     logw = a_log_weights(family, loc, info, gl)
     a_idx = jax.vmap(R.categorical)(keys_a, logw).astype(jnp.int32)
     if family not in _HAS_XI:
-        return a_idx, None
+        return a_idx, None, logw
     p = xi_params(family, jnp.take(gl.a_support, a_idx), loc, info, gl)
-    return a_idx, _gamma(keys_xi, p)
+    return a_idx, _gamma(keys_xi, p), logw
 
 
 def ssvs_logodds(
@@ -576,7 +577,7 @@ class GLScaleStep(KernelBase):
                 loc = dataclasses.replace(loc, **{leaf[second]: x})
                 oks += [ok2, _finite_on(x, on)]
             if info.a_grid:
-                a_idx, log_xi = self.impl("gl_a_conditional")(
+                a_idx, log_xi, _ = self.impl("gl_a_conditional")(
                     fam, _group_keys(key, Sub.GL_A, G), _group_keys(key, Sub.GL_GROUP, G),
                     loc, glob, info, gl,
                 )  # fmt: skip

@@ -111,8 +111,10 @@ def spec_of(case: str, size: str = "full"):
 
 
 def step_of(spec) -> GLK.GLScaleStep:
+    """The production scale step of ``spec``; the tests read its conditionals through the
+    overridable internals (``impl``), so a mutant injected there (P3 §9.6) reaches them."""
     form = "reduced" if spec.static.mean.kind == "linear_reduced" else "structural"
-    return GLK.GLScaleStep(spec.static.coef, form=form)
+    return GLK.GLScaleStep(spec.static.coef, form=form, overrides=spec.overrides)
 
 
 def draw_state(spec, rep: int):
@@ -349,7 +351,7 @@ def test_density_ratio_local_lines(case, line):
             grp = {"log_zeta": bcast(glob.log_zeta, info), "log_tau": bcast(glob.log_tau, info)}
         elif fam in ("normal_gamma", "r2d2"):
             grp["log_xi"] = bcast(glob.log_xi, info)
-        p = GLK.gl_local_conditional(fam, line, ell, log_r, loc, grp, gl)
+        p = step_of(spec).impl("gl_local_conditional")(fam, line, ell, log_r, loc, grp, gl)
         leaf = _LEAF[line]
         x0 = np.asarray(getattr(loc, leaf))
         x1 = perturb(rng, x0, on)
@@ -387,7 +389,9 @@ def test_density_ratio_group_lines(case, line):
     for rep in range(N_STATES):
         st, data = draw_state(spec, rep)
         info, _on, ell, log_r, gl = views(spec, st)
-        p = GLK.gl_group_conditional(fam, line, ell, log_r, st.eq.coef, st.glob.coef, info, gl)
+        p = step_of(spec).impl("gl_group_conditional")(
+            fam, line, ell, log_r, st.eq.coef, st.glob.coef, info, gl
+        )
         x0 = np.asarray(getattr(st.glob.coef, leaf))
         x1 = x0 + 0.4 * rng.standard_normal(x0.shape)
 
@@ -420,7 +424,12 @@ def test_density_ratio_collapsed_a_xi_block(case):
         st, data = draw_state(spec, rep)
         info, _on, _ell, _log_r, gl = views(spec, st)
         loc, glob = st.eq.coef, st.glob.coef
-        logits = np.asarray(GLK.a_log_weights(fam, loc, info, gl))
+        G = info.G
+        _, _, logits = step_of(spec).impl("gl_a_conditional")(
+            fam, GLK._group_keys(KEY, Sub.GL_A, G), GLK._group_keys(KEY, Sub.GL_GROUP, G), loc,
+            glob, info, gl,
+        )  # fmt: skip
+        logits = np.asarray(logits)
         logp = logits - jax.scipy.special.logsumexp(logits, axis=1, keepdims=True)
         sup = np.asarray(gl.a_support)
         idx0, xi0 = np.asarray(glob.a_idx), np.asarray(glob.log_xi)
@@ -460,15 +469,16 @@ def test_density_ratio_dl_block_and_a():
         info, on, ell, log_r, gl = views(spec, st)
         loc, glob = st.eq.coef, st.glob.coef
         grp = {"a": bcast(a_of(glob, gl, info), info)}
-        pt = GLK.gl_local_conditional(fam, "theta", ell, log_r, loc, grp, gl)
+        local = step_of(spec).impl("gl_local_conditional")
+        pt = local(fam, "theta", ell, log_r, loc, grp, gl)
         th0, vr0 = np.asarray(loc.log_theta), np.asarray(loc.log_varrho)
         th1, vr1 = perturb(rng, th0, on), perturb(rng, vr0, on)
 
-        def log_q(x, pt=pt, ell=ell, log_r=log_r, loc=loc, grp=grp, gl=gl, on=on):
+        def log_q(x, pt=pt, ell=ell, log_r=log_r, loc=loc, grp=grp, gl=gl, on=on, local=local):
             th, vr = x
             lq = log_gig_kernel(np.exp(th[on]), np.asarray(pt.lam)[on], 1.0,
                                 np.exp(np.asarray(pt.log_chi)[on]))  # fmt: skip
-            pv = GLK.gl_local_conditional(
+            pv = local(
                 fam, "varrho", ell, log_r, dataclasses.replace(loc, log_theta=jnp.asarray(th)),
                 grp, gl,
             )  # fmt: skip
@@ -483,7 +493,12 @@ def test_density_ratio_dl_block_and_a():
             return float(spec.log_joint(with_coef(st, loc=loc), data))
 
         worst["block"] = check_ratio(log_q, joint, (th0, vr0), (th1, vr1), worst["block"])
-        logits = np.asarray(GLK.a_log_weights(fam, loc, info, gl))
+        G = info.G
+        _, _, logits = step_of(spec).impl("gl_a_conditional")(
+            fam, GLK._group_keys(KEY, Sub.GL_A, G), GLK._group_keys(KEY, Sub.GL_GROUP, G), loc,
+            glob, info, gl,
+        )  # fmt: skip
+        logits = np.asarray(logits)
         idx0 = np.asarray(glob.a_idx)
         idx1 = (idx0 + rng.integers(1, A, idx0.shape)) % A
 
@@ -511,7 +526,7 @@ def test_density_ratio_ssvs(case):
         st, data = draw_state(spec, rep)
         info, on, ell, log_r, gl = views(spec, st)
         loc, glob = st.eq.coef, st.glob.coef
-        logit = np.asarray(GLK.ssvs_logodds(
+        logit = np.asarray(step_of(spec).impl("ssvs_logodds")(
             ell, arr.ssvs.log_tau0, arr.ssvs.log_tau1, bcast(glob.log_p, info),
             bcast(glob.log1m_p, info),
         ))  # fmt: skip
@@ -530,7 +545,9 @@ def test_density_ratio_ssvs(case):
 
         worst["gamma"] = check_ratio(log_q, joint, g0, g1, worst["gamma"])
         if spec.static.coef.p_beta:
-            pb = GLK.gl_group_conditional("ssvs", "p", ell, log_r, loc, glob, info, gl)
+            pb = step_of(spec).impl("gl_group_conditional")(
+                "ssvs", "p", ell, log_r, loc, glob, info, gl
+            )
             p0 = np.exp(np.asarray(glob.log_p))
             p1 = 1.0 / (1.0 + np.exp(-(np.log(p0) - np.log1p(-p0) + rng.normal(0, 0.5, p0.shape))))
 
@@ -785,7 +802,8 @@ def test_block_geweke(name):
     spec = joint_spec(name)
     assert spec.kernel == ("sweep" if name == "gl_mean_only" else "global_step")
     res = geweke(spec, GewekeConfig(seed=401 + BLOCKS.index(name), **G_SMALL))
-    print(res.table().head(6).to_string())
+    print(f"{name}: {len(res.names)} functions, max |z| = {np.max(np.abs(res.z)):.3f}, "
+          f"min p = {np.min(res.p):.2e} (Bonferroni: p > {G_SMALL['alpha']}/{len(res.names)})")  # fmt: skip
     assert res.passed, res.table().head(8)
 
 
@@ -942,3 +960,22 @@ def test_failure_detail_is_log_aware(case, block):
     out = failure_detail(program, st, data, spec.prior, cache, KEY, 3, block, 0)
     assert "prior_log_precision_range" in out and "prior_precision_range" not in out
     assert out["log_space"] is True and out["cholesky_ok"] is True
+
+
+def test_kernel_module_imports_inside_a_trace():
+    """The registry may import the kernel module for the first time inside a traced function
+    (``validation.joint`` composes lazily in its step), so the module computes nothing with JAX
+    at import time: a fresh interpreter steps a block configuration under ``jit`` first."""
+    import subprocess
+    import sys
+
+    code = (
+        "import jax, jax.numpy as jnp\n"
+        "from rai_bvar.validation.joint import joint_spec\n"
+        "s = joint_spec('gl_scales_only_ssvs')\n"
+        "st = s.prior_sample(jax.random.key(0)); d = s.simulate(jax.random.key(1), st)\n"
+        "out = jax.jit(lambda a, b: s.step(jax.random.key(2), jnp.uint32(0), a, b))(st, d)\n"
+        "assert int(out.status.code) == 0\n"
+    )
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
+    assert res.returncode == 0, res.stderr[-2000:]
