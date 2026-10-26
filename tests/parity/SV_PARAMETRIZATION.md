@@ -294,7 +294,7 @@ factorstochvol 1.1.2, GIGrvg 0.8, RcppArmadillo 15.6.2-1, Rcpp 1.1.2, RcppProgre
 RcppTN 0.2-2, R6 2.6.1, generics 0.1.4, lpSolveAPI 5.5.2.0-17.15, mvtnorm 1.4-2, jsonlite 2.0.0,
 coda 0.19-4.1. Every fixture of this section records them (`packages`, `repos`, `ppm_snapshot`,
 `r_version`, `ci_run`); `stochvol_v_t5` does so beside its Phase 2 attributes (§7.4), and the
-fixtures regenerated at `73e3211` also record the commit that ran (`git_commit`). The jobs'
+fixtures regenerated after `d281276` also record the commit that ran (`git_commit`). The jobs'
 artifacts were downloaded with `gh run download` and committed unchanged.
 
 Clean room. The packages were run as black boxes. `tools/make_r_fixtures.R` records only the data
@@ -312,31 +312,62 @@ committed and their status is `pending`.
 
 The rules themselves are in `docs/phase3/DESIGN.md` §9.8 as amended by the errata PR #16
 (Amendment 1, on `main` since `05757c1`), which pins them to `tools/make_r_fixtures.R` at
-`d281276`. After that pin the script changed only in the fixture extraction and its records
-(`73e3211`, the merge-gate review of the WP29 PR: C1–C3); no probe or decision function changed.
-If a later review changes a rule, the affected probes are rerun and this section is updated. Here
-each probe's outcome under its rule is recorded.
+`d281276`; DESIGN Amendment 3 (PR #26: E172, E173) moves the pin to `73e3211` and to the commit
+that implements E173, **`56fcc5c`**. After `d281276` the script changed in the fixture extraction
+and its records (`73e3211`, the merge-gate review of the WP29 PR: C1–C3) and in the R-side SV
+predictive at h ≥ 2 (`56fcc5c`, E173, below); no probe or decision function changed. If a later
+review changes a rule, the affected probes are rerun and this section is updated. Here each
+probe's outcome under its rule is recorded.
 
-The fixtures come from two runs of the job, downloaded with `gh run download` and committed
-unchanged:
-- **run 40243289623 (commit `d281276`)**, the final run at the pin: the probe fixtures, the n = 3
-  runs, the P8 fixtures and the bvars runs (21 fixtures). It replaces the fixtures of the first
-  final run (40234562983, at `83c13b4`), as PR #16 §9.8 states. Every probe's status and answer,
-  and the gating comparison, are the same in both runs; the WP29 PR lists the numbers that differ.
-  It ended with exit status 1 for three recorded reasons, the hard mixing checks of the bvars
-  runs (§7.3): split R-hat − 1 of `wbvars_csv` (0.0125) and of `wbvars_ncsv` (0.0278), each above
-  0.01, and the minimum ESS of `wbvars_ncsv` (198, below 400).
-- **run 40261716464 (commit `73e3211`)**: the eight n = 7 SV runs (`bvars_bayesianvars_n7p4_sv`,
-  `bvars_gl_*_n7p2`, `bvars_gl_r8_hs_olcl_n7p4`) and `stochvol_v_t5`, regenerated with
-  `--sections=stochvol,bvars --only=...` after the review found that run 40243289623 had applied
-  P4's equation order, decided at n = 3, at n = 7 (C1): `matrix()` recycled the first three
-  equations' draws over seven columns, so those fixtures' `sv_*` blocks were wrong (their Π, A,
-  h_t and predictive were not). Its probes ran again and gave the same status and answer for
-  P1–P10, which each fixture records (`probe_answers`). Outside the `sv_*` block the eight
-  fixtures are bit-identical to those of the first final run 40234562983, and R9's `a` is too;
-  run 40243289623's numbers differ from both at Monte Carlo level. It ended with exit status 1
-  for one recorded reason, the hard mixing check of R9's `a` (§7.1). Every fixture of both runs
-  was staged and packed.
+The fixtures come from three runs of the job, downloaded with `gh run download` and committed
+unchanged (the sha256 of every fixture and each artifact's digest are in the commit messages of
+`7d5aef0` and of the fixture commit after `56fcc5c`):
+- **run 40243289623 (commit `d281276`)**, the final run at the first pin: the four probe
+  fixtures, R2 (`bvars_bayesianvars_n3p2_const`), the seven P8 fixtures and the two bvars runs
+  (14 fixtures). It replaces the fixtures of the first final run (40234562983, at `83c13b4`), as
+  PR #16 §9.8 states. Every probe's status and answer, and the gating comparison, are the same in
+  both runs; the WP29 PR lists the numbers that differ. It ended with exit status 1 for three
+  recorded reasons, the hard mixing checks of the bvars runs (§7.3): split R-hat − 1 of
+  `wbvars_csv` (0.0125) and of `wbvars_ncsv` (0.0278), each above 0.01, and the minimum ESS of
+  `wbvars_ncsv` (198, below 400).
+- **run 40261716464 (commit `73e3211`)**: `stochvol_v_t5` (§7.4). This run also regenerated the
+  eight n = 7 SV fixtures after the review found that run 40243289623 had applied P4's equation
+  order, decided at n = 3, at n = 7 (C1, E172): `matrix()` recycled the first three equations'
+  draws over seven columns, so those fixtures' `sv_*` blocks were wrong (their Π, A, h_t and
+  predictive were not). Those eight are now replaced by the next run.
+- **run 40351238342 (commit `56fcc5c`)**: the 14 bayesianVARs SV fixtures (R1 `n3p2_sv` and
+  `n7p4_sv`, R3–R7 at n = 3 and 7, R8, R9), regenerated with `--sections=bvars
+  --only=bvars_bayesianvars_*_sv,bvars_gl_*` at unchanged draw counts for E173 (below). Its probes
+  gave the same status and answer for P1–P10, which each fixture records (`probe_answers`). Apart
+  from the predictive at h ≥ 2, its numbers are bit-identical to run 40243289623's: in the six
+  n = 3 fixtures and `n3p2_sv` every other variable, and in the n = 7 fixtures everything outside
+  the `sv_*` block that C1 corrected. The n = 7 fixtures therefore differ from those of run
+  40261716464 at Monte Carlo level: runs 40234562983 and 40261716464 reproduce each other bit for
+  bit, and so do runs 40243289623 and 40351238342. The two pairs differ, presumably by runner
+  (E165, E172; not explained). In this run R9's `a` never left 0.05, as in run 40243289623. The
+  run ended with exit status 1 for one recorded reason, the hard mixing check of R9's `a` (§7.1).
+
+Every fixture of every run was staged and packed.
+
+**The SV predictive at h ≥ 2 (E173; Q42, owner 2026-10-26).** The Phase 2 weekly test found that
+bayesianVARs' `predict(…, simulate_predictive = TRUE)` disagrees at h ≥ 2 with the exact SWA
+oracle on the same data and prior, while every parameter block agrees. That `predict()` does not
+return the joint-path predictive there is an inference from its outputs, not confirmed. For every
+bayesianVARs SV run the compared predictive (`forecast_*`) is therefore built as follows:
+- h = 1 comes from `predict()`, as before.
+- h ≥ 2 is computed from bayesianVARs' own kept draws by the joint path, with the structure of
+  Phase 2's `swa_forecast`, one path per kept draw. Per draw: Π, A, μ, φ, σ and h_T; then
+  h_{T+s} = μ + φ(h_{T+s−1} − μ) + ση; e ~ N(0, diag(exp(h))); u solves A u = e (P2); and
+  y = Π′x + u with the lags rolled forward (P3).
+
+`predict()`'s own predictive at every horizon is kept as `forecast_predict_*`: evidence only,
+outside the mixing record, never compared. Each fixture records its sources (`forecast_source`:
+"h1: predict(); h>=2: path recursion from own draws (E173, Q42)") and the path's seeds
+(`forecast_path_seeds`). It also records a hard check that the recursion's own h = 1 agrees with
+`predict()`'s (`forecast_h1_check_*`: max |z| 1.37–2.75, all pass). The evidence comparison of
+`predict()`'s h ≥ 2 quantiles with the path's gives max |z| 6.3–7.6 in the n = 3 runs and 2.7–4.9
+in the n = 7 runs (`forecast_predict_vs_path_*`). R2 (constant variances) keeps `predict()` at
+every horizon.
 
 Merging these fixtures makes the Phase 2 weekly test `test_bayesianvars_parity` run on the three
 `bvars_bayesianvars_*` fixtures (it skipped while they were missing and P1–P5 unresolved); its
@@ -371,41 +402,44 @@ attribute is the code that ran.
 **Parity fixtures** (4 independent `bvar()` runs × 50,000 draws after 10,000, seeds in
 `chain_seeds`; quantiles, MCSE (the larger of Vehtari et al. §4.3 and the batch MCSE), ESS, R-hat
 of Π, A, h_t (t ≥ 1), μ, φ, σ or λ and the 1–4-step predictive). The mixing record covers Π, A,
-h_t, μ, φ, σ or λ and the predictive. In the n = 7 fixtures it also covers the compared
-hyperparameters: the global scales (`hypersel`), the SSVS indicators and R9's grid parameter.
-Each regenerated fixture names what the record covers (`mixing_covers`) and what fails
-(`mixing_failed`). The n = 3 fixtures of run 40243289623 predate that record; there the
-hyperparameter checks were soft, and their values are in the fixtures.
+h_t, μ, φ, σ or λ and the predictive (for the SV runs, the compared one: E173). In the GL fixtures
+it also covers the compared hyperparameters: the global scales (`hypersel`), the SSVS indicators
+and R9's grid parameter. Each regenerated fixture names what the record covers (`mixing_covers`)
+and what fails (`mixing_failed`); R2 and the P8 fixtures of run 40243289623 predate that record.
 
-| run | fixture | mixing (max R-hat / min ESS): n = 3 (run 40243289623); n = 7 (run 40261716464) |
+| run | fixture | mixing (max R-hat / min ESS): n = 3; n = 7 (SV runs: run 40351238342; R2: run 40243289623) |
 | :--- | :--- | :--- |
-| R1 | `bvars_bayesianvars_n3p2_sv`, `bvars_bayesianvars_n7p4_sv` | 1.001 / 4,631; 1.001 / 3,673 |
+| R1 | `bvars_bayesianvars_n3p2_sv`, `bvars_bayesianvars_n7p4_sv` | 1.001 / 4,631; 1.001 / 3,818 |
 | R2 | `bvars_bayesianvars_n3p2_const` | 1.000 / 155,657 |
-| R3 HS | `bvars_gl_r3_hs_global_n{3,7}p2` | 1.001 / 4,849; 1.001 / 3,977 |
-| R4 NG (0.1, 1, 1) | `bvars_gl_r4_ng_global_n{3,7}p2` | 1.001 / 4,816; 1.001 / 3,562 |
-| R5 R2D2 (0.1, 0.5) | `bvars_gl_r5_r2d2_global_n{3,7}p2` | 1.001 / 4,595; 1.002 / 3,582 |
-| R6 DL (0.5) | `bvars_gl_r6_dl_global_n{3,7}p2` | 1.001 / 4,638; 1.001 / 3,707 |
-| R7 SSVS (0.01, 1, fixed p = 0.5) | `bvars_gl_r7_ssvs_global_n{3,7}p2` | 1.001 / 4,601; 1.003 / 2,767 (indicators: 1.0035 / 2,969) |
-| R8 HS olcl-lagwise | `bvars_gl_r8_hs_olcl_n7p4` | 1.003 / 2,446 |
-| R9 NG, grid on a | `bvars_gl_r9_nggrid_global_n7p2` | 1.003 / 1,273; **`a` does not mix** (below) |
+| R3 HS | `bvars_gl_r3_hs_global_n{3,7}p2` | 1.001 / 4,849; 1.002 / 3,732 |
+| R4 NG (0.1, 1, 1) | `bvars_gl_r4_ng_global_n{3,7}p2` | 1.001 / 4,816; 1.002 / 3,829 |
+| R5 R2D2 (0.1, 0.5) | `bvars_gl_r5_r2d2_global_n{3,7}p2` | 1.001 / 4,595; 1.003 / 3,971 |
+| R6 DL (0.5) | `bvars_gl_r6_dl_global_n{3,7}p2` | 1.001 / 4,638; 1.002 / 3,588 |
+| R7 SSVS (0.01, 1, fixed p = 0.5) | `bvars_gl_r7_ssvs_global_n{3,7}p2` | 1.001 / 4,601 (indicators 1.0004 / 11,624); 1.002 / 2,554 (indicators 1.0027 / 2,772) |
+| R8 HS olcl-lagwise | `bvars_gl_r8_hs_olcl_n7p4` | 1.002 / 2,605 |
+| R9 NG, grid on a | `bvars_gl_r9_nggrid_global_n7p2` | 1.003 / 1,694; **`a` does not mix** (below) |
 
-At n = 7 the SV parameters are now each equation's own. The minimum ESS of the n = 7 runs is that
-of σ or of a hyperparameter scale. bayesianVARs' μ means in `bvars_bayesianvars_n7p4_sv` agree with
-the independent SWA oracle on the same data (`bvars_swa_n7p4_sv`): −1.301 … 0.980 against −1.302 …
-0.981, with max |z| of the means 2.79 (μ), 1.55 (φ) and 1.13 (σ).
+The SV parameters are each equation's own at every n. The minimum ESS is that of the SV parameters in R1 and
+R3–R6 at n = 7, of Π in R7 and R9, and of the HS group scales in R8. bayesianVARs' μ means in
+`bvars_bayesianvars_n7p4_sv` agree with the independent SWA oracle on the same data
+(`bvars_swa_n7p4_sv`): −1.303 … 0.979 against −1.302 … 0.981, with max |z| of the means 1.99 (μ),
+1.48 (φ) and 1.18 (σ).
 
 The GL fixtures also hold:
 - the thinned draws of every `phi_hyperparameter` column (`hyper_draws`, 500 per run);
 - summaries of the global scales (`hypersel`: HS ζ_g, NG and R2D2 ξ_g);
-- the SSVS inclusion probabilities (`incl_prob`, all lags·M² indicators, MCSE sd/√ESS; at n = 7
-  with each indicator's ESS and split R-hat);
+- the SSVS inclusion probabilities (`incl_prob`, all lags·M² indicators, MCSE sd/√ESS, with
+  each indicator's ESS and split R-hat);
 - R9's posterior of a on its grid (`grid_prob`, with each indicator's MCSE, ESS and split R-hat):
-  0.9915 at a = 0.05 and 0.0085 at 0.1 (binomial MCSE 0.0059).
+  in this run a never left 0.05 (probability 1 there, no ESS).
 
-**R9's `a` does not meet the mixing requirement.** Its indicator has ESS 239 and split R-hat
-1.015; in run 40243289623 `a` never left 0.05 in 4 × 50,000 draws. The fixture records
-`mixing_ok = 0`, with `mixing_failed` naming only `grid_prob a1`; its other summaries mix. Under
-Q39(b) the comparison of R9's `a` is not met at these draw counts (D-59, E167).
+**R9's `a` does not meet the mixing requirement.** In run 40351238342, as in run 40243289623, `a`
+never left 0.05 in 4 × 50,000 draws. In runs 40234562983 and 40261716464 it visited 0.1
+(0.9915 / 0.0085) with indicator ESS 239 and split R-hat 1.015. The fixture records
+`mixing_ok = 0`, with `mixing_failed` naming only `grid_prob a1 (never left 0.05 …)`; its other
+summaries mix. Under Q39(b) the comparison of R9's `a` is not met at these draw counts (D-59,
+E167). WP38 reads Q39(b) per entry of `mixing_failed` (E172), so R9's Π, A, SV parameters, h_t
+and predictive are still compared.
 
 R7 uses c1 = 1 (raw s.d.), not bayesianVARs' default 100, which mixed badly with
 `semiautomatic = FALSE` in a discovery run. That choice was made before any comparison.
