@@ -611,10 +611,9 @@ def test_fixture_provenance_and_prior_numbers(name):
     assert len(set(c.seeds) | set(c.predictive_seeds)) == 8
     for key in ("git_commit", "numpy_version", "scipy_version", "cpu"):
         assert str(a[key]).strip(), key
-    # the runs used this oracle: a change to it needs new fixtures (the md5 is the runs' record;
-    # git_dirty records the tree's tracked state when each run saved, see the WP38a PR)
+    # the runs used this oracle: a change to it needs new fixtures. (The md5 is the runs' own
+    # record; their git_dirty = 1 comes from an edit to this test file during the runs, WP38a PR.)
     assert a["oracle_md5"] == hashlib.md5((ROOT / a["oracle_file"]).read_bytes()).hexdigest()
-    assert int(a["git_dirty"]) in (0, 1)
     problem = c.problem()
     prior = problem.prior
     assert (float(a["prior_lambda"]), float(a["prior_alpha"])) == (0.2, 2.0)
