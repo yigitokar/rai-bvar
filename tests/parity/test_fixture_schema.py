@@ -850,6 +850,16 @@ def test_sv_predictive_sources(name):
     assert np.asarray(a["forecast_path_seeds"]).shape == (4,)
 
 
+@pytest.mark.parametrize("name", BV_SV_FIXTURES)
+def test_sv_predictive_path_is_the_compared_block(name):
+    """E173: the path's own h = 1 passed its check against predict(), and the compared h >= 2
+    quantiles are the path's, not a copy of predict()'s native ones."""
+    ds = fixture(name)
+    assert int(ds.attrs["forecast_h1_check_pass"]) == 1
+    path, native = ds["forecast_q"].values[1:], ds["forecast_predict_q"].values[1:]
+    assert not np.array_equal(path, native)
+
+
 @pytest.mark.parametrize("name", GL_RUNS)
 def test_gl_fixture_layout(name):
     """R3–R9: the global-local runs, their hyperparameter draws and the compared extras."""
