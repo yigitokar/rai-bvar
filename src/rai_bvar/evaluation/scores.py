@@ -75,7 +75,20 @@ def score_forecast(
     estimator on the same forecast, ``lpd_conditioned``, ``lpd_mcse_conditioned`` and
     ``lpd_marginal_conditioned``, with ``attrs["lpd_method"] = "integrated"``. At ``h = 1`` the
     two coincide bitwise; at ``h > 1`` a forecast without ``lag_coefs`` raises ``ValueError``.
+
+    A conditional forecast (``ConditionalForecastResult``, or any forecast whose attrs carry
+    ``"conditional"``) is a scenario, not a forecast to score (P3 DESIGN §6.3, D-50): it raises
+    ``TypeError``, and so does the backtest, which scores through this function.
     """
+    from rai_bvar.forecast.conditional import ConditionalForecastResult
+
+    attrs = getattr(getattr(fr, "dataset", None), "attrs", None) or {}
+    if isinstance(fr, ConditionalForecastResult) or "conditional" in attrs:
+        raise TypeError(
+            "a conditional forecast is a per-draw scenario under hard conditions (P3 DESIGN "
+            "§6.3, D-50), not a forecast of the data: its equal-weight mixture is not "
+            "p(y | data, conditions), so it is not scored; score the unconditional forecast"
+        )
     if lpd_method not in LPD_METHODS:
         raise ValueError(f"lpd_method must be one of {LPD_METHODS}, got {lpd_method!r}")
     realized = np.asarray(realized, dtype=np.float64)
