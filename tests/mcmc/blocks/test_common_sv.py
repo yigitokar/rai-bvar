@@ -588,6 +588,24 @@ def test_density_ratio_sigma2(kind):
     assert worst <= 1e-8
 
 
+def test_q_scaled_by_the_common_h_is_chi_square():
+    """§9.2 item 3: at the data-generating ``θ``, ``q_t e^{−h_t} | h ~ χ²_n`` independently over
+    ``t`` (N08 §A4), with ``q_t`` from the step's ``csv_q`` and WP30's residuals of simulated data
+    (30 prior draws × 50 rows; KS)."""
+    from scipy import stats
+
+    spec = spec_of("structural_commonsv")
+    x = []
+    for rep in range(30):
+        st, data = draw_state(spec, 200 + rep)
+        T = int(data.T_eff)
+        lq = np.asarray(log_q_of(spec, st, data))[:T]
+        x.append(np.exp(lq - np.asarray(st.glob.vol.h)[:T]))
+    p = float(stats.kstest(np.concatenate(x), stats.chi2(spec.static.shapes.n).cdf).pvalue)
+    print(f"q e^(-h) vs chi2_n: KS p = {p:.3f}")
+    assert p > 1e-3
+
+
 # --------------------------------------------------------------------------- the common cores
 
 
@@ -1073,6 +1091,13 @@ def test_resolve_rules_for_common_sv():
     assert r1.static.mean.const_path == "weighted" and r1.static.vol.csv_rho_prior == "beta"
     assert isinstance(r1.prior.shared.shared_prec, type(r1.prior.shared.gl))  # both Empty
     assert "order_invariant" not in r1.warning_inputs
+    shorter = resolve(conj, _data(T=88), Runtime())  # zero recompiles in one bucket (§9.2 item 4)
+    assert shorter.static == r.static and int(shorter.data.T_eff) != int(r.data.T_eff)
+    for a_, b_ in ((shorter.prior, r.prior), (shorter.data, r.data)):
+        assert jax.tree.structure(a_) == jax.tree.structure(b_)
+        assert [np.shape(x) for x in jax.tree.leaves(a_)] == [
+            np.shape(x) for x in jax.tree.leaves(b_)
+        ]
     bad = dataclasses.replace(r.prior.eq.coef, prec0=np.asarray(r.prior.eq.coef.prec0) *
                               np.array([[1.0], [1.0], [1.5]]))  # fmt: skip
     with pytest.raises(ValueError, match="cross = 1 and contemp = 1"):
