@@ -63,6 +63,7 @@ from rai_bvar.validation.reference import conditional_forecast_reference, zero_s
 
 TOL = 1e-10  # A10 / A10b exact rule (§9.7)
 DRAWS = 1000
+ANALYTIC_DRAWS = 10_000  # the analytic legs, as A10b (owner Q43, E174: more draws, same seed)
 SEED = 20261026
 KS_ALPHA = 1e-3  # §6.3: family-wise over the horizons (D-60, E124)
 
@@ -112,6 +113,7 @@ class Leg(NamedTuple):
     coefs: np.ndarray  # (S, k, n): B of every stacked slice
     hist: np.ndarray  # (p, n)
     n_det: int
+    draws: int  # the forecast's draws (S)
 
 
 def _cells(conditions: dict, variables: list[str]) -> list[tuple[int, int, float]]:
@@ -142,6 +144,7 @@ LEGS = ("analytic", "structural-nig", "mcmc-sv", "mcmc-commonsv")
 @pytest.fixture(scope="module", params=LEGS)
 def leg(request, sim_data, sim_data_stationary) -> Leg:
     name = request.param
+    draws = ANALYTIC_DRAWS if name in ("analytic", "structural-nig") else DRAWS
     if name in ("analytic", "structural-nig"):
         data = sim_data_stationary
         prior = (
@@ -151,12 +154,12 @@ def leg(request, sim_data, sim_data_stationary) -> Leg:
         )
         fit = rb.BVAR(mean=rb.Linear(prior), lags=2).fit(data)
         H, conditions = 4, {"gdp": [0.004, 0.006], "rate": [np.nan, np.nan, 4.3]}
-        coefs = fit.draw_parameters(DRAWS, rng=SEED)[0]  # the forecast's own parameter stream
+        coefs = fit.draw_parameters(draws, rng=SEED)[0]  # the forecast's own parameter stream
     elif name == "mcmc-sv":
         data = sim_data
         fit = _fits_module().shared_fit(data)  # structural Mode I × SV(outliers), lags 1
         H, conditions = 6, {"gdp": [0.004, 0.006], "rate": [np.nan, np.nan, 4.3]}
-        coefs = _mcmc_slot_coefs(fit, DRAWS)
+        coefs = _mcmc_slot_coefs(fit, draws)
     else:
         data = _commonsv_data()
         settings = rb.MCMCSettings(chains=2, draws=40, burn=40, store="paths")
@@ -164,13 +167,13 @@ def leg(request, sim_data, sim_data_stationary) -> Leg:
             warnings.simplefilter("ignore", UserWarning)
             fit = rb.BVAR(vol=rb.CommonSV(), lags=2, mcmc=settings).fit(data)
         H, conditions = 4, {"y0": [0.5, 0.2], "y2": [np.nan, np.nan, -0.3]}
-        coefs = _mcmc_slot_coefs(fit, DRAWS)
-    base = fit.forecast(H, DRAWS, SEED, lag_coefs=True)
-    result = fit.conditional_forecast(H, conditions, draws=DRAWS, seed=SEED)
+        coefs = _mcmc_slot_coefs(fit, draws)
+    base = fit.forecast(H, draws, SEED, lag_coefs=True)
+    result = fit.conditional_forecast(H, conditions, draws=draws, seed=SEED)
     variables = list(data.variables)
     lags = fit.model.lags
     return Leg(name, fit, base, result, conditions, _cells(conditions, variables), coefs,
-               data.values[-lags:], 1)  # fmt: skip
+               data.values[-lags:], 1, draws)  # fmt: skip
 
 
 class Oracle(NamedTuple):
@@ -271,15 +274,13 @@ def test_a10_update_matches_the_oracle(leg, oracle):
         assert np.all(res.cond_mean.values[:, :, h - 1, j] == r)
 
 
-# Finding of WP34 (recorded as found; the seed, draw count and rule are unchanged): at the seed
-# and size fixed before the first run, the two analytic-engine legs fail the statistical part on
-# the same moment (the cross moment of the free cells "rate" at h = 2 and "gdp" at h = 3; both
-# legs share the forecast's shocks, since the seed is the same), max |z| = 4.11 (AnalyticFit) and
-# 4.35 (StructuralNIGFit) > 4.00, while every exact part passes at 1e-10 and the MCMC legs pass.
-# Over 400 other seeds of the analytic leg the family-wise failure rate of this rule is 1.0%
-# (0.5% with the known variance 1 + ρ² of the products). They are strict expected failures until
-# the owner decides (PR body, open question).
-MOMENTS_XFAIL = {"analytic": 4.11, "structural-nig": 4.35}
+# History (DESIGN P3 E174, Q43): at the seed fixed before the first run and DRAWS = 1000, the two
+# analytic-engine legs failed the statistical part on one moment (max |z| = 4.11 and 4.35 > 4.00;
+# the legs share the forecast's shocks). Over 400 other seeds the rule's family-wise failure rate
+# at 1000 draws was 1.0% against ≈ 0.34% nominal. The owner decided that the analytic legs run at
+# ANALYTIC_DRAWS = 10⁴ with the same seed, statistic and bound, the outcome binding: a leg that
+# fails at 10⁴ is not met for this check, with no further change.
+MOMENTS_XFAIL: dict[str, float] = {}
 
 
 def test_a10_sample_moments_of_the_conditional_paths(request, leg, oracle):
@@ -289,8 +290,8 @@ def test_a10_sample_moments_of_the_conditional_paths(request, leg, oracle):
     ``z_i z_j − ρ_ij`` (sample s.e.) are compared with ``|z| ≤ max(4, z_{1−0.01/(2m)})``."""
     if leg.name in MOMENTS_XFAIL:
         request.applymarker(pytest.mark.xfail(strict=True, reason=(
-            f"WP34 finding: max |z| = {MOMENTS_XFAIL[leg.name]} > 4 at the pre-chosen seed "
-            "(module comment above); owner decision pending"
+            f"not met (Q43, E174): max |z| = {MOMENTS_XFAIL[leg.name]} > 4 at 10⁴ draws and the "
+            "pre-registered seed (module comment above)"
         )))  # fmt: skip
     res = leg.result
     S = res.n_samples
@@ -317,7 +318,7 @@ def test_a10_mutant_m33_through_the_update_seam(leg, oracle):
     def m33(mu, M, Y, index, values, **kw):
         return cf.exact_update(mu, np.swapaxes(M, 1, 2), Y, index, values, **kw)
 
-    bad = rb.conditional_forecast(leg.fit, leg.base.horizon, leg.conditions, DRAWS, SEED,
+    bad = rb.conditional_forecast(leg.fit, leg.base.horizon, leg.conditions, leg.draws, SEED,
                                   _update=m33)  # fmt: skip
     with pytest.raises(AssertionError, match="E_c"):
         assert_close(bad.stacked("cond_mean"), oracle.mean, oracle.sd, "E_c")
@@ -380,7 +381,7 @@ def test_same_seed_reproduces_bitwise_and_the_entry_points_agree(leg):
     """No random number is drawn: ``rb.conditional_forecast`` (lazy, P3 §1.1) and the fit method
     give the same result, and conditioning a given ``base`` gives it too."""
     res = leg.result
-    again = rb.conditional_forecast(leg.fit, res.horizon, leg.conditions, DRAWS, SEED)
+    again = rb.conditional_forecast(leg.fit, res.horizon, leg.conditions, leg.draws, SEED)
     given = rb.conditional_forecast(leg.fit, res.horizon, leg.conditions, base=leg.base)
     for other in (again, given):
         for name in ("paths", "cond_mean", "cond_chol", "log_weight", "paths_level"):
