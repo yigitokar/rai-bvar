@@ -304,6 +304,44 @@ def test_proposal_is_independent_of_the_current_block():
                                   np.asarray(props["m28", "b"].mode))  # fmt: skip
 
 
+def test_a_single_data_row():
+    """``T_eff = 1`` (E152): ``K_h`` is the single entry ``(1 − ρ²)/σ_h²``, the block target is the
+    dense ``ℓ``, a full step keeps the padding exact and ``ρ`` (``S_xx = 0``; Beta: the uniform
+    branch) and ``σ_h²`` (``S = (1 − ρ²)h_0²``) draw finitely under both priors."""
+    from rai_bvar.engines.mcmc.config import VolStatic
+    from rai_bvar.priors.sv_arrays import common_sv_prior
+
+    rho, s2, n, T_pad = 0.7, 0.2, 3.0, 8
+    ls = 0.5 * math.log(s2)
+    kd, ko = CS.ar1_precision(jnp.float64(rho), jnp.float64(ls), 1, T_pad)
+    assert float(kd[0]) == pytest.approx((1 - rho**2) / s2, rel=1e-15)
+    assert np.all(np.asarray(kd[1:]) == 1.0) and not np.any(np.asarray(ko))
+    lq = jnp.asarray([0.4] + [0.0] * (T_pad - 1))
+    for rho_kind in ("truncated_normal", "beta"):
+        vol = VolStatic(persistent="constant", common=True, csv_block=4, csv_rho_prior=rho_kind)
+        step = CS.CommonSVStep(vol, T_pad)
+        spec = rb.CommonSV(rho_prior=rb.sv_priors.Beta(10.0, 2.0)) if rho_kind == "beta" else (
+            rb.CommonSV()
+        )  # fmt: skip
+        csv = jax.tree.map(jnp.asarray, common_sv_prior(spec, 3))
+        blk = step.block_of(jnp.zeros(T_pad), lq, rho, ls, 1, 0, 4)
+        assert np.asarray(blk.mask).tolist() == [1.0, 0.0, 0.0, 0.0]
+        for x in (-1.3, 0.0, 0.8):
+            xw = jnp.asarray([x, 0.0, 0.0, 0.0])
+            got = float(CS.h_block_log_target(xw, blk.log_q, n, blk.diag, blk.off, blk.lin,
+                                              blk.mask))  # fmt: skip
+            ref = -0.5 * n * x - 0.5 * math.exp(0.4 - x) - 0.5 * (1 - rho**2) / s2 * x * x
+            assert got == pytest.approx(ref, rel=1e-14, abs=1e-14)
+        h, frac, cap, info = step.h_step(random.key(1), jnp.zeros(T_pad), lq, rho, ls, n, 1)
+        assert bool(info.ok) and float(frac) in (0.0, 1.0) and float(cap) == 0.0
+        assert np.all(np.asarray(h)[1:] == 0.0) and np.isfinite(float(h[0]))
+        prop = CS.rho_proposal(*CS.rho_sufficient(h, 1)[:2], jnp.float64(ls), csv, rho_kind)
+        assert bool(prop.uniform) == (rho_kind == "beta")
+        r_new, _ = step.rho_step(random.key(2), h, jnp.float64(rho), jnp.float64(ls), 1, csv)
+        ls_new, ok = step.sigma_step(random.key(3), h, r_new, 1, csv)
+        assert abs(float(r_new)) < 1 and bool(ok) and np.isfinite(float(ls_new))
+
+
 # --------------------------------------------------------------------------- Tier U item 2: h
 
 
@@ -902,6 +940,25 @@ def test_forecast_adds_the_common_future(fits):
     assert "lag_coefs" in fc.dataset.data_vars
 
 
+def test_in_loop_forecast_matches_the_post_hoc_forecast():
+    """In-loop forecasts (P2 §5.8) of a CommonSV fit draw the common future inside the sample
+    executable (global futures by block id) and equal the post-hoc forecast bitwise."""
+    from rai_bvar.settings import FitPlan
+
+    model = rb.BVAR(mean=rb.Linear(rb.Minnesota(form="conjugate", hierarchy="fixed")),
+                    vol=rb.CommonSV(), lags=2,
+                    mcmc=rb.MCMCSettings(chains=2, draws=30, burn=30))  # fmt: skip
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        fit = model.fit(_data(), plan=FitPlan(horizon=2, draws=10, seed=3))
+    a = fit.forecast(2, draws=10, seed=3)
+    assert int(a.dataset.attrs["in_loop"]) == 1
+    fit.in_loop_forecast = None
+    b = fit.forecast(2, draws=10, seed=3)
+    np.testing.assert_array_equal(a.paths.values, b.paths.values)
+    np.testing.assert_array_equal(a.dataset["cond_scale"].values, b.dataset["cond_scale"].values)
+
+
 def test_parameter_draws_and_irfs_read_the_common_h(fits):
     """``draw_parameters`` and IRFs (P3 §5.5): at the last period ``chol`` has diagonal
     ``exp(½(log λ_i + h_T))``; at another date (stored paths) ``exp(½(log λ_i + h_t))``."""
@@ -959,14 +1016,17 @@ def test_warm_start_remaps_the_common_h_by_period(fits):
 def test_monitored_log_prior_equals_the_reference():
     """The monitored ``log p(θ)`` (the cores, means and SOC/SUR rows per equation plus the
     step's ``log p(h, ρ, σ_h)``) equals WP30's ``log_joint.log_prior`` at prior states (1e-10
-    relative), under both ρ and both σ_h² priors; with SOC/SUR rows up to the rows' normalising
+    relative), under both ρ and both σ_h² priors and under global-local priors (rows 324, 328: the
+    scale and CCCM steps' ``log_prior_state`` beside the CommonSV step's
+    ``log_prior_data``); with SOC/SUR rows up to the rows' normalising
     constant ``log p(d)``, which the monitor omits (P2 WP25), so the difference is the same at
     every state."""
     from rai_bvar.engines.mcmc.monitor import monitor_values
 
     offsets: dict[str, float] = {}  # with SOC/SUR rows: equal up to a state-independent constant
     for name, kw in (("structural_commonsv", {}), ("conjugate_commonsv_dummies", {}),
-                     ("conjugate_commonsv_parity", {}), ("reduced_commonsv", {})):  # fmt: skip
+                     ("conjugate_commonsv_parity", {}), ("reduced_commonsv", {}),
+                     ("structural_commonsv_hs", {}), ("reduced_commonsv_ng", {})):  # fmt: skip
         spec = spec_of(name, "full", **kw)
         program = program_of(spec)
         for rep in range(3):
