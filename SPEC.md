@@ -24,6 +24,8 @@
 
 **v2.2 → v2.3 (2026-10-24).** §10.6 states the composition-dependent default MCMC budget (4 × 10,000 kept draws for compositions with stochastic volatility, 4 × 2,000 otherwise) and the warning for SV fits below it, the owner's resolution of DESIGN Q14 (D-35); §13 records it. The convergence gate is unchanged.
 
+**v2.3, amended 2026-10-25 (DESIGN P3 Amendment 2).** §10.4's `bvars` bullet, §13's Phase 3 exit line and D2 name the exact independent `CommonSV` oracle, with `bvars` as evidence (DESIGN P3 Q35, Q40, E168); WP41's v2.4 note carries them.
+
 ---
 
 ## 1. Vision & scope
@@ -758,7 +760,7 @@ The Phase 2 implementation decisions (D-1…D-35) and open questions (Q1…Q14; 
 | ID | Question | Decision | Rationale |
 | :--- | :--- | :--- | :--- |
 | D1 | Licence | **Apache-2.0** | Patent grant, enterprise-friendly, compatible with all core dependencies (JAX, ArviZ, `scoringrules`: Apache-2.0; `bartz`: MIT). Cost: GPL R code cannot be translated, so the clean-room rule applies (§2.1) |
-| D2 | Where does `CommonSV` go? | **Phase 3** | Phase 2 is already heavy and its baseline is `Linear × SV`. `CommonSV` earns its place as a fast SV screen for large `n`, checked against an exact independent oracle, with `bvars` as evidence (DESIGN P3 Q35, Q40) |
+| D2 | Where does `CommonSV` go? | **Phase 3** | Phase 2 is already heavy and its baseline is `Linear × SV`. `CommonSV` earns its place as a fast SV screen for large `n`, checked against an exact independent oracle, with `bvars` as evidence (amended 2026-10-25, DESIGN P3 Q35, Q40) |
 | D3 | Default Minnesota form for MCMC models | **Structural**, with the prior mean of `γ_i` centred on `a_i` so the reduced-form prior mean is preserved (§4.1) | Equations stay independent and parallel; `Linear` and `BART` share one structural treatment of `a_i`, keeping the mean-axis ablation clean; Chan (2022) gives an analytic twin. `form="reduced"` (CCCM 2022) remains available |
 | D4 | Reference datasets | **FRED-QD + FRED-MD**, small / medium / large sets, downloaded on demand with pinned vintages (§5.8) | Literature standard (GLP, CCM, Clark-Ravazzolo); not bundled because of third-party copyrights; fixtures use federal-agency series only |
 | D5 | Relationship with the Bank of England `bvar` | **Build our own analytic engine; use BoE `bvar` as a Python-side parity oracle in CI** | The conjugate model is the baseline of every ablation, so its contract (conditional moments), MH over hyperparameters, Lenza-Primiceri scaling and look-ahead-free refits must stay under our control. The engine is small (about 1–2 weeks) |
