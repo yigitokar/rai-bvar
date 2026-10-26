@@ -25,8 +25,8 @@ concurrency:
   # the event is part of the group: a merge to main must not cancel the hours-long weekly run (or
   # a manual bench run) on the same ref; a new push to a PR still cancels that PR's older run. The
   # bench and r_fixtures inputs are too, so bench, R-fixture and weekly dispatches on one ref run
-  # side by side.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.bench }}-${{ inputs.r_fixtures }}
+  # side by side; so is r_fixtures_args, so a --quick R-fixture dispatch never cancels a full one.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.bench }}-${{ inputs.r_fixtures }}-${{ inputs.r_fixtures_args }}
   cancel-in-progress: true
 
 env:
@@ -398,11 +398,17 @@ jobs:
           EOF
           # clean room (Phase 3 DESIGN, review m21): a failed build of a GPL package is diagnosed
           # from the exit status, the failing step and toolchain messages; compiler diagnostics
-          # that quote package source (file:line: messages and their source excerpts) are dropped
+          # that quote package source (file:line: messages, their "In function"/"At" context lines
+          # and source excerpts) are dropped, and the job installs binaries only: a source
+          # install fails it (no GPL source is compiled here)
           set -o pipefail
           Rscript "$RUNNER_TEMP/install.R" 2>&1 \
-            | { grep -v -E '\.(c|cc|cpp|cxx|h|hh|hpp|f|f90|f95|for)(:[0-9]+)+|^ *[0-9]* *\| |^(g\+\+|gcc|gfortran|clang|clang\+\+|ccache) ' || true; } \
+            | { grep -v -E '\.(c|cc|cpp|cxx|h|hh|hpp|ipp|tpp|inl|f|f90|f95|for)(:[0-9]+)+|\.[A-Za-z0-9+]+(:[0-9]+)*: (In |At )|^ *[0-9]* *\| |^(g\+\+|gcc|gfortran|clang|clang\+\+|ccache) ' || true; } \
             | tee "$OUT/install.log"
+          if grep -q -F 'installing *source* package' "$OUT/install.log"; then
+            echo "::error::a package was installed from source; the R-fixture job installs binaries only"
+            exit 1
+          fi
       - name: R fixtures (stochvol SV-t, bayesianVARs, bvars)
         env:
           RAI_BVAR_CI_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -424,4 +430,4 @@ jobs:
           name: r-fixtures-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/r-fixtures
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90

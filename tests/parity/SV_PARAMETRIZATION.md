@@ -151,10 +151,11 @@ Measured values of the DGP guard: posterior ranks of the truth 0.58, 0.55 and 0.
 therefore fail the test. An unexpected pass fails it too, since that would mean the oracle or our
 sampler changed. Each of these four outcomes was checked with a mutated scratch copy.
 
-**Version caveat.** Every statement in this section is about stochvol **3.2.1**, the version that
-produced the committed fixtures. DESIGN §9.9 names 3.2.9; whether 3.2.9 (or later) still deviates
-was not checked, because R is not available where this phase was finished. The finding is a
-property of one fixture, not of stochvol in general.
+**Version caveat.** The statements above are about stochvol **3.2.1**, the version that produced
+the Phase 2 fixtures; the five Gaussian fixtures (i)–(iv) still come from 3.2.1. The SV-t fixture
+`stochvol_v_t5` is regenerated with stochvol **3.2.9** in Phase 3, and 3.2.9 still deviates on the
+four-observation problem: §7.4 holds that check (step 3 below). The finding is a property of the
+SV-t sampler on these problems, not of stochvol in general.
 
 **Unblock path for the SV-t row.** The strict `xfail` is meant to be removed, not kept:
 
@@ -168,7 +169,8 @@ property of one fixture, not of stochvol in general.
    in the same change; the row then gates like the other fixtures.
 3. If stochvol still deviates, keep the `xfail`, update the version and the table here, and report
    the four-observation example upstream; the exact importance-sampling test stays the SV-t exit
-   criterion.
+   criterion. Done in Phase 3 for stochvol 3.2.9 (§7.4: it still deviates, the `xfail` stays; the
+   upstream report is not filed yet).
 
 ## 4. bayesianVARs: blocked in Phase 2 (superseded by §7)
 

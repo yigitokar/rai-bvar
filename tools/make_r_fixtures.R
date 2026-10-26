@@ -129,10 +129,21 @@ note_check <- function(name, value, limit, hard = TRUE) {
   ok <- is.finite(value) && value <= limit
   checks[[length(checks) + 1]] <<- list(check = name, value = value, limit = limit, ok = ok,
                                         hard = hard)
+  # reported as a message (same text as before): a failed check is not an R warning, so the
+  # fixture extraction can make every warning fatal (fatal_warnings below, review C1)
   if (!ok) {
-    warning(sprintf("%s: %s = %.3e > %.1e", if (hard) "check failed" else "soft check (warning)",
-                    name, value, limit))
+    message(sprintf("Warning: %s: %s = %.3e > %.1e",
+                    if (hard) "check failed" else "soft check (warning)", name, value, limit))
   }
+}
+
+# Inside the fixture extraction and staging every R warning is an error (review C1: a recycling
+# warning there means the staged numbers are wrong). Package calls inside are wrapped in
+# quiet_calls, whose handler is innermost and reports their warnings by message only.
+fatal_warnings <- function(expr) {
+  withCallingHandlers(expr, warning = function(w) {
+    stop("a warning in the fixture extraction is fatal: ", conditionMessage(w), call. = FALSE)
+  })
 }
 
 # =================================================================================================
@@ -1398,18 +1409,22 @@ os_release <- function() {
   if (length(v)) v[1] else "unknown"
 }
 
+# Where a Phase 3 fixture comes from: the repository the packages were installed from (the CI
+# install step exports it; this R session's own repos option is irrelevant), the snapshot, the
+# installed packages, the CI run and the commit of this script that ran (review minors)
+p3_provenance <- function() list(
+  repos = Sys.getenv("RAI_BVAR_PPM_REPO", paste(getOption("repos"), collapse = " ")),
+  ppm_snapshot = Sys.getenv("RAI_BVAR_PPM_SNAPSHOT", "not set"),
+  os = os_release(),
+  packages = paste(package_record(), collapse = "\n"),
+  ci_run = Sys.getenv("RAI_BVAR_CI_RUN", "not set"),
+  git_commit = Sys.getenv("GITHUB_SHA", "not set"))
+
 p3_meta <- function(packages, kind) {
   out <- p2_meta(unique(c("stochvol", packages)))
   out$design <- P3_DESIGN
   out$kind <- kind
-  # the repository the packages were installed from (the CI install step exports it); this R
-  # session's own repos option is irrelevant
-  out$repos <- Sys.getenv("RAI_BVAR_PPM_REPO", paste(getOption("repos"), collapse = " "))
-  out$ppm_snapshot <- Sys.getenv("RAI_BVAR_PPM_SNAPSHOT", "not set")
-  out$os <- os_release()
-  out$packages <- paste(package_record(), collapse = "\n")
-  out$ci_run <- Sys.getenv("RAI_BVAR_CI_RUN", "not set")
-  out
+  c(out, p3_provenance())
 }
 
 is_code <- function(x) is.function(x) || is.language(x)
@@ -1543,18 +1558,22 @@ parity_compare <- function(pairs) {   # list of list(a, b) mc_summary pairs
 # Per-chain summaries of a list of chains of a scalar quantity (or with an exact reference).
 chains_summary <- function(chains) mc_summary(lapply(chains, as.numeric))
 
+# max / min over the finite values (NA when there are none: a constant summary), without the
+# warning of max(numeric(0)), which fatal_warnings would turn into an error
+max_finite <- function(x) if (any(is.finite(x))) max(x[is.finite(x)]) else NA_real_
+min_finite <- function(x) if (any(is.finite(x))) min(x[is.finite(x)]) else NA_real_
+
 check_mixing_p3 <- function(label, sv, hard = TRUE) {
-  note_check(sprintf("%s: max split R-hat - 1", label), max(sv$rhat, na.rm = TRUE) - 1,
+  note_check(sprintf("%s: max split R-hat - 1", label), max_finite(sv$rhat) - 1,
              if (QUICK) 0.1 else 0.01, hard = hard && !QUICK)
-  note_check(sprintf("%s: 400 / min ESS", label), 400 / min(sv$ess, na.rm = TRUE),
+  note_check(sprintf("%s: 400 / min ESS", label), 400 / min_finite(sv$ess),
              if (QUICK) 10 else 1, hard = hard && !QUICK)
 }
 
 mixing_summary <- function(blocks) {
-  rh <- unlist(lapply(blocks, `[[`, "rhat"))
-  es <- unlist(lapply(blocks, `[[`, "ess"))
-  list(max_rhat = max(rh, na.rm = TRUE), min_ess = min(es, na.rm = TRUE),
-       ok = as.integer(max(rh, na.rm = TRUE) < 1.01 && min(es, na.rm = TRUE) > 400))
+  rh <- max_finite(unlist(lapply(blocks, `[[`, "rhat")))
+  es <- min_finite(unlist(lapply(blocks, `[[`, "ess")))
+  list(max_rhat = rh, min_ess = es, ok = as.integer(isTRUE(rh < 1.01 && es > 400)))
 }
 
 # Thinned draws of a list of per-chain (draws x m) matrices as a (chain, draw, <dim>) array.
@@ -1573,8 +1592,10 @@ categorical_summary <- function(chains, support) {
     ind <- lapply(chains, function(x) as.numeric(abs(x - s) <= 1e-12 * max(1, abs(s))))
     pr <- mean(unlist(ind))
     ess <- if (pr > 0 && pr < 1) ess_multi(ind) else NA_real_
-    c(prob = pr, mcse = if (is.finite(ess)) sqrt(pr * (1 - pr) / ess) else 0, ess = ess)
-  }, numeric(3)))
+    rhat <- if (pr > 0 && pr < 1) rhat_split(ind) else NA_real_
+    c(prob = pr, mcse = if (is.finite(ess)) sqrt(pr * (1 - pr) / ess) else 0, ess = ess,
+      rhat = rhat)
+  }, numeric(4)))
 }
 
 stage_probe_fixture <- function(name, attrs, probes, ids, vars = list(), coords = list()) {
@@ -1884,10 +1905,12 @@ run_stochvol_fixture <- function(ds_id, run_name, seed, direct_check = NA_real_)
       "DESIGN sec. 9.9 names stochvol 3.2.9; these fixtures were generated with",
       as.character(packageVersion("stochvol")), "(the version installed here)")
   }
+  # the Phase 2 attribute set stays (design names Phase 2); the Phase 3 provenance is added
+  # (review C2: D-54 asks for the snapshot and package versions in every fixture)
   if (run_name == "t5") attrs <- c(attrs, sv_t5_four_obs(), list(design_p3 = paste(
     "regenerated for Phase 3 (DESIGN sec. 9.8, 0.2 row 19; P2 sec. 2.10 Stage 4 amendment 1)",
     "with the same seed and dataset (v) under", R.version.string, "and stochvol",
-    as.character(packageVersion("stochvol")))))
+    as.character(packageVersion("stochvol")))), p3_provenance())
   stage(name, attrs, coords, vars)
 }
 
@@ -2862,7 +2885,17 @@ probe_p2 <- function() {
 bv_svpara <- function(f, M, D, sv) {
   S <- draws_last(f$sv_para, D)
   if (sv$orient == "cols_params") S <- aperm(S, c(2, 1, 3))
-  perm <- sv$series_perm %||% seq_len(M)
+  # P4 is decided on the n = 3 probe. Its answer "equations in data order" (the identity
+  # permutation) holds for every model size; any other permutation found at n = 3 says nothing
+  # about n != 3, so it stops the extraction (review C1: the length-3 permutation was applied at
+  # n = 7, and matrix() recycled the three equations' draws over seven columns)
+  p4 <- as.integer(sv$series_perm %||% seq_len(3L))
+  if (!identical(p4, seq_along(p4))) {
+    stop(sprintf("P4's equation permutation (%s) is not data order; it cannot be applied at n = %d",
+                 paste(p4, collapse = ", "), M))
+  }
+  perm <- seq_len(M)
+  stopifnot(dim(S)[2] == M, length(perm) == M, dim(S)[3] == D)
   get <- function(row) t(matrix(S[row, perm, ], nrow = M))      # D x M, equations in data order
   out <- list(mu = get(sv$rows[["mu"]]), phi = get(sv$rows[["phi"]]),
               sigma = get(sv$rows[["sigma"]]))
@@ -3174,8 +3207,8 @@ bv_extract <- function(r, L, p, vol, t_sel, H, fc_seed, hyper = TRUE, vprior = F
   rm(lv)
   if (H > 0L) {
     set.seed(fc_seed)
-    pr <- unclass(stats::predict(fit, ahead = seq_len(H), each = 1L, stable = FALSE,
-                                 simulate_predictive = TRUE))
+    pr <- unclass(quiet_calls(stats::predict(fit, ahead = seq_len(H), each = 1L, stable = FALSE,
+                                             simulate_predictive = TRUE)))
     pred <- draws_last(pr$predictions, D)
     if (dim(pred)[1] != H && dim(pred)[2] == H) pred <- aperm(pred, c(2, 1, 3))
     out$fc <- aperm(pred, c(3, 1, 2))                                  # D x H x M
@@ -3198,7 +3231,7 @@ bv_extract <- function(r, L, p, vol, t_sel, H, fc_seed, hyper = TRUE, vprior = F
 }
 
 stage_reduced_fixture <- function(name, chains, info, extra_vars = list(), extra_coords = list(),
-                                  extra_blocks = list(), mixing_hard = TRUE) {
+                                  extra_blocks = list(), mixing_hard = TRUE, hyper_mixing = NULL) {
   M <- info$n
   p <- info$lags
   K <- 1L + M * p
@@ -3253,15 +3286,34 @@ stage_reduced_fixture <- function(name, chains, info, extra_vars = list(), extra
       "lambda", function(ix) chains_at("lam", ix), M, "equation",
       "constant variances lambda_i of e_it")))
   }
+  # The mixing record covers every compared summary (DESIGN 9.8; review C3): the blocks above
+  # and, in the GL runs, the selected hyperparameter scales (hypersel), the SSVS indicators and
+  # the grid parameter of R9 (hyper_mixing, from hyper_staging). Under Q39(b) WP38 treats a
+  # failed check as not met for the quantities it covers: mixing_failed names them.
+  covered <- c(blocks, extra_blocks)
   for (b in blocks) check_mixing_p3(name, b, hard = mixing_hard)
-  for (b in extra_blocks) check_mixing_p3(paste(name, "(hyperparameters)"), b, hard = FALSE)
-  mix <- mixing_summary(blocks)
-  vars <- c(unlist(lapply(c(blocks, extra_blocks), `[[`, "vars"), recursive = FALSE), extra,
-            extra_vars)
+  for (b in extra_blocks) check_mixing_p3(paste(name, "(hyperparameters)"), b, hard = mixing_hard)
+  mix <- mixing_summary(covered)
+  prefix_of <- function(b) sub("_q$", "", names(b$vars)[1])
+  failed <- c(unlist(lapply(covered, function(b) {
+    rh <- max_finite(b$rhat)
+    es <- min_finite(b$ess)
+    if (isTRUE(rh < 1.01 && es > 400)) NULL else
+      sprintf("%s (max R-hat %.4f, min ESS %.0f)", prefix_of(b), rh, es)
+  })), hyper_mixing$failed)
+  vars <- c(unlist(lapply(covered, `[[`, "vars"), recursive = FALSE), extra, extra_vars)
   attrs <- c(p3_meta("bayesianVARs", info$kind), info$attrs)
   attrs$mixing_max_rhat <- mix$max_rhat
   attrs$mixing_min_ess <- mix$min_ess
-  attrs$mixing_ok <- mix$ok
+  attrs$mixing_ok <- as.integer(!length(failed))
+  attrs$mixing_covers <- paste(c(vapply(covered, prefix_of, character(1)), hyper_mixing$covers),
+                               collapse = ", ")
+  attrs$mixing_failed <- if (length(failed)) paste(failed, collapse = "; ") else "none"
+  attrs$mixing_rule <- paste(
+    "mixing_ok = 1 iff every summary in mixing_covers has split R-hat < 1.01 and multi-chain ESS",
+    "> 400 (mixing_max_rhat, mixing_min_ess over its continuous summaries); an indicator summary",
+    "(incl_prob, grid_prob) is checked on its non-constant indicators, and a grid parameter that",
+    "never moves is not mixing; mixing_failed lists what fails")
   attrs$floor_fraction_phi <- max(vapply(chains, `[[`, numeric(1), "floor_phi"))
   attrs$floor_fraction_u <- max(vapply(chains, `[[`, numeric(1), "floor_u"))
   attrs$nonfinite_phi <- sum(vapply(chains, `[[`, numeric(1), "nonfinite"))
@@ -3272,50 +3324,88 @@ stage_reduced_fixture <- function(name, chains, info, extra_vars = list(), extra
 
 # Hyperparameter draws: every column thinned, binary columns as inclusion probabilities, grid
 # columns as categorical probabilities, the continuous columns named by `select` summarised.
-hyper_staging <- function(chains, select = NULL, grid = NULL) {
+hyper_staging <- function(chains, select = NULL, grid = NULL, hard = TRUE, label = "") {
   nm <- chains[[1]]$hyper_names
-  if (is.null(nm)) return(list(vars = list(), coords = list(), blocks = list(), class = "none"))
+  if (is.null(nm)) return(list(vars = list(), coords = list(), blocks = list(), class = "none",
+                               mixing = NULL))
   th <- thinned_draws(lapply(chains, `[[`, "hyper"), BV_HYPER_KEEP)
   vars <- list(hyper_draws = nc_array(th$draws, c("chain", "hyper_draw", "hyper"), paste(
     "evenly thinned draws of every column of bayesianVARs' phi_hyperparameter (names in the",
     "coordinate hyper; the iteration index in hyper_draw)")))
   coords <- list(hyper = nc_array(nm, "hyper"), hyper_draw = nc_array(th$keep, "hyper_draw"))
   col <- function(k) lapply(chains, function(ch) ch$hyper[, k])
+  # the grid parameter is named by the grid prior (NG_a = ng_grid: the columns a1, a2, ...), not
+  # found by value: fixed columns (psi = 1 in R9) can sit on a grid point (review C3)
+  grid_col <- if (!is.null(grid)) grepl("^a[0-9]+$", nm) else rep(FALSE, length(nm))
   cls <- vapply(seq_along(nm), function(k) {
     x <- unlist(col(k), use.names = FALSE)
     u <- unique(x)
+    if (grid_col[k]) {
+      if (!all(vapply(u, function(v) min(abs(v - grid)) < 1e-10, logical(1)))) {
+        stop(sprintf("the grid parameter %s has draws off its grid", nm[k]))
+      }
+      return("grid")
+    }
     if (all(u %in% c(0, 1)) && (length(u) == 2L || startsWith(nm[k], "gamma"))) "binary" else
-      if (length(u) == 1L) "constant" else
-      if (!is.null(grid) && all(vapply(u, function(v) min(abs(v - grid)) < 1e-10, logical(1))))
-        "grid" else "continuous"
+      if (length(u) == 1L) "constant" else "continuous"
   }, character(1))
   blocks <- list()
+  # the mixing record of the indicator summaries (incl_prob, grid_prob): split R-hat and ESS of
+  # every non-constant indicator; a grid parameter that never moves is not mixing (Q39(b), E167)
+  mixing <- list(covers = character(), failed = character())
+  indicator_check <- function(what, rh, es) {
+    note_check(sprintf("%s (%s): max split R-hat - 1", label, what), max_finite(rh) - 1,
+               if (QUICK) 0.1 else 0.01, hard = hard && !QUICK)
+    note_check(sprintf("%s (%s): 400 / min ESS", label, what), 400 / min_finite(es),
+               if (QUICK) 10 else 1, hard = hard && !QUICK)
+    if (isTRUE(max_finite(rh) < 1.01 && min_finite(es) > 400)) character() else
+      sprintf("%s (max R-hat %.4f, min ESS %.0f)", what, max_finite(rh), min_finite(es))
+  }
   bin <- which(cls == "binary")
   if (length(bin)) {
     st <- t(vapply(bin, function(k) {
       ch <- col(k)
       pr <- mean(unlist(ch))
       ess <- if (pr > 0 && pr < 1) ess_multi(ch) else NA_real_
-      c(pr, if (is.finite(ess)) sqrt(pr * (1 - pr) / ess) else 0, ess %||% NA_real_)
-    }, numeric(3)))
+      rh <- if (pr > 0 && pr < 1) rhat_split(ch) else NA_real_
+      c(pr, if (is.finite(ess)) sqrt(pr * (1 - pr) / ess) else 0, ess %||% NA_real_, rh %||% NA_real_)
+    }, numeric(4)))
     coords$incl <- nc_array(nm[bin], "incl")
     vars$incl_prob <- nc_array(st[, 1], "incl", "posterior inclusion probability (mean of the 0/1 column)")
     vars$incl_prob_mcse <- nc_array(st[, 2], "incl", "binomial MCSE sqrt(p(1 - p)/ESS), multi-chain ESS")
     vars$incl_prob_ess <- nc_array(st[, 3], "incl", "multi-chain ESS of the indicator (NA if constant)")
+    vars$incl_prob_rhat <- nc_array(st[, 4], "incl", "split R-hat of the indicator (NA if constant)")
+    moving <- st[, 1] > 0 & st[, 1] < 1
+    mixing$covers <- c(mixing$covers, "incl_prob")
+    if (any(moving)) mixing$failed <- c(mixing$failed, indicator_check(
+      "incl_prob", st[moving, 4], st[moving, 3]))
   }
   gr <- which(cls == "grid")
   if (length(gr)) {
     pr <- array(NA_real_, c(length(gr), length(grid)))
-    se <- pr
+    se <- es <- rh <- pr
     for (g in seq_along(gr)) {
-      cs <- categorical_summary(col(gr[g]), grid)
+      ch <- col(gr[g])
+      cs <- categorical_summary(ch, grid)
       pr[g, ] <- cs[, "prob"]
       se[g, ] <- cs[, "mcse"]
+      es[g, ] <- cs[, "ess"]
+      rh[g, ] <- cs[, "rhat"]
+      mixing$covers <- c(mixing$covers, paste("grid_prob", nm[gr[g]]))
+      visited <- pr[g, ] > 0
+      mixing$failed <- c(mixing$failed, if (sum(visited) == 1L) {
+        note_check(sprintf("%s (grid_prob %s): never left one grid point (1 = yes)", label,
+                           nm[gr[g]]), 1, 0, hard = hard && !QUICK)
+        sprintf("grid_prob %s (never left %g in %d draws: not mixing)", nm[gr[g]],
+                grid[visited], length(unlist(ch)))
+      } else indicator_check(paste("grid_prob", nm[gr[g]]), rh[g, visited], es[g, visited]))
     }
     coords$grid_param <- nc_array(nm[gr], "grid_param")
     coords$grid_support <- nc_array(grid, "grid_support")
     vars$grid_prob <- nc_array(pr, c("grid_param", "grid_support"), "posterior probability of each grid point")
-    vars$grid_prob_mcse <- nc_array(se, c("grid_param", "grid_support"), "binomial MCSE from the ESS of the indicator")
+    vars$grid_prob_mcse <- nc_array(se, c("grid_param", "grid_support"), "binomial MCSE from the ESS of the indicator (0 where the indicator is constant)")
+    vars$grid_prob_ess <- nc_array(es, c("grid_param", "grid_support"), "multi-chain ESS of the indicator (NA where it is constant)")
+    vars$grid_prob_rhat <- nc_array(rh, c("grid_param", "grid_support"), "split R-hat of the indicator (NA where it is constant)")
   }
   sel <- which(cls == "continuous" & (if (is.null(select)) FALSE else grepl(select, nm)))
   if (length(sel)) {
@@ -3323,7 +3413,7 @@ hyper_staging <- function(chains, select = NULL, grid = NULL) {
     blocks <- list(summary_vars("hypersel", function(ix) col(sel[ix[1]]), length(sel), "hyper_sel",
                                 "selected continuous hyperparameters (coordinate hyper_sel)"))
   }
-  list(vars = vars, coords = coords, blocks = blocks,
+  list(vars = vars, coords = coords, blocks = blocks, mixing = mixing,
        class = paste(sprintf("%s: %s", nm, cls), collapse = "; "))
 }
 
@@ -3826,8 +3916,8 @@ bv_run_fixture <- function(fx, L, seed, probe_answers, kind, label, chains_n = B
     r <- bv_eval(call, vars, seed + ch)
     r$data <- Y
     r$D <- draws
-    ex <- bv_extract(r, L, p, fx$vol, t_sel, horizon, seed + 1000L + ch,
-                     hyper = fx$family != "normal", vprior = vprior)
+    ex <- fatal_warnings(bv_extract(r, L, p, fx$vol, t_sel, horizon, seed + 1000L + ch,
+                                    hyper = fx$family != "normal", vprior = vprior))
     if (!identical(ex$row_map$bv_to_ours, prm$bv_to_ours)) stop("PHI rows not in the predicted order")
     ex$seconds <- r$seconds
     rm(r)
@@ -3835,9 +3925,10 @@ bv_run_fixture <- function(fx, L, seed, probe_answers, kind, label, chains_n = B
     chains[[ch]] <- ex
     message(sprintf("    %s run %d: %.1fs", fx$name, ch, ex$seconds))
   }
-  hy <- if (fx$family != "normal") hyper_staging(chains, BV_HYPER_SELECT,
-                                                 if (isTRUE(fx$grid)) BV_GRID_SUPPORT else NULL)
-    else list(vars = list(), coords = list(), blocks = list(), class = "none")
+  hy <- if (fx$family != "normal") fatal_warnings(hyper_staging(
+    chains, BV_HYPER_SELECT, if (isTRUE(fx$grid)) BV_GRID_SUPPORT else NULL, hard = mixing_hard,
+    label = paste(fx$name, "(hyperparameters)")))
+    else list(vars = list(), coords = list(), blocks = list(), class = "none", mixing = NULL)
   if (vprior && !is.null(chains[[1]]$vprior)) {
     th <- thinned_draws(lapply(chains, `[[`, "vprior"), BV_HYPER_KEEP)
     extra_vars$vprior_draws <- nc_array(th$draws, c("chain", "hyper_draw", "vprior_slot"), sprintf(
@@ -3878,8 +3969,9 @@ bv_run_fixture <- function(fx, L, seed, probe_answers, kind, label, chains_n = B
         "Phase 2 parity rule (Phase 3 DESIGN Conventions, sec. 9.8): quantiles of Pi, A, h_t",
         "(t >= 1), mu, phi, sigma (or lambda), forecasts; GL: and the hyperparameters with the",
         "same meaning")))
-  stage_reduced_fixture(fx$name, chains, info, c(extra_vars, hy$vars), c(extra_coords, hy$coords),
-                        hy$blocks, mixing_hard = mixing_hard)
+  fatal_warnings(stage_reduced_fixture(fx$name, chains, info, c(extra_vars, hy$vars),
+                                       c(extra_coords, hy$coords), hy$blocks,
+                                       mixing_hard = mixing_hard, hyper_mixing = hy$mixing))
 }
 
 probe_answers_text <- function(probes) {
@@ -3925,6 +4017,8 @@ run_bvars_p3 <- function(env) {
                        horizon = 0L, mixing_hard = FALSE, vprior = TRUE)
         "staged"
       }, error = function(e) paste("failed:", conditionMessage(e)))
+      # a run that fails (a fatal extraction warning included) is not staged: the job fails
+      note_check(sprintf("%s: run failed (1 = yes)", name), as.numeric(r != "staged"), 0)
       p8_txt <- c(p8_txt, sprintf("%s: %s", name, r))
     }
   } else p8_txt <- "not run: P5 or P10 undecided"
@@ -3956,6 +4050,8 @@ run_bvars_p3 <- function(env) {
       bv_run_fixture(fx, L, 20261500L + 100L * i, answers, kind, fx$run)
       "staged"
     }, error = function(e) paste("failed:", conditionMessage(e)))
+    # a run that fails (a fatal extraction warning included) is not staged: the job fails
+    note_check(sprintf("%s: run failed (1 = yes)", fx$name), as.numeric(r != "staged"), 0)
     run_txt <- c(run_txt, sprintf("%s (%s): %s", fx$name, fx$run, r))
     message("  ", run_txt[length(run_txt)])
   }

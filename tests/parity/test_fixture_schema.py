@@ -607,6 +607,31 @@ BV_SUMMARY_FIXTURES = [*BV_RUNS, *GL_RUNS, *P8_FIXTURES]
 P3_FIXTURES = [*BV_SUMMARY_FIXTURES, *WB_RUNS, PROBE_P3, PROBE_WB, PROBE_P16]
 COMPARED = ("Pi", "A", "sv", "h", "forecast", "lambda", "B", "Sigma")  # the gated summaries
 DOC = Path(__file__).parent / "SV_PARAMETRIZATION.md"
+# the SV runs: R1 and every GL run
+BV_SV_FIXTURES = [n for n, v in BV_RUNS.items() if v[2] == "sv"] + list(GL_RUNS)
+
+
+def documented_runs() -> dict[str, str]:
+    """The r-fixtures runs §7 of SV_PARAMETRIZATION.md names as the source of committed
+    fixtures, with the commit each ran at: "run <id> (commit `<sha>`)"."""
+    text = DOC.read_text(encoding="utf-8")
+    runs = dict(re.findall(r"run (\d{9,}) \(commit `([0-9a-f]{7,40})`\)", text))
+    assert runs, "SV_PARAMETRIZATION.md §7 names no fixture run"
+    return runs
+
+
+def check_run_provenance(a) -> None:
+    """The fixture comes from a CI run §7 names; a fixture that records its commit was made by
+    that run's commit."""
+    runs = documented_runs()
+    ci_run = str(a["ci_run"])
+    assert ci_run != "not set" and re.fullmatch(
+        r"https://github.com/[^/]+/[^/]+/actions/runs/\d+", ci_run
+    )
+    run_id = ci_run.rsplit("/", 1)[1]
+    assert run_id in runs, f"run {run_id} is not named in SV_PARAMETRIZATION.md §7"
+    if "git_commit" in a:
+        assert str(a["git_commit"]).startswith(runs[run_id]), (run_id, a["git_commit"])
 
 
 def check_summary_block(ds, prefix: str) -> None:
@@ -650,6 +675,7 @@ def test_phase3_provenance(name):
     for pkg in ("bayesianVARs 0.1.8", "bvars 1.1", "bsvars 4.0", "stochvol 3.2.9"):
         assert pkg in packages, pkg
     assert a["stochvol_version"] == "3.2.9"
+    check_run_provenance(a)
     if "data_file" in a:
         path = FIXTURES / a["data_file"]
         assert path.exists()
@@ -666,20 +692,61 @@ def test_phase3_summary_blocks_are_well_formed(name):
         check_summary_block(ds, prefix)
 
 
+def _finite(values) -> np.ndarray:
+    values = np.asarray(values, dtype=float).ravel()
+    return values[np.isfinite(values)]
+
+
+def _mixes(rhat, ess) -> bool:
+    rhat, ess = _finite(rhat), _finite(ess)
+    return bool(rhat.size and ess.size and rhat.max() < MAX_RHAT and ess.min() > MIN_ESS)
+
+
 @pytest.mark.parametrize("name", [*BV_RUNS, *GL_RUNS, *WB_RUNS])
 def test_phase3_mixing_record_matches_the_summaries(name):
-    """The fixture's mixing record (split R-hat < 1.01 and multi-chain ESS > 400 over the compared
-    summaries) agrees with its stored R-hat and ESS. Whether an unmixed fixture can serve a
-    comparison is the parity test's decision (D-59), not the schema's."""
+    """The fixture's mixing record (split R-hat < 1.01 and multi-chain ESS > 400 over what it
+    covers) agrees with its stored R-hat and ESS. A fixture with `mixing_covers` names the
+    summaries the record covers, the GL hyperparameters included (review C3): the indicator
+    summaries (incl_prob, grid_prob) are checked on their non-constant indicators, and a grid
+    parameter that never left one point is not mixing. Whether an unmixed fixture can serve a
+    comparison is the parity test's decision (D-59, Q39(b)), not the schema's."""
     ds = fixture(name)
     a = ds.attrs
-    prefixes = summary_prefixes(ds) & set(COMPARED)
-    assert prefixes
-    rhat = max(float(ds[f"{p}_rhat"].max()) for p in prefixes)
-    ess = min(float(ds[f"{p}_ess"].min()) for p in prefixes)
+    if "mixing_covers" in a:
+        covers = [c.strip() for c in str(a["mixing_covers"]).split(",")]
+        continuous = [c for c in covers if c in summary_prefixes(ds)]
+        indicators = [c for c in covers if c not in continuous]
+        assert set(summary_prefixes(ds) & set(COMPARED)) <= set(continuous)
+    else:  # the fixtures staged before the record named what it covers
+        continuous, indicators = sorted(summary_prefixes(ds) & set(COMPARED)), []
+    assert continuous
+    rhat = max(float(_finite(ds[f"{p}_rhat"].values).max()) for p in continuous)
+    ess = min(float(_finite(ds[f"{p}_ess"].values).min()) for p in continuous)
     np.testing.assert_allclose(float(a["mixing_max_rhat"]), rhat, rtol=1e-12)
     np.testing.assert_allclose(float(a["mixing_min_ess"]), ess, rtol=1e-12)
-    assert int(a["mixing_ok"]) == int(rhat < MAX_RHAT and ess > MIN_ESS)
+    failed = [p for p in continuous if not _mixes(ds[f"{p}_rhat"].values, ds[f"{p}_ess"].values)]
+    for item in indicators:
+        if item == "incl_prob":
+            prob = ds["incl_prob"].values
+            moving = (prob > 0.0) & (prob < 1.0)
+            if moving.any() and not _mixes(
+                ds["incl_prob_rhat"].values[moving], ds["incl_prob_ess"].values[moving]
+            ):
+                failed.append(item)
+        else:
+            kind, param = item.split(" ")
+            assert kind == "grid_prob", item
+            row = list(ds["grid_param"].values).index(param)
+            prob = ds["grid_prob"].values[row]
+            visited = prob > 0.0
+            if visited.sum() == 1 or not _mixes(
+                ds["grid_prob_rhat"].values[row][visited], ds["grid_prob_ess"].values[row][visited]
+            ):
+                failed.append(item)
+    assert int(a["mixing_ok"]) == int(not failed), failed
+    if "mixing_failed" in a:
+        entries = [] if a["mixing_failed"] == "none" else str(a["mixing_failed"]).split("; ")
+        assert [e.split(" (")[0] for e in entries] == failed
 
 
 @pytest.mark.parametrize("name", [*BV_RUNS, *GL_RUNS, *P8_FIXTURES])
@@ -698,7 +765,10 @@ def test_bayesianvars_runs_are_four_independent_runs(name):
     for tol in ("NG_tol", "R2D2_tol", "DL_tol"):
         if tol in call:
             assert f"{tol} = 0" in call
-    assert float(a["floor_fraction_phi"]) == 0.0 and float(a["floor_fraction_u"]) == 0.0
+    # recorded, not judged: P10's "a draw at a floor => that run not met" is applied at
+    # comparison (D-59, WP38), not here
+    for key in ("floor_fraction_phi", "floor_fraction_u"):
+        assert np.isfinite(float(a[key])) and 0.0 <= float(a[key]) <= 1.0, key
     assert int(a["nonfinite_phi"]) == 0
 
 
@@ -743,6 +813,23 @@ def test_bayesianvars_fixture_layout(name):
     assert "normal_sds = bv_normal_sds, priormean = 0.5" in a["call"]
 
 
+@pytest.mark.parametrize("name", BV_SV_FIXTURES)
+def test_sv_parameters_are_per_equation(name):
+    """Review C1: the SV parameters (mu, phi, sigma) of each equation are that equation's own
+    draws. The n = 7 fixtures of run 40243289623 held the first three equations' draws recycled
+    over seven columns (P4's n = 3 permutation applied at n = 7): mu's posterior mean was the same
+    in every equation to within 0.005, against a spread above 1 in the data's equations."""
+    ds = fixture(name)
+    params = list(ds["sv_param"].values)
+    assert params == ["mu", "phi", "sigma"]
+    mean = ds["sv_mean"].values  # (sv_param, equation)
+    assert mean.shape == (3, int(ds.attrs["n"]))
+    mu = mean[params.index("mu")]
+    assert np.ptp(mu) > 1e-2, f"mu's posterior mean is the same in every equation: {mu}"
+    for k in range(3):  # no two equations share a posterior
+        assert len(np.unique(np.round(mean[k], 12))) == mean.shape[1], params[k]
+
+
 @pytest.mark.parametrize("name", GL_RUNS)
 def test_gl_fixture_layout(name):
     """R3–R9: the global-local runs, their hyperparameter draws and the compared extras."""
@@ -782,12 +869,15 @@ def test_gl_fixture_layout(name):
         support, weight = ds["ng_grid_support"].values, ds["ng_grid_weight"].values
         assert "NG_a = ng_grid" in a["call"] and np.isclose(weight.sum(), 1.0)
         k = names.index("a1")
-        if "grid_prob" in ds:  # a moved over the grid: its posterior probabilities
+        if "grid_prob" in ds:  # a's posterior on its grid (staged whether or not a moved)
             np.testing.assert_array_equal(ds["grid_support"].values, support)
             prob = ds["grid_prob"].values
             assert prob.shape == (1, len(support)) and np.isclose(prob.sum(), 1.0)
             assert list(ds["grid_param"].values) == ["a1"]
-        else:  # a never left one grid point in any stored draw: a constant column, on the grid
+            assert "a1: grid" in a["hyper_columns"]
+            if (prob[0] > 0).sum() == 1:  # a never moved: recorded as not mixing (Q39(b), E167)
+                assert int(a["mixing_ok"]) == 0 and "grid_prob a1 (never left" in a["mixing_failed"]
+        else:  # run 40243289623's layout: a never left one grid point, a constant column
             values = np.unique(draws.values[:, :, k])
             assert len(values) == 1 and np.isclose(support, values[0]).any()
             assert "a1: constant" in a["hyper_columns"]
@@ -873,7 +963,9 @@ def test_wbvars_p16_draws():
         assert h.dims == ("run", "iter", "n2") and h.shape == (4, calls, 2)
         for field in ("h", "rho", "omega", "sigma2_omega", "s_"):
             assert np.all(np.isfinite(ds[f"p16_{vol}_{field}"].values)), (vol, field)
-        assert int(a[f"{vol}_extraction_pass"]) in (0, 1)  # recorded; a failure makes P16 undecided
+        assert int(a[f"{vol}_extraction_pass"]) in (0, 1)
+        if fixture(PROBE_WB).attrs["P16_status"] == "pending":  # §9.8: a failure => undecided
+            assert int(a[f"{vol}_extraction_pass"]) == 1, vol
         assert int(a[f"{vol}_draws_per_call"]) in (1, 2)
         assert np.asarray(a[f"{vol}_seeds"]).shape == (4,)
 
@@ -892,6 +984,9 @@ def test_wbvars_fixture_layout(name):
     assert list(ds["regressor"].values) == regressors and list(ds["equation"].values) == variables
     assert ds["B_q"].shape == (13, 3, 5) and ds["Sigma_q"].shape == (6, 5)
     assert ds["forecast_q"].shape == (4, 3, 5)
+    # the chained state runs' summaries carry dotted prefixes (h.h_*, state.state_*), as
+    # documented in SV_PARAMETRIZATION.md §7.3
+    assert {"h.h", "state.state"} <= summary_prefixes(ds)
     if "does not move V" in fixture(PROBE_WB).attrs["P12_answer"]:  # P12's recorded finding
         np.testing.assert_array_equal(ds["V_sd"].values, 0.0)
     assert int(a["extraction_pass"]) in (0, 1)  # chained state runs vs the main runs, recorded
@@ -920,3 +1015,15 @@ def test_stochvol_t5_regenerated_with_a_fixed_stochvol():
         exact = np.asarray(a[f"check_4obs_exact_{part}_q"])
         assert q.shape == exact.shape == (5,) and np.all(np.diff(q) > 0)
     assert "check_4obs_error" not in a
+
+
+def test_stochvol_t5_provenance():
+    """The SV-t fixture keeps the Phase 2 attribute set (its design is Phase 2's) plus the
+    Phase 3 record: R and stochvol versions, the snapshot, the packages and the CI run (D-54)."""
+    a = fixture("stochvol_v_t5").attrs
+    assert a["design"].startswith("docs/phase2/DESIGN.md") and "design_p3" in a
+    assert a["r_version"].startswith(P3_R_VERSION) and a["stochvol_version"] == "3.2.9"
+    assert a["ppm_snapshot"] == P3_SNAPSHOT
+    assert f"/{P3_SNAPSHOT}" in a["repos"] and "packagemanager.posit.co" in a["repos"]
+    assert "stochvol 3.2.9" in a["packages"]
+    check_run_provenance(a)
