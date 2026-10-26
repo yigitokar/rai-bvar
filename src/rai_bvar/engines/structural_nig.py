@@ -78,6 +78,10 @@ _RANK_TOL = 1e-10  # |R_jj| relative to the stacked column norm (as ConjugatePro
 _EB_NAMES = ("lambda", "alpha", "soc", "sur")  # the GLP hyperparameters (Phase 1, P2 §6.5)
 _SCALE_NAMES = ("cross", "contemp")  # κ_c, κ_a: flat on their log over LOG_FLAT_BOX (P3 §4.3)
 _HYPER_NAMES = (*_EB_NAMES, *_SCALE_NAMES)
+# L-BFGS-B tolerances when cross or contemp is free (P3 Q38, owner 2026-10-25: tighten the free-scale
+# path so A9's projected gradient at the mode is below 1e-6). The Phase 2 plug-in (cross and contemp
+# fixed) keeps ftol = 1e-12 and SciPy's default gtol, so its results stay bitwise (E118).
+_FREE_SCALE_OPTIONS = {"ftol": 1e-15, "gtol": 1e-9}
 
 
 @dataclass(frozen=True)
@@ -553,6 +557,10 @@ def eb_structural(
         anchor = 0.0 if state["f"] is None else state["f"]
         return anchor + 1e4 * (1.0 + float(np.sum((z - state["z"]) ** 2)))
 
+    options: dict[str, float] = {"ftol": 1e-12, "maxiter": 2000}
+    if any(name in _SCALE_NAMES for name in free):
+        options.update(_FREE_SCALE_OPTIONS)
+
     def run(z_start: np.ndarray):
         res = optimize.minimize(
             objective,
@@ -560,7 +568,7 @@ def eb_structural(
             method="L-BFGS-B",
             jac="3-point",
             bounds=list(zip(lo, hi, strict=True)),
-            options={"ftol": 1e-12, "maxiter": 2000},
+            options=options,
         )
         gain, grad = _stationarity(objective, res.x, lo, hi)
         return res, evaluate(np.exp(res.x))[1], gain, grad

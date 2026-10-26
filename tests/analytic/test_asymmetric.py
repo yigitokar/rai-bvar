@@ -248,28 +248,10 @@ def test_a9_free_cross_eb_passes_phase1s_stationarity_test(data, name):
     assert lo <= fit.hyper["cross"] <= hi
 
 
-# Finding (WP33, recorded, not retuned): eb_structural's L-BFGS-B keeps the Phase 2 settings
-# (ftol 1e-12 and SciPy's default pgtol 1e-5, so the free-cross path is the same optimiser as the
-# bitwise fixed-cross one, E118) and stops on "NORM OF PROJECTED GRADIENT <= PGTOL" at a projected
-# gradient of 4.5e-6 (lambda+cross) and 1.4e-6 (+contemp) on this window, above A9's 1e-6, while
-# Phase 1's stationarity rule (predicted Newton gain 9e-13 and 1.6e-13 < 1e-6) passes. A tighter
-# pgtol alone does not reach 1e-6 (ftol then stops it), so meeting the criterion means changing
-# the optimiser's tolerances: the owner's decision.
-# The +contemp case misses by 37% only, and where L-BFGS-B stops depends on its finite-difference
-# gradients (BLAS rounding), so that case is not strict: an XPASS elsewhere is not a regression.
-_PG_FINDING = {
-    "lambda+cross": pytest.mark.xfail(
-        strict=True,
-        reason="A9 projected gradient 4.5e-6 > 1e-6 at the L-BFGS-B stop (WP33 finding)",
-    ),
-    "lambda+cross+contemp": pytest.mark.xfail(
-        strict=False,
-        reason="A9 projected gradient 1.4e-6 > 1e-6 at the L-BFGS-B stop (WP33 finding; 37% margin)",
-    ),
-}
-
-
-@pytest.mark.parametrize("name", [pytest.param(n, marks=_PG_FINDING[n]) for n in EB_FREE])
+# A9's criterion: the projected gradient at the returned mode is below 1e-6. eb_structural's free-scale
+# path (cross or contemp free) runs L-BFGS-B with tightened tolerances for it (P3 Q38, owner
+# 2026-10-25); with the Phase 2 settings it stopped at 4.5e-6 (lambda+cross) and 1.4e-6 (+contemp).
+@pytest.mark.parametrize("name", list(EB_FREE))
 def test_a9_free_cross_eb_projected_gradient(data, name):
     model = ac(**EB_FREE[name])
     fit = fitted(model, data)
