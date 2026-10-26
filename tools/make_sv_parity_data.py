@@ -22,7 +22,13 @@ R side only reads committed numbers (N02 §13.6, N03 §7.4):
   runs (bayesianVARs could not be built here, see the ``bvars`` section of the R script):
   ``y_t = c + Σ_l B_l y_{t−l} + A⁻¹ diag(e^{h_t/2}) ε_t`` with ``A`` unit lower triangular
   (``A u_t = e_t``, N04 §2) and independent AR(1) log-volatilities;
-* the bayesianVARs probe datasets of DESIGN §9.9 (P1–P5, N04 §9.8, §10 item 4).
+* the bayesianVARs probe datasets of DESIGN §9.9 (P1–P5, N04 §9.8, §10 item 4);
+* Phase 3 (docs/phase3/DESIGN.md §9.8, work package WP29): ``probe_gl`` (P8, iid normal,
+  ``n = 3``, ``T_eff = 8`` at ``p = 2``), ``probe_t2n5`` (P16, iid normal, ``n = 5``, ``T = 2`` at
+  ``p = 1``) and ``qd3_growth``, the FRED-QD small set (``qd_small_levels.csv``) as annualised
+  growth of GDPC1 and GDPCTPI (``4 Δ`` of the 100 × log levels) and FEDFUNDS, for the bvars runs;
+  ``probe_corr3`` (P2 at ``n = 3``: a known unit lower-triangular ``A`` whose ``A``, ``2I − A`` and
+  ``A⁻¹`` differ in the ``(3, 1)`` entry).
 
 Every CSV has a ``date`` column (quarterly periods ending before 2020, so no COVID-sample warning
 fires) and float columns written with ``%.17g`` (R's ``read.csv`` and
@@ -196,6 +202,55 @@ DATASETS: dict[str, Dataset] = {
             "bayesianVARs probe P4 (sv_para layout): VAR(1) with diagonal A and SV "
             "parameters that differ across equations, T = 400",
         ),
+        Dataset(
+            "qd3_growth",
+            "qd",
+            "",  # dates come from qd_small_levels.csv
+            0,
+            {
+                "source": "qd_small_levels.csv (100 x log GDPC1, 100 x log GDPCTPI, FEDFUNDS)",
+                "transform": "4 * diff for GDPC1 and GDPCTPI (annualised growth, percent), FEDFUNDS as is",
+                "n": 3,
+                "T_raw": 239,
+            },
+            "bvars parity data (Phase 3 DESIGN sec. 9.8): the FRED-QD small set as annualised real-"
+            "GDP growth, GDP-deflator inflation and the federal funds rate, 1960Q2-2019Q4",
+        ),
+        Dataset(
+            "probe_corr3",
+            "probe",
+            "1860Q1",
+            20261033,
+            {
+                "n": 3,
+                "T_raw": 601,
+                "intercept": [2.0, -1.0, 1.0],
+                "own_lag": 0.3,
+                "A": [[1.0, 0.0, 0.0], [-0.6, 1.0, 0.0], [0.5, -0.7, 1.0]],
+                "d": [1.0, 0.5, 2.0],
+            },
+            "bayesianVARs probe P2 at n = 3 (Phase 3 DESIGN sec. 9.8, review M10): VAR(1), "
+            "A u_t = e_t with A unit lower triangular, e_t ~ N(0, diag d), T = 600; the (3, 1) "
+            "entries of A, 2I - A and A^-1 differ (0.5, -0.5, -0.08)",
+        ),
+        Dataset(
+            "probe_gl",
+            "probe",
+            "1990Q1",
+            20261031,
+            {"n": 3, "T_raw": 10, "lags": 2},
+            "bayesianVARs probe P8 (meaning of the global-local hyperparameters, Phase 3 "
+            "DESIGN sec. 9.8): iid N(0, 1), T_eff = 8 at p = 2, prior-sensitive",
+        ),
+        Dataset(
+            "probe_t2n5",
+            "probe",
+            "1990Q1",
+            20261032,
+            {"n": 5, "T_raw": 3, "lags": 1},
+            "bvars probe P16 (is the common-SV h sampler exact? Phase 3 DESIGN sec. 9.8): "
+            "iid N(0, 1), T = 2 at p = 1, n = 5",
+        ),
     )
 }
 
@@ -315,8 +370,16 @@ def _var_frame(ds: Dataset) -> pd.DataFrame:
 def _probe_frame(ds: Dataset) -> pd.DataFrame:
     g, rng = ds.dgp, np.random.default_rng(ds.seed)
     n, T_raw = g["n"], g["T_raw"]
-    if ds.name == "probe_tiny":
+    if ds.name in ("probe_tiny", "probe_gl", "probe_t2n5"):
         y = rng.standard_normal((T_raw, n))
+    elif ds.name == "probe_corr3":
+        A, d, c = np.asarray(g["A"]), np.asarray(g["d"]), np.asarray(g["intercept"])
+        y = np.zeros((T_raw + 200, n))
+        y[0] = c / (1.0 - g["own_lag"])
+        for t in range(1, y.shape[0]):
+            u = np.linalg.solve(A, np.sqrt(d) * rng.standard_normal(n))  # A u_t = e_t
+            y[t] = c + g["own_lag"] * y[t - 1] + u
+        y = y[-T_raw:]
     elif ds.name == "probe_corr":
         sd, corr = np.asarray(g["sd"]), g["corr"]
         cov = np.outer(sd, sd) * np.array([[1.0, corr], [corr, 1.0]])
@@ -340,8 +403,19 @@ def _probe_frame(ds: Dataset) -> pd.DataFrame:
     return frame
 
 
+def _qd_growth_frame(ds: Dataset) -> pd.DataFrame:
+    """``qd3_growth``: ``4 Δ(100 log level)`` of GDPC1 and GDPCTPI, FEDFUNDS in levels."""
+    raw = pd.read_csv(QD_FILE, float_precision="round_trip")
+    frame = pd.DataFrame({"date": raw["date"].to_numpy()[1:]})
+    for col in ("GDPC1", "GDPCTPI"):
+        frame[f"d{col}"] = 4.0 * np.diff(raw[col].to_numpy(np.float64))
+    frame["FEDFUNDS"] = raw["FEDFUNDS"].to_numpy(np.float64)[1:]
+    return frame
+
+
 _GENERATORS: dict[str, Callable[[Dataset], pd.DataFrame]] = {
     "sv": _sv_frame,
+    "qd": _qd_growth_frame,
     "var": _var_frame,
     "probe": _probe_frame,
 }
@@ -371,10 +445,14 @@ def md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
-def write_data(out: Path = DATA_DIR) -> list[Path]:
+def write_data(out: Path = DATA_DIR, only: list[str] | None = None) -> list[Path]:
+    """Write the CSVs (``only``: just these datasets, so a committed CSV that a newer NumPy or
+    BLAS would round differently, and the fixtures that record its md5, stay untouched)."""
     out.mkdir(parents=True, exist_ok=True)
     paths = []
     for name, ds in DATASETS.items():
+        if only and name not in only:
+            continue
         path = out / ds.file
         path.write_text(to_csv_text(generate(name)))
         paths.append(path)
@@ -501,7 +579,10 @@ def run_r(staging: Path, quick: bool) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("data", help="write tests/parity/fixtures/data/*.csv")
+    p_data = sub.add_parser("data", help="write tests/parity/fixtures/data/*.csv")
+    p_data.add_argument(
+        "--only", nargs="+", choices=sorted(DATASETS), help="write only these datasets"
+    )
     sub.add_parser("check", help="compare a fresh regeneration with the committed CSVs")
     p_pack = sub.add_parser("pack", help="convert staged R JSON into NetCDF fixtures")
     p_pack.add_argument("staging", type=Path)
@@ -516,7 +597,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "data":
-        write_data()
+        write_data(only=args.only)
     elif args.command == "check":
         return check_data()
     elif args.command == "pack":
