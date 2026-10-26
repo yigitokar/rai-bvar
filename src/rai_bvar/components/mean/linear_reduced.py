@@ -35,6 +35,15 @@ independent across ``j`` and correlated within ``j``, which the CTA supports —
 (``FitCache.dummy``). They are never scaled by ``Σ_t`` (that would make the ``Π`` prior depend on
 ``A``), never enter ``U``, ``E``, ``W`` or the likelihood, and leave ``K_j`` free of ``Π``.
 
+**Deviation path** (P3 §3.4, D-41; :func:`cccm_core_log`, ``MeanStatic.coef_log``): under a
+varying (global-local) coefficient prior the moments are ``GaussianLogDiag`` and each ``π_j`` is
+drawn about its prior mean ``m_j`` in deviation coordinates with the Jacobi scaling in log space,
+``K_j = diag(exp(log p_j)) + Xᵀdiag(W_·j)X``, ``b̃_j = Xᵀ(G_j + W_·j ⊙ (Xπ_j − Xm_j))``,
+``π_j = m_j + d_j`` (``linalg.precision_draw_log``), and the step stores ``glob.mean.dev_log`` (row
+``j`` = ``log|π_j − m_j|``, exact). The same scan, the same law; with ``GaussianDiag`` moments
+:func:`cccm_core` runs unchanged. The ``Π`` prior's log density then needs the scales, so it is
+evaluated from the full chain state (:meth:`CCCMStep.log_prior_state`).
+
 **The rest of the reduced-form sweep** (DESIGN §4.3) lives elsewhere: ``a_j | Π, λ_j`` is
 ``Recursive.contemp_step`` on ``ỹ = U`` (the regression of ``u_j`` on ``−u_{<j}``; N04 §6.2), and
 the volatility blocks receive ``e_j = (UAᵀ)_j``. :class:`ReducedEq` is the per-equation mean of
@@ -66,7 +75,12 @@ from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before an
 from rai_bvar.engines.mcmc.config import MeanStatic, StaticConfig
 from rai_bvar.engines.mcmc.data import packed_products
 from rai_bvar.engines.mcmc.keys import Block, Key, Sub, eq_key, sub_key
-from rai_bvar.engines.mcmc.linalg import precision_draw_factored, precision_factor, weighted_gram
+from rai_bvar.engines.mcmc.linalg import (
+    precision_draw_factored,
+    precision_draw_log,
+    precision_factor,
+    weighted_gram,
+)
 from rai_bvar.engines.mcmc.protocols import Batching, EqMap, KernelBase
 from rai_bvar.engines.mcmc.state import (
     CCCMDraw,
@@ -79,6 +93,7 @@ from rai_bvar.engines.mcmc.state import (
     EqContext,
     FitCache,
     GaussianDiag,
+    GaussianLogDiag,
     GaussianPrec,
     GlobalState,
     GlobDraw,
@@ -98,6 +113,7 @@ __all__ = [
     "ReducedEq",
     "cccm_conditional_j",
     "cccm_core",
+    "cccm_core_log",
     "cccm_noise",
     "cccm_precisions",
     "cccm_weights",
@@ -240,6 +256,87 @@ def cccm_core(
     return Pi_new, StepInfo(ok, info.min_pivot)
 
 
+def cccm_core_log(
+    Pi: Array,
+    a: Array,
+    inv_lam: Array,
+    X: Array,
+    Y: Array,
+    XX: Array | Empty,
+    mean0: Array,
+    log_prec0: Array,
+    Z: Array,
+    *,
+    gram: str,
+    precompute: bool,
+    tile: int = 0,
+) -> tuple[Array, Array, StepInfo]:
+    """The CTA scan of :func:`cccm_core` on the deviation path (P3 §3.4): ``log_prec0`` (n, k) the
+    log prior precisions of the ``π_j`` (row ``j``) and ``mean0`` the centres ``m_j``; per ``j``
+
+        b̃_j = Xᵀ(G_j + W_·j ⊙ (Xπ_j − Xm_j)),   d_j ~ N(K_j⁻¹b̃_j, K_j⁻¹),   π_j = m_j + d_j
+
+    with ``K_j = diag(exp(log p_j)) + Xᵀdiag(W_·j)X`` Jacobi-scaled in logs
+    (``linalg.precision_draw_log``). ``precompute``: every Gram ``Xᵀdiag(W_·j)X`` before the loop
+    (the factorisation, which depends on ``log p_j``, is in the loop). Other arguments as in
+    :func:`cccm_core`; no SOC/SUR rows (global-local priors have none, P3 D-36).
+
+    Returns ``(Π_new, dev_log, info)``: ``dev_log`` (n, k) with row ``j`` = ``log|π_j − m_j|``
+    exactly; ``info.ok`` iff every factorisation succeeded and ``Π_new`` is finite."""
+    n, k = Pi.shape[1], X.shape[1]
+    A = unit_lower(a)
+    W = inv_lam.T @ (A * A)
+    xx = None if isinstance(XX, Empty) else XX
+    if gram == "packed" and xx is None:
+        xx = packed_products(X)
+    E0 = (Y - X @ Pi) @ A.T
+    WI = inv_lam.T
+    Gs = jax.vmap(lambda w: _gram(w, X, xx, gram, tile))(W.T) if precompute else None
+
+    def body(
+        j: Array, carry: tuple[Array, Array, Array, StepInfo]
+    ) -> tuple[Array, Array, Array, StepInfo]:
+        Pi, E, dev, info = carry
+        G = Gs[j] if precompute else _gram(W[:, j], X, xx, gram, tile)
+        A_j = A[:, j]
+        pi_old = Pi[:, j]
+        f = X @ (pi_old - mean0[j])
+        Gv = (E * WI) @ A_j
+        b = X.T @ (Gv + W[:, j] * f)
+        d, dl, info_j = precision_draw_log(log_prec0[j], G, b, Z[j])
+        pi_new = mean0[j] + d
+        E = E - (X @ (pi_new - pi_old))[:, None] * A_j[None, :]
+        return Pi.at[:, j].set(pi_new), E, dev.at[j].set(dl), info.merge(info_j)
+
+    init = (Pi, E0, jnp.zeros((n, k), jnp.float64), StepInfo.success())
+    Pi_new, _, dev_log, info = lax.fori_loop(0, n, body, init)
+    ok = info.ok & jnp.all(jnp.isfinite(Pi_new))
+    return Pi_new, dev_log, StepInfo(ok, info.min_pivot)
+
+
+def cccm_deviation_conditional_j(
+    Pi: Array,
+    a: Array,
+    inv_lam: Array,
+    X: Array,
+    Y: Array,
+    centre: Array,
+    log_prec0: Array,
+    j: int | Array,
+) -> tuple[Array, Array, Array]:
+    """``(log p_j, G_j, b̃_j)`` of ``π_j | π_{−j}, A, Λ, y`` on the deviation path at the current
+    ``Π`` (from scratch; :func:`cccm_core_log`): ``π_j = centre_j + d``, ``d ~ N(K⁻¹b̃, K⁻¹)``,
+    ``K = diag(exp(log p_j)) + G_j``."""
+    k = X.shape[1]
+    A = unit_lower(a)
+    W = inv_lam.T @ (A * A)
+    E = (Y - X @ Pi) @ A.T
+    w = W[:, j]
+    G = weighted_gram(w, F=X, mode="batched", q=k)
+    b = X.T @ ((E * inv_lam.T) @ A[:, j] + w * (X @ (Pi[:, j] - centre[j])))
+    return log_prec0[j], G, b
+
+
 def cccm_conditional_j(
     Pi: Array,
     a: Array,
@@ -313,17 +410,20 @@ def _check_static(static: Any, owner: str) -> None:
 class CCCMStep(KernelBase):
     """Pre-phase global step ``Π | A, λ_eff, y`` (``Block.G_CCCM``; DESIGN §3.6, §3.7.3, §4.3).
 
-    Reads ``glob.mean.Pi``, ``eq.struct.a`` and ``eq.vol`` (through ``vol.log_var_eq``); writes
-    ``glob.mean.Pi``. Marginal of the mixture indicators: it conditions on the exact Gaussian
-    likelihood given ``λ_eff`` (DESIGN §4.6 item 2). ``vol``: the program's ``VolBlock``
+    Reads ``glob.mean.Pi``, ``eq.struct.a``, ``eq.vol`` (through ``vol.log_var_eq``) and the
+    coefficient prior's ``eq.coef``, ``glob.coef`` (through ``moments``); writes ``glob.mean.Pi``
+    (and ``glob.mean.dev_log`` on the deviation path, P3 §3.4). Marginal of the mixture
+    indicators: it conditions on the exact Gaussian likelihood given ``λ_eff`` (DESIGN §4.6
+    item 2). ``vol``: the program's ``VolBlock``
     (required by :meth:`sample`); ``coef``: its ``CoefPrior`` (``moments_eq`` through ``eq_map``,
     so Phase 3 global-local priors plug in unchanged), or ``None`` for the prior arrays' moments.
     """
 
     block: ClassVar[Block] = Block.G_CCCM
     phase: ClassVar[Literal["pre", "post"]] = "pre"
-    reads: ClassVar[frozenset[str]] = frozenset({"glob.mean.Pi", "eq.struct.a", "eq.vol"})
-    writes: ClassVar[frozenset[str]] = frozenset({"glob.mean.Pi"})
+    reads: ClassVar[frozenset[str]] = frozenset(
+        {"glob.mean.Pi", "eq.struct.a", "eq.vol", "eq.coef", "glob.coef"}
+    )  # eq.coef, glob.coef: through moments (P3 §2.4, E70)
     marginal_of_indicators: ClassVar[bool] = True
 
     static: MeanStatic
@@ -331,10 +431,18 @@ class CCCMStep(KernelBase):
     coef: Any = None
 
     cccm_core = staticmethod(cccm_core)  # overridable internal (DESIGN §4.9)
+    cccm_core_log = staticmethod(cccm_core_log)  # the deviation path's scan (P3 §2.4)
 
     def __post_init__(self) -> None:
         super().__post_init__()
         _check_static(self.static, "CCCMStep")
+
+    @property
+    def writes(self) -> frozenset[str]:  # type: ignore[override]
+        """``glob.mean.Pi``, and on the deviation path ``glob.mean.dev_log`` (P3 §3.4)."""
+        if self.static.coef_log:
+            return frozenset({"glob.mean.Pi", "glob.mean.dev_log"})
+        return frozenset({"glob.mean.Pi"})
 
     @classmethod
     def from_static(cls, static: StaticConfig, *, vol: Any = None, coef: Any = None) -> CCCMStep:
@@ -398,6 +506,28 @@ class CCCMStep(KernelBase):
             **self._core_kwargs(cache),
         )  # fmt: skip
 
+    def gl_deviation(self, mean: Array) -> Array:
+        """The centres ``m_j`` of the deviation coordinates (overridable; mutant M26)."""
+        return mean
+
+    def _draw_log(
+        self, key: Key, Pi: Array, a: Array, inv_lam: Array, data: EngineData, cache: FitCache,
+        pm: GaussianLogDiag,
+    ) -> tuple[CCCMGlobal, StepInfo]:  # fmt: skip
+        """The deviation path (P3 §3.4): ``(CCCMGlobal(Π, dev_log), info)``."""
+        if self.static.n_dummy:
+            raise ValueError("global-local priors carry no SOC/SUR dummy rows (P3 D-36)")
+        n, k = data.Y.shape[1], data.X.shape[1]
+        Z = cccm_noise(key, n, k)
+        kw = {"gram": self.static.gram, "precompute": self.static.cccm_precompute}
+        if self.static.gram == "packed_tiled":
+            kw["tile"] = self.static.gram_tile
+        centre = self.impl("gl_deviation")(pm.mean)
+        Pi_new, dev_log, info = self.impl("cccm_core_log")(
+            Pi, a, inv_lam, data.X, data.Y, cache.XX, centre, pm.log_prec, Z, **kw
+        )
+        return CCCMGlobal(Pi=Pi_new, dev_log=dev_log), info
+
     # ----------------------------------------------------------------- GlobalStep
     def init(
         self, key: Key, st: ChainState, data: EngineData, prior: PriorArrays, cache: FitCache
@@ -409,6 +539,11 @@ class CCCMStep(KernelBase):
         log_lam0 = _prior_log_lam(prior.eq.vol_core, _vol_rw(self.vol))
         inv_lam = masked_inv_lam(jnp.broadcast_to(log_lam0[:, None], (n, T_pad)), data.tmask)
         pm = self.moments(st, prior)
+        if isinstance(pm, GaussianLogDiag):  # deviation path: also sets dev_log (P3 §3.7)
+            mean, _ = self._draw_log(
+                key, jnp.zeros((k, n)), jnp.zeros((n, n - 1)), inv_lam, data, cache, pm
+            )
+            return dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=mean))
         Pi, _ = self._draw(key, jnp.zeros((k, n)), jnp.zeros((n, n - 1)), inv_lam, data, cache, pm)
         return dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=CCCMGlobal(Pi=Pi)))
 
@@ -419,6 +554,11 @@ class CCCMStep(KernelBase):
         data = ctx.data
         inv_lam = self.inv_lam(st, data.tmask, eq_map)
         pm = self.moments(st, ctx.prior, eq_map)
+        if isinstance(pm, GaussianLogDiag):  # deviation path (P3 §3.4)
+            mean, info = self._draw_log(
+                key, st.glob.mean.Pi, st.eq.struct.a, inv_lam, data, ctx.cache, pm
+            )
+            return dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=mean)), info
         Pi, info = self._draw(key, st.glob.mean.Pi, st.eq.struct.a, inv_lam, data, ctx.cache, pm)
         st = dataclasses.replace(st, glob=dataclasses.replace(st.glob, mean=CCCMGlobal(Pi=Pi)))
         return st, info
@@ -429,14 +569,53 @@ class CCCMStep(KernelBase):
         """The exact conditional of ``π_j`` at the state (:func:`cccm_conditional_j`)."""
         data = ctx.data
         pm = self.moments(st, ctx.prior, eq_map)
+        if isinstance(pm, GaussianLogDiag):  # π coordinates of the deviation path's conditional
+            centre = self.impl("gl_deviation")(pm.mean)
+            log_p, G, b = cccm_deviation_conditional_j(
+                st.glob.mean.Pi, st.eq.struct.a, self.inv_lam(st, data.tmask, eq_map), data.X,
+                data.Y, centre, pm.log_prec, j,
+            )  # fmt: skip
+            K = jnp.diag(jnp.exp(log_p)) + G
+            return GaussianPrec(K=K, b=b + K @ jnp.take(centre, j, axis=0))
         dummy = self.dummy_terms(ctx.cache) if self.static.n_dummy else None
         return cccm_conditional_j(
             st.glob.mean.Pi, st.eq.struct.a, self.inv_lam(st, data.tmask, eq_map), data.X,
             data.Y, pm.mean, pm.prec, j, dummy=dummy,
         )  # fmt: skip
 
+    def deviation_conditional_j(
+        self, st: ChainState, ctx: SweepCtx, j: int | Array, eq_map: EqMap | None = None
+    ) -> tuple[Array, Array, Array]:
+        """``(log p_j, G_j, b̃_j)`` of ``π_j`` on the deviation path at the state (failure
+        diagnostics in log space, D-62)."""
+        data = ctx.data
+        pm = self.moments(st, ctx.prior, eq_map)
+        centre = self.impl("gl_deviation")(pm.mean)
+        return cccm_deviation_conditional_j(
+            st.glob.mean.Pi, st.eq.struct.a, self.inv_lam(st, data.tmask, eq_map), data.X,
+            data.Y, centre, pm.log_prec, j,
+        )  # fmt: skip
+
+    def log_prior_state(
+        self, st: ChainState, prior: PriorArrays, eq_map: EqMap | None = None
+    ) -> Array:
+        """``Σ_j log N(π_j; m_j, diag(exp(−log p_j)))`` from the full chain state (P3 §3.7): the
+        moments of ``coef.moments_eq`` at the current scales, the quadratic form from
+        ``glob.mean.dev_log`` under the deviation path (exact at any scale); with fixed moments
+        it equals :meth:`log_prior` (without dummy rows)."""
+        pm = self.moments(st, prior, eq_map)
+        if isinstance(pm, GaussianLogDiag):
+            lp = 0.5 * (pm.log_prec - _LOG_2PI) - 0.5 * jnp.exp(
+                2.0 * st.glob.mean.dev_log + pm.log_prec
+            )
+            return jnp.sum(jnp.where(pm.cmask > 0, lp, 0.0))
+        r = st.glob.mean.Pi.T - pm.mean
+        return 0.5 * jnp.sum(jnp.log(pm.prec) - _LOG_2PI - pm.prec * r * r)
+
     def log_prior(self, glob: GlobalState, prior: PriorArrays) -> Array:
-        """``Σ_j log N(π_j; m_j, diag(1/p_j))`` from ``prior.eq.coef`` (fixed moments); with SOC/SUR
+        """``Σ_j log N(π_j; m_j, diag(1/p_j))`` from ``prior.eq.coef`` (fixed moments: the
+        ``FixedDiagonal`` form only; a global-local prior's needs the scales, see
+        :meth:`log_prior_state`); with SOC/SUR
         rows (WP25) plus their factor ``Σ_j Σ_d log N(y_{d,j}; x_d'π_j, 1/w_j)``, i.e. the log
         prior up to the rows' normalising constant."""
         c = prior.eq.coef

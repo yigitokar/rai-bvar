@@ -10,6 +10,14 @@ Monitored sets (D-33; DESIGN §8.1; fixes E3, E16). The **primary** set decides 
 never gates: every active ``a_ij``; ``h_{i,1}``, ``h_{i,⌈T/2⌉}``; the reduced-form intercepts
 ``B_{0,i}``; ``log p_i``; ``ν_i`` (with its escape probability in the table); the log prior.
 
+Phase 3 (P3 D-52, §3.7; global-local and SSVS priors): ``group`` fields (``(G,)``, one value per
+coefficient group): the group log scales (HS ``gl_log_zeta``, NG/R2D2 ``gl_log_xi``) are primary
+when ``G ≤ max(2p, n)`` (global, olcl-lagwise, equation-wise groups) and secondary otherwise; SSVS
+``gl_p`` (the inclusion probability ``p_g``) is primary under a Beta hyperprior; the HS auxiliary
+``gl_log_tau`` and the hyperprior index ``gl_a_idx`` (with a grid on ``a``) are secondary. Local
+scales are latent: neither monitored nor stored (§3.7). Under a varying coefficient prior the log
+prior reads the deviations' ``dev_log`` and the scales from the full chain state.
+
 On device, :func:`monitor_values` returns one array per *field* (``"mu"``: one value per
 equation, ``"a"``: the strict lower triangle in row-major order, ``"loglik"``: a scalar); the
 runner stacks them to ``(chains, draws, …)``. On the host a :class:`MonitorSpec` names every scalar
@@ -51,7 +59,7 @@ from jax import lax
 
 from rai_bvar import diagnostics as dg
 from rai_bvar.engines.mcmc import _jax  # noqa: F401  (enables float64 before any computation)
-from rai_bvar.engines.mcmc.config import StaticConfig, VolStatic
+from rai_bvar.engines.mcmc.config import CoefPriorStatic, StaticConfig, VolStatic
 from rai_bvar.engines.mcmc.state import (
     ChainState,
     EngineData,
@@ -88,13 +96,42 @@ class MonitorField(NamedTuple):
     (``(n,)``) or ``"pair"`` (``(n(n−1)/2,)``, the active ``a_ij`` in row-major order)."""
 
     name: str
-    kind: Literal["scalar", "equation", "pair"]
+    kind: Literal["scalar", "equation", "pair", "group"]
     primary: bool
 
 
-def monitor_fields(mean_kind: str, vol: VolStatic, n: int, n_det: int) -> tuple[MonitorField, ...]:
+def gl_fields(coef: CoefPriorStatic | None, n: int, lags: int) -> tuple[MonitorField, ...]:
+    """The ``group`` fields of a global-local or SSVS coefficient prior (P3 D-52; module
+    docstring); ``()`` for a fixed prior."""
+    if coef is None or not coef.varies:
+        return ()
+    primary = coef.n_groups <= max(2 * lags, n)
+    out: list[MonitorField] = []
+    if coef.kind == "horseshoe":
+        out += [MonitorField("gl_log_zeta", "group", primary)]
+        out += [MonitorField("gl_log_tau", "group", False)]
+    elif coef.kind in ("normal_gamma", "r2d2"):
+        out.append(MonitorField("gl_log_xi", "group", primary))
+    elif coef.kind == "ssvs" and coef.p_beta:
+        out.append(MonitorField("gl_p", "group", True))
+    if coef.a_grid:
+        out.append(MonitorField("gl_a_idx", "group", False))
+    return tuple(out)
+
+
+def monitor_fields(
+    mean_kind: str,
+    vol: VolStatic,
+    n: int,
+    n_det: int,
+    *,
+    coef: CoefPriorStatic | None = None,
+    lags: int = 1,
+) -> tuple[MonitorField, ...]:
     """The monitor fields of a composition, primary fields first (DESIGN §8.1). Shared by
-    :func:`monitor_spec` (host) and :func:`monitor_values` (device), so the two always agree."""
+    :func:`monitor_spec` (host) and :func:`monitor_values` (device), so the two always agree.
+    ``coef`` (the coefficient-prior static) and ``lags`` add the ``group`` fields of a
+    global-local prior (:func:`gl_fields`, P3 D-52) before the log prior."""
     linear = mean_kind in _LINEAR_MEANS
     out = [MonitorField("loglik", "scalar", True)]
     if linear:
@@ -114,6 +151,7 @@ def monitor_fields(mean_kind: str, vol: VolStatic, n: int, n_det: int) -> tuple[
         out.append(MonitorField("log_p", "equation", False))
     if vol.has_t:
         out.append(MonitorField("nu", "equation", False))
+    out.extend(gl_fields(coef, n, lags))
     out.append(MonitorField("log_prior", "scalar", False))
     return tuple(out)
 
@@ -230,9 +268,15 @@ def monitor_spec(static: StaticConfig, variables: tuple[str, ...]) -> MonitorSpe
         raise ValueError(f"variable names must be unique, got {variables}")
     slots: list[MonitorSlot] = []
     primary: list[str] = []
-    for f in monitor_fields(static.mean.kind, static.vol, n, static.shapes.n_det):
+    fields = monitor_fields(
+        static.mean.kind, static.vol, n, static.shapes.n_det, coef=static.coef,
+        lags=static.shapes.lags,
+    )  # fmt: skip
+    for f in fields:
         if f.kind == "scalar":
             new = [MonitorSlot(f.name, f.name)]
+        elif f.kind == "group":
+            new = [MonitorSlot(f"{f.name}[{g}]", f.name, g) for g in range(static.coef.n_groups)]
         elif f.kind == "equation":
             new = [MonitorSlot(f"{f.name}[{v}]", f.name, i, v) for i, v in enumerate(variables)]
         else:
@@ -290,8 +334,12 @@ def monitor_values(
     structure, mean, coef, vol = program.structure, program.mean, program.coef, program.vol
     st, data, prior, cache = jax.tree.map(jnp.asarray, (st, data, prior, cache))  # host inputs
     n = data.Y.shape[-1]
-    n_det = data.X.shape[-1] - n * data.hist.shape[0]
-    fields = monitor_fields(mean.static.kind, vol.static, n, n_det)
+    lags = data.hist.shape[0]
+    n_det = data.X.shape[-1] - n * lags
+    coef_static = getattr(coef, "static", None)
+    coef_static = coef_static if isinstance(coef_static, CoefPriorStatic) else None
+    coef_log = bool(getattr(mean.static, "coef_log", False))
+    fields = monitor_fields(mean.static.kind, vol.static, n, n_det, coef=coef_static, lags=lags)
     names = {f.name for f in fields}
     glob, gvol, shared = st.glob, st.glob.vol, prior.shared
     fuses = bool(mean.fuses_contemp)
@@ -338,7 +386,11 @@ def monitor_values(
     per = program.eq_map(body)(jnp.arange(n, dtype=jnp.int32), st.eq, prior.eq, cache.eq)
     log_prior = jnp.sum(per["log_prior"])
     for step in (*getattr(program, "global_pre", ()), *getattr(program, "global_post", ())):
-        log_prior = log_prior + step.log_prior(glob, prior)
+        state_fn = getattr(step, "log_prior_state", None) if coef_log else None
+        if state_fn is not None:  # P3 §3.7: a varying prior's density needs the full state
+            log_prior = log_prior + state_fn(st, prior, program.eq_map)
+        else:
+            log_prior = log_prior + step.log_prior(glob, prior)
     core, trans = per["vol"].core, per["vol"].trans
     values: dict[str, Any] = {
         "loglik": jnp.sum(per["loglik"]) + structure.log_jacobian(glob, data.T_eff),
@@ -365,6 +417,13 @@ def monitor_values(
         values["log_p"] = trans.log_p
     if "nu" in names:
         values["nu"] = trans.nu
+    gcoef = glob.coef
+    for name, leaf in (("gl_log_zeta", "log_zeta"), ("gl_log_tau", "log_tau"),
+                       ("gl_log_xi", "log_xi"), ("gl_a_idx", "a_idx")):  # fmt: skip
+        if name in names:
+            values[name] = getattr(gcoef, leaf)
+    if "gl_p" in names:
+        values["gl_p"] = jnp.exp(gcoef.log_p)
     aux = auxiliary_fields(vol.static)
     if aux:
         o_idx = st.eq.vol.trans.o_idx  # (n, T_pad), o = o_idx + 1; padded rows are masked
@@ -624,6 +683,54 @@ def sv_budget_message(chains: int, draws: int) -> str:
     )
 
 
+_GL_SCALE_FIELDS = ("gl_log_zeta", "gl_log_xi", "gl_p")
+_A_GRID_END_MASS = 0.5  # draws of a_g at a grid end: "the grid may be too narrow" (P3 §8)
+
+
+def _gl_warnings(
+    mon: Mapping[str, Any], spec: MonitorSpec, static: StaticConfig, settings: MCMCSettings
+) -> list[str]:
+    """P3 §8 warnings of a global-local prior: secondary group scales (``G > max(2p, n)``) that
+    fail R-hat or ESS (informational, named; primary ones are in the convergence message), and a
+    hyperprior index ``a_idx`` at an end of its grid for more than half the draws."""
+    out: list[str] = []
+    labels = tuple(
+        label
+        for name in _GL_SCALE_FIELDS
+        for label in spec.field_labels(name, primary=False)
+        if spec.slot(label).field in mon
+    )
+    if labels:
+        rhat, ess = rhat_ess(mon, spec, labels)
+        bad = np.flatnonzero(~((rhat < settings.rhat_max) & (ess > settings.ess_min)))
+        if bad.size:
+            order = bad[np.argsort(-_severity(rhat[bad], ess[bad], settings), kind="stable")]
+            worst = "; ".join(
+                f"{labels[j]} R-hat {_fmt(rhat[j], 3)}, ESS {_fmt(ess[j], 0)}"
+                for j in order[:_WORST_PRIMARY]
+            )
+            out.append(
+                f"secondary (informational; does not gate converged): {bad.size} of "
+                f"{len(labels)} global-local group scales fail R-hat < {settings.rhat_max:g} or "
+                f"bulk ESS > {settings.ess_min:g} (worst: {worst})"
+            )
+    A = static.coef.a_grid
+    if A and "gl_a_idx" in mon:
+        idx = np.asarray(mon["gl_a_idx"], dtype=np.float64)  # (chains, draws, G)
+        G = idx.shape[-1]
+        flat = idx.reshape(-1, G)
+        mass = ((flat == 0) | (flat == A - 1)).mean(axis=0) if flat.size else np.zeros(G)
+        bad = mass > _A_GRID_END_MASS
+        if bad.any():
+            groups = [int(g) for g in np.flatnonzero(bad)]
+            out.append(
+                f"the hyperprior on a puts more than {_A_GRID_END_MASS:.0%} of its draws at an end "
+                f"of its {A}-point grid for coefficient group(s) {groups} (mass "
+                f"{[round(float(m), 3) for m in mass[bad]]}): the grid may be too narrow"
+            )
+    return out
+
+
 def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
     """Every warning of the DESIGN §8.3 table that applies, in the table's order.
 
@@ -657,6 +764,8 @@ def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
         )[1]
     if inputs.sv_budget is not None:
         out.append(sv_budget_message(*inputs.sv_budget))
+    if inputs.mon is not None and spec is not None:
+        out += _gl_warnings(inputs.mon, spec, static, settings)
     acc = _acc_names(inputs.acc)
     if vol.persistent == "sv" and vol.exact and ("h" in acc or "rej_run_max" in acc):
         rate = _per_equation(acc["h"], n, "min") if "h" in acc else np.full(n, np.nan)
@@ -849,6 +958,7 @@ __all__ = [
     "converged",
     "diagnostics_table",
     "gaussian_diag_logpdf",
+    "gl_fields",
     "is_order_invariant",
     "monitor_fields",
     "monitor_spec",
