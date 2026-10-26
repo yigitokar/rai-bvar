@@ -21,7 +21,8 @@ them before the work packages they gate, with the §9.8 probe rules as WP29 impl
 amendment and of WP26 (**R4**) found no blocker; its findings revised E124, E150, Q36 and row 28 in place and added
 E153–E159, and a re-check of those fixes revised E123, E124, E154 and E157 again. Amendment 1 was merged as
 PR #16 (`05757c1`). **Amendment 2** (errata E160–E166) records what the work packages WP29, WP31 and WP33 found
-while implementing this design, and the owner's decisions on Q35, Q38 and Q39. The largest revisions: the
+while implementing this design, the owner's decisions on Q35, Q38, Q39 and Q40, and the exact `CommonSV` oracle
+(§9.8, WP38a) that Q40 adds. The largest revisions: the
 conjugate `CommonSV` became a shared-factor path of the per-equation sampler instead of a separate Kronecker program
 (E29), the GIG sampler follows Devroye (2014) §6 (E31), every parity and DGP criterion is pass/fail with its
 tolerance stated here (E34–E36), and conditional forecasts are labelled scenarios (E43); the second round made the
@@ -154,7 +155,7 @@ the DGP PR. Stacked PRs are merged with a merge commit (no squash or rebase merg
 | D-61 | **Separate Phase 3 validation registry**: `validation.joint` gains `COMPOSITIONS_P3`, `BLOCK_CONFIGS_P3` (and `joint_spec` accepts their names); the Phase 2 tuples and the suites that assert them stay unchanged | P2 §9.2 | E51 |
 | D-62 | **Log-aware consumers.** Every reader of a coefficient prior's precision (failure diagnostics, implied prior moments, monitors) accepts `GaussianLogDiag`; implied reduced-form prior moments are reported "not applicable" under a GL prior (the horseshoe has no finite prior variance) | P2 §5.7, §8.4 | E53 |
 
-### 0.4 Review errata (E29–E167)
+### 0.4 Review errata (E29–E168)
 
 `Ra`, `Rb`, `Rc` = the first-round reviewers and `R2a`, `R2b` the second-round reviewers (header), with their finding
 numbers; `R3` = the merge-gate review of Amendment 1 (majors `R3-M1…M12`, each confirmed by a second reader; minors
@@ -303,6 +304,7 @@ related findings share one.
 | E165 | WP29's final fixture run (40243289623 at `d281276`) against the first (40234562983) | Recorded: every probe's status and answer and the gating are identical between the two runs; many fixture numbers differ at Monte Carlo level although the seeds, snapshot, R, BLAS and package versions are the same (the R side does not reproduce bit for bit from its seeds; threaded BLAS rounding amplified by the samplers is suspected, not checked). bvars's `Σ` fails its hard mixing check in both volatilities at §9.8's draw counts (cSV max R-hat 1.013, min ESS 570; ncSV 1.028, 198; the run exits 1); R9's `a` never left the grid point 0.05 in this run, so its fixture records it as constant (the schema test accepts both layouts); P14's fixing scan setting `sv_a × 10⁶, sv_s × 10⁶` now stops with an `iwishrnd` error for cSV. Q39 (resolved: option (b), E167) settles the bvars mixing | §9.8, §12 |
 | E166 | Amendment 2's process | WP33 and WP31 were written in parallel on branches from WP30 (their files are disjoint) and rebased by the coordinator; WP33's PR targets `phase-3-wp30` until WP32 exists (D-57) | §13 |
 | E167 | The owner's decisions on Q35 and Q39 (2026-10-25: "Q35 kanıt olsun, Q39 için (b)") | Q35: §9.8's branch 2 (the bvars CommonSV predictive comparison when no exact prior mapping exists) is reported as evidence and does not gate; under it the exit criterion "bvars parity for CommonSV" is not met for want of an exact mapping. Q39: the bvars runs keep §9.8's draw counts; WP38 treats a fixture whose hard mixing check fails as not met for the quantities it covers (at the final run both bvars volatilities fail it for `Σ`, and R9's `a`, whose chain did not move, is to be recorded as not mixing in PR #21's fixtures, so those comparisons are not met) | §9.8, §12, §13 |
+| E168 | Q40 (owner, 2026-10-25: "Bağımsız kesin oracle yaz (Recommended)", write an independent exact oracle): under Q35 the SPEC §13 "bvars parity for CommonSV" could not be met, since branch 2 applies to both volatilities | §9.8 specifies an exact `CommonSV` oracle (model, three exact blocks each a different algorithm from the engine's, independence rules, its own Geweke and closed-form validation, runs C1–C2, the comparison and its tolerances), written in WP38a before WP38 by an author who wrote no Phase 3 kernel; SPEC §13 and §10.4 are amended to name it, with bvars as evidence | §9.8, §12, §13, SPEC §10.4, §13 |
 
 ---
 
@@ -1458,6 +1460,62 @@ decide (E147).
 
 A failure under the selected comparison is **not met** (D-59); A8 and A11 are evidence, never a substitute (E35).
 
+**Exact `CommonSV` oracle** (WP38a; Q40, resolved by the owner on 2026-10-25: "Bağımsız kesin oracle yaz
+(Recommended)"; E168). §9.8's bvars comparison takes branch 2 for both volatilities, which Q35 makes evidence, so the
+SPEC §13 `CommonSV` criterion is checked, as Phase 2 checked its reduced-form sampler (P2 §2.10 Stage 4 amendment 2),
+against an exact sampler written independently of the engine. Everything below is fixed before any comparison runs
+(D-59, D-60).
+
+- **Model** (the composition `BVAR(Linear(Minnesota(form="conjugate", hierarchy="fixed", …)), CommonSV(), lags=p)`,
+  §5.3, written in reduced form): `y_t = Bᵀx_t + u_t`, `u_t | h_t, Σ ~ N(0, e^{h_t}Σ)`; `Σ ~ IW(Ψ, d)`, `Ψ = diag(ψ)`,
+  `d = n + 2`; `vec B | Σ ~ N(vec b, Σ ⊗ Ω)` with the Phase 1 prior of SPEC §4.6 (`Ω` diagonal: lag `l` of variable
+  `j` `λ²(d − n − 1)/(l^α ψ_j)`, deterministic terms `var_const`; `b` zero except the own first lags, `mean_i`); the
+  SOC/SUR dummy rows of SPEC §4.6 when the run has them, with weight 1 (not scaled by `e^{h}`; E88); `h_t = ρh_{t−1} +
+  σ_h η_t`, `h_0 ~ N(0, σ_h²/(1 − ρ²))` at the first data row (0-based), `E h = 0`; `ρ ~ N(0.9, 0.2²)·1(|ρ| < 1)`,
+  `σ_h² ~ IG(5, 0.04)` (CommonSV's defaults, D-46). The engine's Mode II at `cross = contemp = 1` is this prior exactly
+  (P2 §6.1, N05 §4.2), so both sides target one posterior.
+- **Sampler** (Gibbs over three exact blocks, each a different algorithm from the engine's):
+  1. `(B, Σ) | h, Y`: one joint matrix-normal–inverse-Wishart draw with row weights `w_t = e^{−h_t}` on the data rows
+     and 1 on the dummy rows: `Ω̄ = (Ω⁻¹ + X̃ᵀX̃)⁻¹`, `B̄ = Ω̄(Ω⁻¹b + X̃ᵀỸ)`, `Ψ̄ = Ψ + ỸᵀỸ + bᵀΩ⁻¹b − B̄ᵀΩ̄⁻¹B̄`,
+     `d̄ = d + T + m` (`X̃, Ỹ` the weighted rows stacked with the `m` dummy rows); `Σ ~ IW(Ψ̄, d̄)` by the Bartlett
+     decomposition, then `B | Σ ~ MN(B̄, Ω̄, Σ)` (the engine draws the recursive structural `(θ_i, λ_i)` per equation).
+  2. `h | B, Σ, ρ, σ_h, Y`: five elliptical slice sampling updates of the whole path per sweep (Murray, Adams &
+     MacKay 2010), with the stationary AR(1) prior as the Gaussian prior (its draws by the AR recursion) and the
+     log-likelihood `Σ_t [−(n/2)h_t − ½e^{−h_t}q_t]`, `q_t = u_tᵀΣ⁻¹u_t` (the engine: blocked independence MH with a
+     tridiagonal Newton proposal).
+  3. `ρ | h, σ_h`: univariate slice sampling (Neal 2003; stepping out with width 0.1, at most 50 steps, then
+     shrinkage) on `(−1, 1)` of `log π(ρ) + ½ log(1 − ρ²) − (1 − ρ²)h_0²/(2σ_h²) − Σ_{t≥1}(h_t − ρh_{t−1})²/(2σ_h²)`
+     (the engine: a truncated-normal independence MH); then `σ_h² | h, ρ ~ IG(5 + T/2, 0.04 + S/2)`, `S = (1 −
+     ρ²)h_0² + Σ_{t≥1}(h_t − ρh_{t−1})²`, the closed form, written independently.
+- **Independence**: the oracle is a NumPy module under `tests/parity/oracles/` that imports nothing from `rai_bvar`
+  (it lags the data, builds `Ω`, `b`, `Ψ` and the dummy rows from SPEC §4.6's formulas in its own code; SciPy only
+  for special functions); its author wrote no Phase 3 kernel and reads neither the engine's CommonSV code
+  (`components/vol/common.py`, the shared-factor path, `linalg.shared_factor_*`, `tridiag_newton`) nor the bodies of
+  WP30's CommonSV references, only this design and SPEC §4.6 (E58's rule; WP35's author may write it). Every prior
+  number is stated in the run's fixture and read by both sides (E11: one parameter set, both sides derived from it).
+- **Its own validation** (WP38a's PR, before any comparison): (a) a Geweke joint-distribution test of the oracle at
+  P2 §9.5's G-small sizes (`C = 1000, M_c = 100, M₁ = 2·10⁵, α = 1e-3`, Bonferroni over its test functions) on
+  `n = 2, p = 1, T_eff = 20` with SUR rows, the test functions bounded (E148: `atan` of the `B` entries, of `log Σ_ii`,
+  of `h` at three dates and of mean `h`; `ρ`, `σ_h`); (b) block 1's moments against the closed-form
+  matrix-normal–IW moments computed in the test (1e-10 for the posterior parameters; `|z| ≤ 4` Bonferroni for 10⁵
+  draws); (c) block 2 for `T ∈ {2, 3}`, `n = 2`: the `h` posterior by tensor quadrature against its draws (KS,
+  family-wise `α = 1e-3`, D-60); (d) block 3: `p(ρ | h, σ_h)` by quadrature against its draws (KS).
+- **Runs** (fixtures `tests/parity/fixtures/commonsv_oracle_*.nc`, written by `tools/make_commonsv_oracle.py` with
+  recorded seeds, the commit and the NumPy/SciPy versions): **C1** `qd3_growth.csv` (`n = 3, p = 4`, the bvars data,
+  E146) without dummy rows; **C2** a dataset simulated from this model (`commonsv_n3.csv`, `n = 3, p = 2, T = 200`,
+  `ρ = 0.9`, `σ_h = 0.15`, written by the same tool from a stated seed) with SOC and SUR rows (`μ = δ = 1`). Prior
+  numbers per run: `λ = 0.2`, `α = 2`, `ψ` and the own-lag means stated in the fixture (C1: the sample variances of the
+  series and means 0; C2: `ψ = 1` and means 0.5), `var_const = 1e7`, CommonSV's defaults. Oracle: 4 independent runs
+  × 50,000 kept sweeps after 10,000, MCSE from the per-run ESS; if the oracle's own mixing gate (below) fails at
+  these counts, WP38a lengthens its runs four-fold before any comparison is made, so a comparison never sees a
+  fixture shorter than that rule allows (a pre-registered run length, not a change of algorithm or criterion). Engine: 4 chains × 50,000 (weekly) and 4 × 6,000
+  (PR short run, P2 §9.10).
+- **Comparison** (WP38): the 5/25/50/75/95% quantiles of every `B` and `Σ` entry (reduced form; the engine's `Σ =
+  A⁻¹ΛA⁻ᵀ`), `h_t` at `t ∈ {0, ⌊T/4⌋, ⌊T/2⌋, T − 1}`, `ρ`, `σ_h`, and the 1- and 4-step predictive quantiles of each
+  variable, under the Phase 2 parity rule with the combined quantile-MCSE. A compared quantity whose split R-hat
+  exceeds 1.01 or whose bulk ESS is below 400 on either side is **not met** (Q39(b)). The criterion is met iff every
+  compared quantity of C1 and C2 passes; a failure is not met (D-59) and is reported, never retuned.
+
 **BoE `bvar` 0.3.5**: the per-draw oracle A10b (its end-to-end conditional forecast re-draws the parameters, D-50).
 
 ### 9.9 DGP verdict tests (SPEC §10.5; exit criterion)
@@ -1599,6 +1657,7 @@ Estimates to be replaced by WP36's measurements (`docs/phase3/pilot.md`):
 | Q37 | Add a reversed-ordering twin of R1 (reduced × SV, `n = 3, p = 2`, the same matched priors and the same Phase 2 criterion) to WP29's `bvars` section and WP38, per N08 §B5 item 7 (row 28, E156) | Defer past v0.3.0 (scope: SPEC §13 does not require per-ordering parity). The alternative is cheap: the R1 fixture machinery and the P3 row map serve a permuted dataset unchanged |
 | Q38 | A9's projected-gradient criterion with free `cross`: keep Phase 1's stationarity rule as the criterion, or tighten the free-scale optimiser (E160) | **Resolved (owner, 2026-10-25): "Toleransları sıkılaştır (Recommended)"**: tighten the free-scale path's tolerances; the 1e-6 criterion stays |
 | Q39 | bvars's `Σ` fails its hard mixing check in both volatilities at §9.8's draw counts, and the R fixtures do not reproduce bit for bit from their seeds (E165): (a) lengthen the bvars runs (for example × 4, ≈ 6 h of the dispatch-only job) in a WP29 follow-up before WP38; (b) keep them, and WP38 treats a fixture that fails its hard mixing check as not met (D-59) | **Resolved (owner, 2026-10-25): "Q39 için (b)"**: the bvars runs stay as they are, and WP38 treats a fixture that fails its hard mixing check as not met (E167) |
+| Q40 | Under Q35 the SPEC §13 criterion "bvars parity for CommonSV" cannot be met (branch 2 for both volatilities): write an independent exact oracle, as Phase 2 did for its reduced-form sampler, or record the criterion as not met (E168) | **Resolved (owner, 2026-10-25): "Bağımsız kesin oracle yaz (Recommended)"**: the exact `CommonSV` oracle of §9.8, WP38a; SPEC §13 and §10.4 amended |
 
 ---
 
@@ -1627,7 +1686,8 @@ and is merged before WP38 (D-57). WP31 and WP32 run their acceptance G-small row
 | WP35 | Composition suites (§9.4–§9.6): rows 301–330, blocks, SBC, mutants M19–M36, contract tests, the ordering-invariance test (row 27), weekly shards | WP30–WP34 | WP34 | G-small (PR rows) green; G-full, S and M green on a dispatched weekly run; every mutant caught |
 | WP36 | Pilot: GL and CommonSV mixing and cost on the validated kernels, BENCH-P3 (§8, §10) | WP35 | WP35 | measurements with machine fingerprint; recommendation for D-58; compute estimate for Q26 |
 | WP37 | Twins at scale: A8 (`n = 20`), A9's MCMC leg | WP35 | WP36 | green weekly |
-| WP38 | Parity tests (§9.8) | WP29 (merged), WP37 | WP37 (`main` merged into the stack after WP29, D-57) | the parity exit criteria (map below) |
+| WP38a | The exact `CommonSV` oracle (§9.8, Q40): `tests/parity/oracles/commonsv_exact.py`, its validation (a)–(d), `tools/make_commonsv_oracle.py`, the C2 dataset, fixtures C1–C2 | Amendment 2 | `main` (independent of the stack, like WP29) | the oracle's own validation green; fixtures committed with seeds and versions; the PR records the author's independence (E58) |
+| WP38 | Parity tests (§9.8), including CommonSV against WP38a's oracle | WP29 and WP38a (merged), WP37 | WP37 (`main` merged into the stack after WP29, D-57) | the parity exit criteria (map below) |
 | WP39 | DGP exit (§9.9): the DGP session's merged PR and its full study's readings | the registered run's report (at `58ab09f`) and the DGP PR merged (E138) | WP38 | the readings recorded in this document's exit map; criterion met or not |
 | WP40 | GK replication: pre-registration, then the acceptance run and report (§9.10) | WP36 (budget), WP38 | WP39 | report against C1–C6 |
 | WP41 | Release: SPEC v2.4 (status, the §0.2 edits the owner accepted), README roadmap, this document's exit map, `ci.yml` tiers, `pyproject` 0.3.0, release notes; tag only on the owner's approval after a status report | all | WP40 | CI green; the weekly tier green on the release commit with no skipped parity test |
@@ -1638,7 +1698,7 @@ and is merged before WP38 (D-57). WP31 and WP32 run their acceptance G-small row
 | :--- | :--- |
 | `bayesianVARs` parity, global-local priors × SV | WP38 runs R3–R9 (fixtures WP29, probes P6–P10); pass/fail (D-59) |
 | `bayesianVARs` parity, reduced-form sampler, after P1–P6 | WP38 runs R1–R2 (fixtures WP29); pass/fail |
-| `bvars` parity for `CommonSV` | WP38, the comparison selected by P11–P16 (§9.8); pass/fail; under branch 2 **not met** for want of an exact mapping, its predictive comparison reported as evidence (Q35, E167); A8 and A11 are evidence only |
+| `CommonSV` parity with an exact independent oracle (SPEC §13 as amended by Q40; first written "`bvars` parity for `CommonSV`") | WP38 against WP38a's exact oracle (§9.8, runs C1–C2; pass/fail). The bvars comparison selected by P11–P16 stays as evidence: under branch 2 it is not met for want of an exact mapping and is reported (Q35, E167); A8 and A11 are evidence only |
 | DGP verdict-engine tests on linear DGPs | WP39: the registered full study's readings (§9.9); pass/fail |
 | R6: Geweke and SBC for every new block and interaction class | WP35 (references WP30), with the coverage argument of §9.4 |
 | Replication target (SPEC §10.7) | WP40 (C1–C6; acceptance per Q31) |
