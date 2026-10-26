@@ -80,8 +80,8 @@ SBC_ROWS: dict[str, tuple[int, ...]] = {
     "b8": (328,),
 }
 #: The pre-dispatch estimate of each row's SBC time in minutes on an Apple M5 Max under a load
-#: average of 140–170 (about half as fast as the 4-vCPU EPYC 7763 runner; ``tools/weekly_shards.py``):
-#: a pilot of 200 replications (burn 300, pilot 1000) gives the pilot IATs, hence the thinning
+#: average of 140–170 (about half as fast as the 4-vCPU EPYC 7763 runner; see
+#: ``tools/weekly_shards.py``): a pilot of 200 replications (burn 300, pilot 1000) gives the pilot IATs, hence the thinning
 #: ``⌈2·IAT⌉ ≤ 200`` and the ten sorted production blocks of 100 replications, at the measured
 #: time of a sweep of 100 replications, plus the compilation; Gandy–Scott reruns are not included.
 SBC_ESTIMATE_MIN: dict[int, float] = {
