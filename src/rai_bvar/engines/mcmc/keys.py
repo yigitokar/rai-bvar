@@ -78,7 +78,8 @@ class Block(IntEnum):
 
 
 class Sub(IntEnum):
-    """Sub-draws within one equation's step. Vol block: S … TAU; mean, contemp, CCCM: Z."""
+    """Sub-draws within one step. Vol block: S … TAU; mean, contemp, CCCM: Z; Phase 3 global
+    steps: GL_* (coefficient scales) and CSV_* (common stochastic volatility). Append-only."""
 
     S = 0
     H = 1
@@ -95,6 +96,18 @@ class Sub(IntEnum):
     P = 12
     NU = 13
     TAU = 14
+    # Phase 3 (P3 DESIGN §2.4): global-local scale step (G_COEF_GLOBAL) and CommonSV (G_COMMON_SV)
+    GL_LOCAL = 15
+    GL_LOCAL_AUX = 16
+    GL_GROUP = 17
+    GL_GROUP_AUX = 18
+    GL_A = 19
+    CSV_OFFSET = 20
+    CSV_H = 21
+    CSV_H_ACC = 22
+    CSV_RHO = 23
+    CSV_RHO_ACC = 24
+    CSV_S2 = 25
     Z = 0  # alias of S: the mean, contemp and CCCM blocks use only this one (CCCM folds j first)
 
 
