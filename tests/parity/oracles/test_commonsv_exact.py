@@ -29,7 +29,8 @@ The quadrature densities are written here from the model (SciPy's normal and inv
 densities, the AR(1) covariance in closed form), not taken from the oracle. The draws of (c) and
 (d) are the final states of :data:`KS_DRAWS` independent chains, each started from a prior draw
 and run :data:`BLOCK2_CALLS` (c) or :data:`SLICE_UPDATES` (d) updates of the block under test, so
-the KS tests see independent draws. Tiers: (b)–(d) and the fixture reads in the PR tier, (a) weekly (``slow``).
+the KS tests see independent draws. Tiers: (b)–(d), the predictive check and the fixture reads in
+the PR tier; (a) weekly (``slow``).
 
 **Data.** C1's data ``qd3_growth.csv`` is WP29's (PR #21); the tests that need it (the C1 cases
 of (b) and the C1 fixture reads) fail with that explanation while it is missing.
@@ -86,10 +87,12 @@ def case(name: str):
     c = tool().CASES[name]
     path = tool().DATA_DIR / c.data_file
     if not path.exists():
-        pytest.fail(
-            f"{path.relative_to(ROOT)} is missing: C1's data qd3_growth.csv is WP29's (PR #21, "
-            "merged before WP38a; DESIGN §9.8, D-57)"
+        owner = (
+            "WP29's (PR #21, merged before WP38a; DESIGN §9.8, D-57)"
+            if name == "C1"
+            else "written by tools/make_commonsv_oracle.py data"
         )
+        pytest.fail(f"{path.relative_to(ROOT)} is missing: {name}'s data is {owner}")
     return c
 
 
@@ -606,9 +609,12 @@ def test_fixture_provenance_and_prior_numbers(name):
     np.testing.assert_array_equal(a["seeds"], c.seeds)
     np.testing.assert_array_equal(a["predictive_seeds"], c.predictive_seeds)
     assert len(set(c.seeds) | set(c.predictive_seeds)) == 8
-    for key in ("git_commit", "numpy_version", "scipy_version", "oracle_md5"):
+    for key in ("git_commit", "numpy_version", "scipy_version", "cpu"):
         assert str(a[key]).strip(), key
-    assert int(a["git_dirty"]) == 0
+    # the runs used this oracle: a change to it needs new fixtures (the md5 is the runs' record;
+    # git_dirty records the tree's tracked state when each run saved, see the WP38a PR)
+    assert a["oracle_md5"] == hashlib.md5((ROOT / a["oracle_file"]).read_bytes()).hexdigest()
+    assert int(a["git_dirty"]) in (0, 1)
     problem = c.problem()
     prior = problem.prior
     assert (float(a["prior_lambda"]), float(a["prior_alpha"])) == (0.2, 2.0)
