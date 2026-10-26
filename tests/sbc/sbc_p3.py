@@ -62,8 +62,8 @@ SBC_CONFIG: dict[str, Any] = {"L": 99, "burn": 300, "pilot": 1000, "t_max": 200,
 #: P3 §9.11: ``sbc-p3a`` the structural rows, ``sbc-p3b`` the reduced and CommonSV rows (the
 #: Geweke split, by file), split further so that every shard stays within 200 min on a 2-vCPU EPYC
 #: 7763 ("split further if not"): one file per group, ``test_sbc_p3_<group>.py``. The groups are
-#: balanced on a pre-dispatch estimate of each row's SBC time (``SBC_ESTIMATE_MIN``; module
-#: docstring), at most about 87 min each.
+#: balanced on a pre-dispatch estimate of each row's SBC time (``SBC_ESTIMATE_MIN``,
+#: below), at most about 87 min each.
 SBC_ROWS: dict[str, tuple[int, ...]] = {
     "a1": (317, 303),
     "a2": (308, 302),
@@ -79,9 +79,9 @@ SBC_ROWS: dict[str, tuple[int, ...]] = {
     "b7": (322, 323),
     "b8": (328,),
 }
-#: The pre-dispatch estimate of each row's SBC time in minutes (Apple M5 Max under a load average
-#: of 140–170, about as fast as the 4-vCPU EPYC 7763 runner on Phase 2's G-full of row 2): the
-#: pilot of 200 replications (burn 300, pilot 1000) gives the pilot IATs, hence the thinning
+#: The pre-dispatch estimate of each row's SBC time in minutes on an Apple M5 Max under a load
+#: average of 140–170 (about half as fast as the 4-vCPU EPYC 7763 runner; ``tools/weekly_shards.py``):
+#: a pilot of 200 replications (burn 300, pilot 1000) gives the pilot IATs, hence the thinning
 #: ``⌈2·IAT⌉ ≤ 200`` and the ten sorted production blocks of 100 replications, at the measured
 #: time of a sweep of 100 replications, plus the compilation; Gandy–Scott reruns are not included.
 SBC_ESTIMATE_MIN: dict[int, float] = {

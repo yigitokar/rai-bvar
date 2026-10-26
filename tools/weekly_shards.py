@@ -18,7 +18,38 @@ The selection is by directory and composition only, from the per-test times of r
 (EPYC 7763, 2 vCPU; up to the timeout) and 40106532730 (EPYC 9V45, 4 vCPU; complete); minutes on
 the 9V45, cold XLA cache:
 
-=========================  ============================================================================
+=====================  =====================================================  =========
+shard                  contents                                               9V45 min
+=====================  =====================================================  =========
+``geweke-structural``  G-full, inexact and G-small rows of structural models  55
+``geweke-other``       reduced and ``zero_sv`` rows, the block configurations 40
+``sbc-structural``     SBC of structural models, the structural-step tier B   43
+``sbc-other``          SBC of the other models, the rest of the block tier    41
+``unit``               ``tests/unit`` (EB convergence: 47 min)                53
+``rest``               analytic, contract, integration, mcmc, mutation,       41
+                       parity, priors, validation
+=====================  =====================================================  =========
+
+The EPYC 7763 takes 2.0–2.9× as long, and a Gandy–Scott rerun (DESIGN §9.5) of an ``outliers_t``
+row adds up to an hour there (the reruns depend on the CPU's rounding).
+
+**Phase 3** (docs/phase3/DESIGN.md §9.11; WP35): shards by file (:data:`P3_SHARDS`), and the Phase
+2 shards of ``tests/geweke`` and ``tests/sbc`` ``--ignore`` every Phase 3 file (their ``-k
+structural`` would otherwise collect rows such as ``structural_constant_hs``); ``rest`` ignores the
+Phase 3 mutation file, which runs as its own shard. §9.11 names ``geweke-p3a``/``geweke-p3b`` (the
+structural rows; the reduced and CommonSV rows) and ``sbc-p3a``/``sbc-p3b`` (the same split, by
+file), "each shard ≤ 200 min on a 2-vCPU EPYC 7763, split further if not". Each is split further
+before the first dispatch, on estimates measured on an Apple M5 Max under a load average of
+140–170, about half as fast as the 4-vCPU EPYC 7763 runner (Phase 2's G-full of row 2: 2813 s for
+three Gandy–Scott stages, 9 stage-1 units, so 313 s per stage-1 unit against 156 s on the runner of
+run 40140397848), i.e. about as fast as a 2-vCPU one: G-full 10–11 min for the heaviest rows (302,
+311, 320), and an SBC time per row from a pilot of 200 replications (``tests/sbc/sbc_p3.py``,
+``SBC_ESTIMATE_MIN``: 4–76 min, 930 min in all). Each Phase 3 shard is estimated at most about 87
+min there, Gandy–Scott reruns not counted; the heaviest SBC rows (317, 324, 325) run alone or with a
+light row, so a stage-2 rerun (four times the replications) still fits the 240-min step on a 4-vCPU
+runner:
+
+=====================  ============================================================================
 shard                  contents (estimate, min)
 =====================  ============================================================================
 ``geweke-p3a1``        G-full of the structural rows 301–308 (≈ 75)
