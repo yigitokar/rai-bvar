@@ -203,6 +203,9 @@ def test_cccm_reads_include_the_coefficient_prior():
     step = CCCMStep.from_static(spec.static)
     assert {"eq.coef", "glob.coef"} <= step.reads
     assert step.writes == frozenset({"glob.mean.Pi", "glob.mean.dev_log"})
+    st, _ = draw_state(spec, 0)
+    with pytest.raises(ValueError, match="log_prior_state"):  # never the fixed-moment form
+        step.log_prior(st.glob, spec.prior)
 
 
 PLAN_CASES = ["horseshoe", "ng_grid", "r2d2_grid", "dl_grid", "ssvs_beta",

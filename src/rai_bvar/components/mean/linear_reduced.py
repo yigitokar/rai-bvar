@@ -618,6 +618,11 @@ class CCCMStep(KernelBase):
         :meth:`log_prior_state`); with SOC/SUR
         rows (WP25) plus their factor ``Σ_j Σ_d log N(y_{d,j}; x_d'π_j, 1/w_j)``, i.e. the log
         prior up to the rows' normalising constant."""
+        if self.static.coef_log:  # the arrays' prec0 is not the prior of a varying prior
+            raise ValueError(
+                "under a varying coefficient prior (coef_log) the Π prior needs the scales: use "
+                "CCCMStep.log_prior_state(st, prior)"
+            )
         c = prior.eq.coef
         r = glob.mean.Pi.T - c.mean0
         out = 0.5 * jnp.sum(jnp.log(c.prec0) - _LOG_2PI - c.prec0 * r * r)
