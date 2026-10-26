@@ -368,8 +368,10 @@ class MCMCFit:
         """Implied reduced-form prior moments of ``B = (A⁻¹Γ)'`` and ``Σ`` (R8; N05 §4.3, DESIGN
         §6.1): ``priors.structural.implied_reduced_form_moments`` of the fit's prior arrays at the
         composition's scaling mode with ``E[λ_i]`` from :meth:`prior_vol_mean`. ``None`` unless
-        the mean is structural (the reduced-form coefficient prior is already on ``B``, §6.2)."""
-        if self.static.mean.kind != "linear_structural":
+        the mean is structural (the reduced-form coefficient prior is already on ``B``, §6.2) and
+        the coefficient prior fixed: under a global-local prior they are not applicable (P3 D-62:
+        the horseshoe has no finite prior variance)."""
+        if self.static.mean.kind != "linear_structural" or self.static.coef.varies:
             return None
         from rai_bvar.priors.structural import implied_reduced_form_moments
 
@@ -380,6 +382,11 @@ class MCMCFit:
         )
 
     def _implied_summary(self) -> dict[str, Any] | str:
+        if self.static.coef.varies:
+            return (
+                f"not applicable: the {self.static.coef.kind} global-local prior has no fixed "
+                "prior variances (the horseshoe's are infinite; P3 D-62)"
+            )
         if self.static.mean.kind != "linear_structural":
             return (
                 "not applicable: the reduced-form coefficient prior is already a prior on B "

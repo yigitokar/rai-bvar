@@ -71,6 +71,8 @@ from rai_bvar.engines.mcmc.state import (
     PriorArrays,
 )
 from rai_bvar.priors.dummies import dummy_arrays, dummy_hyper
+from rai_bvar.priors.global_local import DiscreteGrid, GlobalLocalPrior
+from rai_bvar.priors.global_local_arrays import gl_arrays
 from rai_bvar.priors.reduced import reduced_arrays
 from rai_bvar.priors.scales import WindowScales, window_scales
 from rai_bvar.priors.structural import contemp_arrays, structural_arrays
@@ -90,6 +92,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Resolved",
+    "check_coef_groups",
     "fit_bvar",
     "resolve",
     "resolve_cccm_precompute",
@@ -170,13 +173,23 @@ def resolve_const_path(setting: str, static_parts: Any) -> str:
         raise ValueError(f"unknown const_path setting {setting!r}")
     if static_parts.mean_kind != "linear_structural" or not static_parts.vol.constant_weights:
         return "weighted"
+    if COEF_VARIES[static_parts.coef.kind]:  # before an explicit "cholesky" (P3 E65)
+        return "weighted"
     if setting == "cholesky":
         return "cholesky_const"
-    if COEF_VARIES[static_parts.coef.kind]:
-        return "weighted"
     mean = MeanStatic(kind=static_parts.mean_kind, coef_scaling=static_parts.coef_scaling)
     mode = scaling_mode(static_parts.struct, mean)
     return {"I": "eigen", "II": "fixed_factor", "iw_equivalent": "cholesky_const"}[mode]
+
+
+def check_coef_groups(model: BVAR, n: int) -> int:
+    """``G`` of the model's global-local prior for ``n`` variables (P3 §2.1: only the value of
+    ``G`` depends on ``n``), raising E-13 for a custom ``groups`` array of the wrong shape; 0 for a
+    Minnesota prior."""
+    prior = model.mean.prior
+    if not isinstance(prior, GlobalLocalPrior):
+        return 0
+    return prior.n_groups(n, model.lags)
 
 
 def resolve_cccm_precompute(n: int, k: int, chains: int) -> bool:
@@ -209,14 +222,19 @@ def resolve(
     settings: MCMCSettings = model.mcmc
     prior, vol = model.mean.prior, model.vol
     lags, det = model.lags, model.deterministic
-    parts = static_parts(model)
+    check_coef_groups(model, data.n_vars)  # E-13 at fit (P3 §7.3)
+    parts = static_parts(model, n=data.n_vars)  # G of a global-local prior needs n (P3 §2.1)
+    gl_prior = isinstance(prior, GlobalLocalPrior)
+    # a global-local prior has no hierarchy, EB or dummy rows: ψ, means, the deterministic and
+    # a_i priors come from its internal Minnesota adapter (P3 §3.6)
+    mn = prior.minnesota() if gl_prior else prior
 
     # hyperparameters: EB plug-in (DESIGN §6.5) or the fixed values
-    outcome = eb.eb_hyper(model, data) if prior.hierarchy == "eb" else None
-    psi = outcome.hyper["psi"] if outcome is not None and "psi" in prior.free else None
-    scales = window_scales(data, prior, lags, det, psi=psi)
+    outcome = eb.eb_hyper(model, data) if mn.hierarchy == "eb" else None
+    psi = outcome.hyper["psi"] if outcome is not None and "psi" in mn.free else None
+    scales = window_scales(data, mn, lags, det, psi=psi)
     if outcome is None:
-        lam, alpha = prior.lambda_, prior.alpha
+        lam, alpha = mn.lambda_, mn.alpha
     else:
         lam, alpha = outcome.hyper["lambda"], outcome.hyper["alpha"]
 
@@ -228,9 +246,11 @@ def resolve(
         parts.struct, MeanStatic(kind=parts.mean_kind, coef_scaling=parts.coef_scaling)
     )
     dummies, dummy_w = dummy_arrays(
-        data.values, scales, prior, None if outcome is None else outcome.hyper,
+        data.values, scales, mn, None if outcome is None else outcome.hyper,
         lags=lags, n_det=n_det, mode=mode if structural else "reduced",
     )  # fmt: skip
+    if gl_prior and not isinstance(dummies, Empty):  # pragma: no cover - mn has no soc/sur
+        raise ValueError("global-local priors carry no SOC/SUR dummy rows (P3 D-36)")
     n_dummy = 0 if isinstance(dummies, Empty) else int(dummies.Y.shape[0])
     T_eff = int(np.asarray(engine_data.T_eff))
     shapes = Shapes.of(n, lags, n_det, bucket(T_eff, settings.t_bucket))
@@ -243,6 +263,7 @@ def resolve(
         gram_tile=tile,
         cccm_precompute=resolve_cccm_precompute(n, shapes.k, settings.chains),
         n_dummy=n_dummy,
+        coef_log=parts.coef_log,
     )
     static = StaticConfig(
         shapes=shapes,
@@ -261,14 +282,22 @@ def resolve(
     values = {"lambda": lam, "alpha": alpha}
     if structural:
         coef, shared = structural_arrays(
-            scales, prior, values, n=n, lags=lags, n_det=n_det, mode="II" if mode == "II" else "I"
+            scales, mn, values, n=n, lags=lags, n_det=n_det, mode="II" if mode == "II" else "I"
         )
     else:
-        coef, shared = reduced_arrays(scales, prior, values, n=n, lags=lags, n_det=n_det)
+        coef, shared = reduced_arrays(scales, mn, values, n=n, lags=lags, n_det=n_det)
     if n_dummy:  # SOC/SUR prior rows (WP25)
         coef = dataclasses.replace(coef, dummy_w=dummy_w)
         shared = dataclasses.replace(shared, dummies=dummies)
-    contemp = contemp_arrays(scales, prior, n, scaling=parts.struct.contemp_scaling)
+    if gl_prior:  # P3 §2.3, §3.6: the GL arrays on top of the adapter's
+        gl_arr, gl_shared, G = gl_arrays(
+            prior, scales, n=n, lags=lags, n_det=n_det, form=parts.mean_kind, data=engine_data
+        )
+        if G != parts.coef.n_groups:  # pragma: no cover - both come from prior.group_ids
+            raise ValueError(f"group count {G} differs from the static n_groups")
+        coef = dataclasses.replace(coef, gl=gl_arr)
+        shared = dataclasses.replace(shared, gl=gl_shared)
+    contemp = contemp_arrays(scales, mn, n, scaling=parts.struct.contemp_scaling)
     if parts.vol.persistent == "constant":
         core, trans = constant_prior(scales, n), Empty()
     else:
@@ -279,6 +308,8 @@ def resolve(
     )
 
     hyper = _hyper(model, scales, lam, alpha, outcome, core)
+    if gl_prior:
+        hyper["n_groups"] = parts.coef.n_groups
     if n_dummy:  # the SOC/SUR weights in use (EB values when free) and the row count (WP25)
         hyper.update(dummy_hyper(prior, None if outcome is None else outcome.hyper))
         hyper["n_dummy"] = n_dummy
@@ -320,18 +351,36 @@ def _hyper(
     outcome: eb.EBOutcome | None,
     core: Any,
 ) -> dict[str, Any]:
-    """The hyperparameters in use (``MCMCFit.hyper``; DESIGN §11.3)."""
+    """The hyperparameters in use (``MCMCFit.hyper``; DESIGN §11.3). A global-local prior reports
+    its own settings (P3 §3.2) instead of the Minnesota hierarchy, λ, α and cross."""
     prior, vol = model.mean.prior, model.vol
-    hyper: dict[str, Any] = {
-        "hierarchy": prior.hierarchy,
-        "lambda": float(lam),
-        "alpha": float(alpha),
-        "cross": prior.cross,
-        "contemp": prior.contemp,
-        "var_const": prior.var_const,
-        "psi": scales.psi.copy(),
-        "own_means": scales.own_means.copy(),
-    }
+    if isinstance(prior, GlobalLocalPrior):
+        hyper: dict[str, Any] = {
+            "prior": prior.label,
+            "groups": prior.groups_label,
+            "scale": prior.scale,
+            "contemp": prior.contemp,
+            "var_const": prior.var_const,
+            "psi": scales.psi.copy(),
+            "own_means": scales.own_means.copy(),
+        }
+        for name in prior._OWN:
+            value = getattr(prior, name)
+            if isinstance(value, DiscreteGrid):
+                spec = value.to_spec()
+                value = spec.get("name", f"DiscreteGrid({value.size} points)")
+            hyper[name] = value if isinstance(value, float | int | str | bool) else str(value)
+    else:
+        hyper = {
+            "hierarchy": prior.hierarchy,
+            "lambda": float(lam),
+            "alpha": float(alpha),
+            "cross": prior.cross,
+            "contemp": prior.contemp,
+            "var_const": prior.var_const,
+            "psi": scales.psi.copy(),
+            "own_means": scales.own_means.copy(),
+        }
     if outcome is not None:
         hyper["eb_method"] = outcome.hyper["eb_method"]
         hyper["eb_free"] = outcome.hyper["eb_free"]

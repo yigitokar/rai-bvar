@@ -80,6 +80,7 @@ from rai_bvar.engines.mcmc.state import (
     EngineData,
     EqState,
     FitCache,
+    GaussianLogDiag,
     ParamDraw,
     PathDraw,
     PriorArrays,
@@ -288,6 +289,9 @@ def _init_fn(program: Program) -> Callable[..., ChainState]:
         struct, coefs = program.eq_map(first)(idx, prior.eq)
         eq0 = EqState(struct=struct, mean=tmpl.eq.mean, coef=coefs, vol=tmpl.eq.vol)
         st = ChainState(eq=eq0, glob=tmpl.glob, status=Status.initial())
+        init_global = getattr(coef, "init_global", None)
+        if init_global is not None:  # P3 §2.4, §3.7: the scales before Π and the mean's cold draw
+            st = init_global(keys.block_key(ikey, Block.G_COEF_GLOBAL), st, data, prior)
         for g in program.global_pre:
             st = g.init(keys.block_key(ikey, Block(int(g.block))), st, data, prior, cache)
         ytil = structure.pre_residual(st.glob, data, mean.fitted_reduced(st.glob, data))
@@ -343,6 +347,9 @@ def extract_params(
     )
     struct_d = program.structure.extract(st.eq.struct, st.glob)
     vol_d = program.eq_map(lambda vs: vol.extract_eq(vs, data.T_eff))(st.eq.vol)
+    coef_draw = getattr(program.coef, "extract_draw", None)
+    if coef_draw is not None:  # P3: the SSVS indicators ride with the stored parameters (E123)
+        glob = dataclasses.replace(glob, coef=coef_draw(st.eq.coef, st.glob.coef))
     return ParamDraw(glob=glob, mean=mean_d, struct=struct_d, vol=vol_d)
 
 
@@ -906,6 +913,8 @@ def _accumulators(final: ChainState, sweeps: int) -> tuple[dict, dict]:
             latent["h_sd"] = np.sqrt(np.maximum(rb.pop("rb_h_sq") - mean**2, 0.0))
     if "rb_out" in rb:
         latent["p_outlier"] = rb.pop("rb_out")
+    if "rb_incl" in rb:  # SSVS: Rao-Blackwellised inclusion probabilities (P3 §3.7)
+        latent["incl_prob"] = rb.pop("rb_incl")
     latent.update({f"{k}_mean": v for k, v in rb.items()})
     return acc, latent
 
@@ -1182,6 +1191,36 @@ def _gaussian_detail(K: Any) -> dict[str, Any]:
     return out
 
 
+def _log_gaussian_detail(log_prec: Any, G: Any) -> dict[str, Any]:
+    """:func:`_gaussian_detail` of ``K = diag(exp(log_prec)) + G`` without forming ``K`` (P3 D-62,
+    §3.4): the Jacobi-scaled ``A = I + offdiag(s_i s_j G_ij)``, ``log s = −½ logaddexp(log P,
+    log G_jj)``, as ``linalg.precision_draw_log`` factors it, so log precisions of ±1600 work."""
+    log_prec = np.asarray(log_prec, dtype=np.float64)
+    G = np.asarray(G, dtype=np.float64)
+    out: dict[str, Any] = {"dimension": int(log_prec.shape[0]), "log_space": True}
+    finite = np.isfinite(G).all() and not np.isnan(log_prec).any()
+    out["nonfinite_entries"] = int((~np.isfinite(G)).sum() + np.isnan(log_prec).sum())
+    if not finite:
+        out["cholesky_ok"] = False
+        out["diag_ratio"] = float("inf")
+        return out
+    with np.errstate(divide="ignore"):
+        log_s = -0.5 * np.logaddexp(log_prec, np.log(np.diag(G)))
+    A = np.exp(log_s[:, None] + log_s[None, :]) * G
+    np.fill_diagonal(A, 1.0)
+    A = 0.5 * (A + A.T)
+    out["min_eigenvalue_scaled"] = float(np.linalg.eigvalsh(A).min())
+    try:
+        L = np.linalg.cholesky(A)
+        piv = np.diag(L) ** 2
+        out["cholesky_ok"] = True
+        out["diag_ratio"] = float(piv.max() / piv.min())
+    except np.linalg.LinAlgError:
+        out["cholesky_ok"] = False
+        out["diag_ratio"] = float("inf")
+    return out
+
+
 def _range(x: Any, mask: Any | None = None) -> tuple[float, float]:
     x = np.asarray(x, dtype=np.float64)
     if mask is not None:
@@ -1251,10 +1290,21 @@ def _equation_detail(
             out["weight_range"] = _range(ctx.weights, ctx.tmask)
             cm = program.structure.contemp_moments(ctx, prior_i)
             pm = program.coef.moments_eq(eq_i.coef, i, prior_i, sh.glob.coef)
-            out["prior_precision_range"] = _range(
-                np.concatenate([np.ravel(pm.prec), np.ravel(cm.prec)])
-            )
-            if step.name == "equation":
+            log_moments = isinstance(pm, GaussianLogDiag)  # D-62: a varying prior's log precisions
+            if log_moments:
+                out["prior_log_precision_range"] = _range(
+                    np.concatenate([np.ravel(pm.log_prec), np.log(np.ravel(cm.prec))])
+                )
+            else:
+                out["prior_precision_range"] = _range(
+                    np.concatenate([np.ravel(pm.prec), np.ravel(cm.prec)])
+                )
+            if step.name == "equation" and log_moments:
+                dc = program.mean.deviation_conditional(
+                    ctx, pm, cm, cache, prior.shared, batched=False
+                )
+                out.update(_log_gaussian_detail(dc.log_prec, dc.G))
+            elif step.name == "equation":
                 gp = program.mean.conditional_eq(
                     eq_i.mean, eq_i.struct.a, ctx, pm, cm, cache_i, cache, prior.shared
                 )
@@ -1299,8 +1349,12 @@ def _global_detail(
     out: dict[str, Any] = {"step": step.name}
     data, prior, eq_map = ctx.data, ctx.prior, program.eq_map
     moments = getattr(g, "moments", None)
-    prec = moments(st, prior, eq_map).prec if callable(moments) else prior.eq.coef.prec0
-    out["prior_precision_range"] = _range(prec)
+    pm = moments(st, prior, eq_map) if callable(moments) else None
+    log_moments = isinstance(pm, GaussianLogDiag)  # D-62: a varying prior's log precisions
+    if log_moments:
+        out["prior_log_precision_range"] = _range(pm.log_prec)
+    else:
+        out["prior_precision_range"] = _range(prior.eq.coef.prec0 if pm is None else pm.prec)
     inv_lam = getattr(g, "inv_lam", None)
     if callable(inv_lam):
         w = np.asarray(inv_lam(st, data.tmask, eq_map))
@@ -1311,10 +1365,16 @@ def _global_detail(
         out["equation_located"] = False
         return out
     per = []
+    dev = getattr(g, "deviation_conditional_j", None) if log_moments else None
     for j in range(program.static.shapes.n):
-        gp = cond(st, ctx, j, eq_map)
-        d = _gaussian_detail(gp.K)
-        d["b_finite"] = bool(np.isfinite(np.asarray(gp.b)).all())
+        if dev is not None:
+            log_p, G, b = dev(st, ctx, j, eq_map)
+            d = _log_gaussian_detail(log_p, G)
+        else:
+            gp = cond(st, ctx, j, eq_map)
+            d = _gaussian_detail(gp.K)
+            b = gp.b
+        d["b_finite"] = bool(np.isfinite(np.asarray(b)).all())
         per.append(d)
     bad = [j for j, d in enumerate(per) if not d["cholesky_ok"] or not d["b_finite"]]
     j = bad[0] if bad else int(np.argmax([d["diag_ratio"] for d in per]))
