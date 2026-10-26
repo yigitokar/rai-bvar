@@ -979,3 +979,29 @@ def test_kernel_module_imports_inside_a_trace():
     )
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     assert res.returncode == 0, res.stderr[-2000:]
+
+
+def test_gl_warnings():
+    """P3 §8 warnings: secondary group scales (``G > max(2p, n)``) failing R-hat or ESS are named
+    (informational) and a hyperprior index at a grid end for more than half the draws says the
+    grid may be too narrow; neither fires on well-mixed draws inside the grid."""
+    import rai_bvar as rb
+    from rai_bvar.engines.mcmc import monitor as M
+    from rai_bvar.settings import MCMCSettings
+
+    _, r = _static(rb.NormalGamma(groups="covariate-wise"))  # G = n·p = 6 > max(2p, n) = 4
+    s = r.static
+    spec = M.monitor_spec(s, ("y0", "y1", "y2"))
+    rng = np.random.default_rng(0)
+    C, D, G, A = 4, 500, s.coef.n_groups, s.coef.a_grid
+    good = {"gl_log_xi": rng.standard_normal((C, D, G)),
+            "gl_a_idx": rng.integers(1, A - 1, (C, D, G)).astype(float)}  # fmt: skip
+    settings = MCMCSettings(chains=C, draws=D)
+    assert M._gl_warnings(good, spec, s, settings) == []
+    bad_xi = good["gl_log_xi"] + np.arange(C)[:, None, None]  # chains disagree
+    idx = good["gl_a_idx"].copy()
+    idx[..., 2] = A - 1  # group 2 always at the upper end
+    out = M._gl_warnings({"gl_log_xi": bad_xi, "gl_a_idx": idx}, spec, s, settings)
+    assert len(out) == 2
+    assert out[0].startswith("secondary (informational") and "gl_log_xi[" in out[0]
+    assert "group(s) [2]" in out[1] and "the grid may be too narrow" in out[1]

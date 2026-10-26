@@ -291,6 +291,8 @@ def test_scale_equivariance(family, form):
     else:
         x0, x1 = np.asarray(new0.glob.mean.Pi).T, np.asarray(new1.glob.mean.Pi).T
         l0, l1 = np.asarray(new0.glob.mean.dev_log), np.asarray(new1.glob.mean.dev_log)
+    worst = {"coef_rel": float(np.max(np.abs(x1 / (x0 * f) - 1.0))),
+             "dev_log": float(np.max(np.abs(l1 - l0 - g)))}  # fmt: skip
     np.testing.assert_allclose(x1, x0 * f, rtol=1e-9, atol=0)
     np.testing.assert_allclose(l1, l0 + g, rtol=0, atol=1e-9)
     for path, u in jax.tree_util.tree_flatten_with_path((new0.eq.coef, new0.glob.coef))[0]:
@@ -300,4 +302,6 @@ def test_scale_equivariance(family, form):
         if np.issubdtype(u.dtype, np.integer):
             np.testing.assert_array_equal(u, v)
         else:
+            worst["scales"] = max(worst.get("scales", 0.0), float(np.max(np.abs(v - u))))
             np.testing.assert_allclose(v, u, rtol=0, atol=1e-9, err_msg=str(path))
+    print(f"equivariance {family}/{form}: {worst}")
