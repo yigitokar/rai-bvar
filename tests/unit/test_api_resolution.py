@@ -183,17 +183,17 @@ def test_sv_settings_map_to_the_static_vol_config(sv, changes):
 
 # =========================================================================== errors
 
-CONJUGATE_MSG = (
-    "the conjugate Minnesota prior requires Constant(prior='iw'); use form='structural' "
-    "(the MCMC default) or 'reduced'"
+CONJUGATE_MSG = (  # P3 E-1 (amended in P3 WP27)
+    "the conjugate Minnesota prior requires Constant(prior='iw') or CommonSV(); use "
+    "form='structural' (the MCMC default) or 'reduced'"
 )
 REDUCED_IW_MSG = (
     "Constant('iw') is the conjugate NIW prior; with form='reduced' use 'iw_equivalent' "
     "(Chan 2022) or 'ig'"
 )
-MH_MSG = (
-    "hierarchical Minnesota inside MCMC arrives with the Phase 3 global-scale step; "
-    "use 'eb' or 'fixed'"
+MH_MSG = (  # P3 E-5 (amended in P3 WP27)
+    "hierarchy='mh' is not available on the MCMC engine in this version (DESIGN Q15); use 'eb' "
+    "or 'fixed', or the analytic engine (Minnesota(form='conjugate') with Constant())"
 )
 
 
@@ -230,7 +230,7 @@ def test_metropolis_hastings_hierarchy_is_rejected_on_mcmc(form, vol):
 )
 @pytest.mark.parametrize("vol", [rb.Constant("ig"), rb.SV()], ids=["ig", "SV"])
 def test_lenza_primiceri_scaling_is_rejected_on_mcmc(vol, outliers):
-    with pytest.raises(NotImplementedError, match="arrives in Phase 3") as err:
+    with pytest.raises(NotImplementedError, match="analytic engine only") as err:  # P3 E-6
         bvar(vol=vol, outliers=outliers, hierarchy="fixed")
     assert "double treatment" not in str(err.value)
     assert "SV(outliers=True)" in str(err.value)
@@ -257,7 +257,7 @@ def test_soc_sur_dummies_run_on_mcmc(form, vol, dummies):
     assert label in model.axes["prior"]
     assert rb.BVAR.from_spec(model.spec()) == model
     assert bvar("conjugate", **dummies).engine == "analytic"
-    with pytest.raises(NotImplementedError, match="hierarchical Minnesota inside MCMC"):
+    with pytest.raises(NotImplementedError, match="hierarchy='mh' is not available on the MCMC"):
         bvar(form, vol, hierarchy="mh", **dummies)
 
 
@@ -282,11 +282,15 @@ def test_unknown_components_are_not_implemented():
     class Bart:
         prior = rb.Minnesota()
 
-    with pytest.raises(NotImplementedError, match="Linear × Constant and Linear × SV"):
+    # the messages are amended in P3 WP27 (CommonSV and the Phase 3 priors exist)
+    msg = "Linear × Constant, Linear × SV and Linear × CommonSV"
+    with pytest.raises(NotImplementedError, match=msg):
         rb.BVAR(mean=Bart())
-    with pytest.raises(NotImplementedError, match="Linear × Constant and Linear × SV"):
+    with pytest.raises(NotImplementedError, match=msg):
         rb.BVAR(vol="sv")
-    with pytest.raises(TypeError, match="must be a Minnesota prior"):
+    with pytest.raises(
+        TypeError, match=r"must be a Minnesota, global-local .* or AsymmetricConjugate"
+    ):
         rb.BVAR(mean=rb.Linear(prior="minnesota"))
 
 

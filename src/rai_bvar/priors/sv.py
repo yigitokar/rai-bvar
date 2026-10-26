@@ -10,6 +10,8 @@ of N06 pitfall 3:
 * ``InvGamma(shape, scale)``: density ``∝ x^{−shape−1} exp(−scale/x)``.
 * ``DiscreteUniform(low, high)``: uniform on the integers ``{low, …, high}``, the static ν grid
   of the Student-t scale mixture (D-8; N03 §0).
+* ``TruncatedNormal(mean, var, low=-1.0, high=1.0)``: ``N(mean, var)`` restricted to
+  ``(low, high)``; the ``CommonSV`` prior of ``ρ`` (P3 DESIGN §5.1).
 * ``OutlierPrior(every_years, prior_years)``: ``p ~ Beta(a, f·prior_years − a)`` with
   ``a = prior_years/every_years`` and ``f`` periods per year (12 monthly, 4 quarterly): prior mean
   one outlier every ``every_years`` years, prior sample size ``prior_years`` years (N03 §3.1;
@@ -123,6 +125,24 @@ class DiscreteUniform:
 
 
 @dataclass(frozen=True)
+class TruncatedNormal:
+    """``x ~ N(mean, var)·1(low < x < high)`` (``var`` is the variance before truncation)."""
+
+    mean: float
+    var: float
+    low: float = -1.0
+    high: float = 1.0
+
+    def __post_init__(self) -> None:
+        _number(self, "mean", positive=False)
+        _number(self, "var")
+        _number(self, "low", positive=False)
+        _number(self, "high", positive=False)
+        if not self.low < self.high:
+            raise ValueError(f"TruncatedNormal needs low < high, got ({self.low}, {self.high})")
+
+
+@dataclass(frozen=True)
 class OutlierPrior:
     """Outlier-probability prior by frequency-free settings (N03 §3.1; CCMM 2024 §III.B).
 
@@ -165,7 +185,8 @@ def periods_per_year(freq: str) -> int:
 
 
 PRIOR_CLASSES: dict[str, type] = {
-    cls.__name__: cls for cls in (Normal, Beta, ScaledChi2, InvGamma, DiscreteUniform, OutlierPrior)
+    cls.__name__: cls
+    for cls in (Normal, Beta, ScaledChi2, InvGamma, DiscreteUniform, OutlierPrior, TruncatedNormal)
 }
 
 
@@ -197,6 +218,7 @@ __all__ = [
     "Normal",
     "OutlierPrior",
     "ScaledChi2",
+    "TruncatedNormal",
     "periods_per_year",
     "prior_from_spec",
     "prior_to_spec",
