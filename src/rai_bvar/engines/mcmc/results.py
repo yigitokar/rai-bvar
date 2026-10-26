@@ -360,6 +360,8 @@ class MCMCFit:
 
     def vol_mean_label(self) -> str:
         """How :meth:`prior_vol_mean` sets ``λ_i`` (the ``vol_mean`` field of ``summary()``)."""
+        if self.static.vol.common:  # P3 §5: Σ_t = e^{h_t}Σ; the moments are those of Σ (h = 0)
+            return "C/(c-1) prior mean (CommonSV: the base Σ at h = 0)"
         if self.static.vol.persistent == "constant":
             return "C/(c-1) prior mean (Constant)"
         return "exp(m0) plug-in (SV, RW)" if self.static.vol.rw else "exp(b_mu) plug-in (SV)"
@@ -454,8 +456,16 @@ class MCMCFit:
         return frame
 
     # ------------------------------------------------------------------ delegation (WP17)
-    def forecast(self, horizon: int, draws: int = 1000, seed: SeedLike = None) -> ForecastResult:
-        """Predictive paths and conditional moments (DESIGN §7); ``engines.mcmc.forecast``."""
+    def forecast(
+        self, horizon: int, draws: int = 1000, seed: SeedLike = None, *, lag_coefs: bool = True
+    ) -> ForecastResult:
+        """Predictive paths and conditional moments (DESIGN §7); ``engines.mcmc.forecast``.
+
+        MCMC forecasts always attach the accelerator variable ``lag_coefs`` (P2 D-34); the
+        keyword-only ``lag_coefs`` is accepted for symmetry with the analytic forecasts'
+        ``forecast(..., lag_coefs=True)`` protocol (P3 D-49, E162(a)) and changes nothing."""
+        if not isinstance(lag_coefs, bool):
+            raise TypeError(f"lag_coefs must be a bool, got {lag_coefs!r}")
         return _forecast_fn("forecast")(self, horizon, draws, seed)
 
     def irf(
@@ -512,8 +522,10 @@ def fit_mcmc(
     never passes it. ``settings.draws=None`` (the composition default) is resolved from
     ``static.vol`` as ``BVAR`` resolves it (D-35).
     """
-    if getattr(settings, "draws", 0) is None:
-        settings = settings.with_default_draws(sv=static.vol.persistent == "sv")
+    if getattr(settings, "draws", 0) is None:  # CommonSV counts as SV (P3 D-51)
+        settings = settings.with_default_draws(
+            sv=static.vol.persistent == "sv" or static.vol.common
+        )
     with _jax.x64():
         fns = make_runner(static, overrides=_overrides)
         if init is not None:

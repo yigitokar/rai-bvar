@@ -28,6 +28,15 @@ IRF shocks, N03 §5.4). ``obs_logdensity_eq = −½ log λ^pers + log f(e·λ^{�
 transitory-integrated ``f`` of N03 §2.2 (RB LPD, particle filters). ``draw_ahead_eq`` returns
 ``(log λ^pers, log λ^eff)`` for ``T+1..T+H`` (N03 §5.2).
 
+**CommonSV** (P3 §2.4, §5.2; ``VolStatic.common``): the core's ``uses_global_vol`` is true, so
+the block passes the global volatility state ``gvol`` (``CommonSVGlobal``) to the core's
+``sample`` and ``log_var`` (``log_var_eq = log λ_i + h_t``, which makes ``constant_weights()``
+false and sends a Mode I or reduced mean down the weighted path) and the future of the common
+``h`` (``gfut[Block.G_COMMON_SV]``) to its ``ahead``. :meth:`VolBlockImpl.global_steps` returns
+the post step ``CommonSVStep`` (registry kind ``common_sv``) that draws ``h, ρ, σ_h``, and
+:meth:`VolBlockImpl.extract_global` the draw ``CommonSVDraw(h_T, ρ, σ_h)`` of ``glob.vol``.
+Without ``common`` none of this is traced (Phase 2 programs are unchanged).
+
 Construction: ``VolBlockImpl(static_config)`` builds the core and the transitory scale through
 ``engines.mcmc.registry`` with the same convention ``cls(vol_static, T_pad)``;
 ``VolBlockImpl(vol_static, T_pad, core=…, transitory=…)`` takes them explicitly (``compose`` and
@@ -51,7 +60,7 @@ from rai_bvar.engines.mcmc import (
     registry,
 )
 from rai_bvar.engines.mcmc.config import VolStatic
-from rai_bvar.engines.mcmc.keys import Key, Sub, sub_key
+from rai_bvar.engines.mcmc.keys import Block, Key, Sub, sub_key
 from rai_bvar.engines.mcmc.protocols import KernelBase
 from rai_bvar.engines.mcmc.state import (
     Coupling,
@@ -122,8 +131,33 @@ class VolBlockImpl(KernelBase):
 
     # ------------------------------------------------------------------ static properties
     def constant_weights(self) -> bool:
-        """Constant core, no transitory scale (Phase 2 has no global volatility)."""
+        """Constant core, no transitory scale and no common volatility (P3 E50)."""
         return self.static.constant_weights
+
+    @property
+    def _global(self) -> bool:
+        """The core reads the global volatility state (CommonSV; P3 §2.4)."""
+        return bool(getattr(self.core, "uses_global_vol", False))
+
+    # ------------------------------------------------------------------ global steps (P3 §2.4)
+    def global_steps(self) -> tuple[Any, ...]:
+        """The block's global steps: ``(CommonSVStep,)`` under CommonSV (registry kind
+        ``common_sv``, built as ``cls(VolStatic, T_pad)``), else ``()`` (Phase 2)."""
+        if not self.static.common:
+            return ()
+        return (_build("common_sv", self.static, self.T_pad),)
+
+    def extract_global(self, glob: Any, T_eff: Array | None = None) -> Any:
+        """``GlobDraw.vol``: ``CommonSVDraw(h_T = h[T_eff − 1], ρ, σ_h)`` under CommonSV (the
+        runner passes ``T_eff``: the last data row is a dynamic index), else ``Empty()``."""
+        from rai_bvar.engines.mcmc.state import Empty
+
+        if not self.static.common:
+            return Empty()
+        if T_eff is None:
+            raise ValueError("extract_global of a CommonSV block needs T_eff (the last data row)")
+        (step,) = self.global_steps()
+        return step.extract(glob.vol, T_eff)
 
     # ------------------------------------------------------------------ state
     def init_eq(
@@ -151,11 +185,14 @@ class VolBlockImpl(KernelBase):
         cleaned residuals; atomic (module docstring)."""
         le2 = log_e2(resid, tmask)
         trans = self.transitory.sample(
-            key, vs.trans, le2, self.core.log_var(vs.core), tmask, T_eff, prior_i
+            key, vs.trans, le2, self._core_log_var(vs.core, gvol), tmask, T_eff, prior_i
         )
         scale2 = self.transitory.log_scale2(trans)
         le2c = jnp.where(tmask > 0, le2 - scale2, 0.0)
-        core, info = self.core.sample(key, vs.core, le2c, tmask, T_eff, prior_i, cpl)
+        if self._global:  # CommonSV: the core reads the common h (P3 §5.2)
+            core, info = self.core.sample(key, vs.core, le2c, tmask, T_eff, prior_i, cpl, gvol)
+        else:
+            core, info = self.core.sample(key, vs.core, le2c, tmask, T_eff, prior_i, cpl)
         ok = info.ok
         for leaf in jax.tree.leaves(trans):  # failures are values (D-18): non-finite p, τ
             if jnp.issubdtype(leaf.dtype, jnp.floating):
@@ -163,13 +200,17 @@ class VolBlockImpl(KernelBase):
         return VolEq(core=core, trans=trans), StepInfo(ok, info.min_pivot)
 
     # ------------------------------------------------------------------ views
+    def _core_log_var(self, cs: Any, gvol: PyTree) -> Array:
+        return self.core.log_var(cs, gvol) if self._global else self.core.log_var(cs)
+
     def log_var_eq(
         self, vs: VolEq, gvol: PyTree, which: Literal["effective", "persistent"] = "effective"
     ) -> Array:
-        """Per-row log variance ``log λ^pers_t (+ 2 log o_t + log τ_t)``; f64[T_pad]."""
+        """Per-row log variance ``log λ^pers_t (+ 2 log o_t + log τ_t)``; f64[T_pad]. Under
+        CommonSV the persistent part is ``log λ_i + h_t`` (``gvol`` is ``glob.vol``)."""
         if which not in ("effective", "persistent"):
             raise ValueError(f"which must be 'effective' or 'persistent', got {which!r}")
-        lv = self.core.log_var(vs.core)
+        lv = self._core_log_var(vs.core, gvol)
         return lv if which == "persistent" else lv + self.transitory.log_scale2(vs.trans)
 
     def log_scale2_eq(self, vs: VolEq) -> Array:
@@ -208,8 +249,13 @@ class VolBlockImpl(KernelBase):
     ) -> tuple[Array, Array]:
         """``(log λ^pers, log λ^eff)`` for ``T+1..T+H``: the core's persistent path (key
         ``fold_in(key, Sub.H)``) plus iid transitory scales ``2 log o + log τ`` (key ``key``; its
-        sub-keys ``O``, ``TAU``) (N03 §5.2; one consumer per key, module docstring)."""
-        pers = self.core.ahead(sub_key(key, Sub.H), vd.core, H)
+        sub-keys ``O``, ``TAU``) (N03 §5.2; one consumer per key, module docstring). Under
+        CommonSV the core adds the future common ``h`` of ``gfut[Block.G_COMMON_SV]`` (the global
+        futures are a mapping by block id, P3 §2.4)."""
+        if self._global:
+            pers = self.core.ahead(sub_key(key, Sub.H), vd.core, H, gfut[Block.G_COMMON_SV])
+        else:
+            pers = self.core.ahead(sub_key(key, Sub.H), vd.core, H)
         return pers, pers + self.transitory.ahead(key, vd.trans, H)
 
     def log_prior_eq(self, vs: VolEq, prior_i: EqPrior, tmask: Array) -> Array:

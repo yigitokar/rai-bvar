@@ -15,6 +15,11 @@
 * transitory (N03 §0, §3): outlier probability ``p ~ Beta(a_p, b_p)`` resolved from the window
   frequency (``OutlierPrior``, D-9) unless given explicitly; log prior weights of ν on the
   static grid (``DiscreteUniform``: ``−log G`` on its support).
+* ``CommonSV`` (P3 §5.1, D-46; :func:`common_sv_prior`): ``ρ ~ N(ρ₀, V_ρ)·1(|ρ| < 1)`` or
+  ``(ρ + 1)/2 ~ Beta(a, b)``; ``σ_h² ~ IG(c₀, C₀)`` or ``B·χ²₁``; ``n_eq`` the number of
+  equations that share ``h``. Every field of both options is filled (the unused ones with the
+  inert placeholders above); ``VolStatic.csv_rho_prior`` and ``csv_sigma2_prior`` select which
+  apply. No field depends on the data (R9).
 
 Fields a variant does not use hold inert finite placeholders (0 for locations, 1 for shapes,
 scales and variances), so every leaf is finite except ``log_c`` in zero-offset mode and the
@@ -27,10 +32,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from rai_bvar.components.specs import SV
-from rai_bvar.engines.mcmc.state import ConstantPrior, Empty, SVPrior, TransitoryPrior
+from rai_bvar.components.specs import SV, CommonSV
+from rai_bvar.engines.mcmc.state import (
+    CommonSVPrior,
+    ConstantPrior,
+    Empty,
+    SVPrior,
+    TransitoryPrior,
+)
 from rai_bvar.priors.scales import WindowScales, _check_scales
-from rai_bvar.priors.sv import Beta, InvGamma, OutlierPrior, ScaledChi2
+from rai_bvar.priors.sv import Beta, InvGamma, OutlierPrior, ScaledChi2, TruncatedNormal
 
 C_REL = 1e-12  # relative offset c_i = C_REL·ψ_i (D-2)
 
@@ -143,9 +154,45 @@ def transitory_arrays(
     return TransitoryPrior(a_p=_f64(a_p), b_p=_f64(b_p), log_nu_w=log_nu_w)
 
 
+def common_sv_prior(vol: CommonSV, n: int) -> CommonSVPrior:
+    """``CommonSVPrior`` of ``vol`` for ``n`` equations (P3 §2.3, §5.1, D-46; NumPy scalars).
+
+    ``rho_prior``: a ``TruncatedNormal(mean, var)`` gives ``rho_mean``, ``rho_var`` (``var`` is
+    the variance before truncation to ``(−1, 1)``); a ``Beta(a, b)`` on ``(ρ + 1)/2`` gives
+    ``rho_a``, ``rho_b``. ``sigma2_prior``: ``InvGamma(shape, scale)`` gives ``s2_shape``,
+    ``s2_scale``; ``ScaledChi2(B)`` (``σ_h² ~ B·χ²₁``) gives ``s2_B``. The fields of the option
+    not chosen hold inert placeholders (0 for a location, 1 otherwise); ``n_eq = n``."""
+    if not isinstance(vol, CommonSV):
+        raise TypeError(f"vol must be a CommonSV specification, got {type(vol).__name__}")
+    if isinstance(n, bool) or not isinstance(n, int | np.integer) or n < 1:
+        raise ValueError(f"n must be a positive integer, got {n!r}")
+    rho, s2 = vol.rho_prior, vol.sigma2_prior
+    if isinstance(rho, TruncatedNormal):
+        rho_mean, rho_var, rho_a, rho_b = rho.mean, rho.var, 1.0, 1.0
+    elif isinstance(rho, Beta):
+        rho_mean, rho_var, rho_a, rho_b = 0.0, 1.0, rho.a, rho.b
+    else:  # pragma: no cover - CommonSV validates its rho_prior
+        raise TypeError(f"unsupported rho prior {rho!r}")
+    if isinstance(s2, InvGamma):
+        s2_shape, s2_scale, s2_B = s2.shape, s2.scale, 1.0
+    elif isinstance(s2, ScaledChi2):
+        s2_shape, s2_scale, s2_B = 1.0, 1.0, s2.B
+    else:  # pragma: no cover - CommonSV validates its sigma2_prior
+        raise TypeError(f"unsupported sigma2 prior {s2!r}")
+    values = (rho_mean, rho_var, rho_a, rho_b, s2_shape, s2_scale, s2_B, float(n))
+    return CommonSVPrior(*(np.array(v, dtype=np.float64) for v in values))
+
+
 def _f64(x: np.ndarray) -> np.ndarray:
     """A fresh C-contiguous float64 copy: leaves never share a buffer (placeholders reuse one)."""
     return np.array(x, dtype=np.float64, order="C", copy=True)
 
 
-__all__ = ["C_REL", "constant_prior", "outlier_beta", "sv_prior_arrays", "transitory_arrays"]
+__all__ = [
+    "C_REL",
+    "common_sv_prior",
+    "constant_prior",
+    "outlier_beta",
+    "sv_prior_arrays",
+    "transitory_arrays",
+]

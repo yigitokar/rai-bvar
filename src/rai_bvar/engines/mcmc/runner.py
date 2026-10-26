@@ -350,6 +350,8 @@ def extract_params(
     coef_draw = getattr(program.coef, "extract_draw", None)
     if coef_draw is not None:  # P3: the SSVS indicators ride with the stored parameters (E123)
         glob = dataclasses.replace(glob, coef=coef_draw(st.eq.coef, st.glob.coef))
+    if program.static.vol.common:  # P3 §2.2: CommonSVDraw(h_T, ρ, σ_h) of glob.vol
+        glob = dataclasses.replace(glob, vol=vol.extract_global(st.glob, T_eff=data.T_eff))
     return ParamDraw(glob=glob, mean=mean_d, struct=struct_d, vol=vol_d)
 
 
@@ -915,6 +917,11 @@ def _accumulators(final: ChainState, sweeps: int) -> tuple[dict, dict]:
         latent["p_outlier"] = rb.pop("rb_out")
     if "rb_incl" in rb:  # SSVS: Rao-Blackwellised inclusion probabilities (P3 §3.7)
         latent["incl_prob"] = rb.pop("rb_incl")
+    if "rb_ch_sum" in rb:  # CommonSV: moments of the common h by data row (P3 §2.2, §5.5)
+        mean = rb.pop("rb_ch_sum")
+        latent["common_h_mean"] = mean
+        if "rb_ch_sq" in rb:
+            latent["common_h_sd"] = np.sqrt(np.maximum(rb.pop("rb_ch_sq") - mean**2, 0.0))
     latent.update({f"{k}_mean": v for k, v in rb.items()})
     return acc, latent
 
@@ -944,8 +951,10 @@ def run_chains(
     the stored draws exceed the memory budget. ``settings.draws=None`` (the composition default)
     is resolved from ``static.vol`` by ``MCMCSettings.with_default_draws`` (D-35), as ``BVAR`` does.
     """
-    if getattr(settings, "draws", 0) is None:
-        settings = settings.with_default_draws(sv=static.vol.persistent == "sv")
+    if getattr(settings, "draws", 0) is None:  # CommonSV counts as SV (P3 D-51)
+        settings = settings.with_default_draws(
+            sv=static.vol.persistent == "sv" or static.vol.common
+        )
     t_start = time.perf_counter()
     # one OpenBLAS thread for jaxlib's LAPACK calls while the chains run: oversubscription
     # removed; results unchanged below a 128 × 128 factor (engines.mcmc._blas; WP24)

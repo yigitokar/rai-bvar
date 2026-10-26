@@ -21,6 +21,12 @@ Contemporaneous conditional for a non-fusing mean (N04 §6.2 with its minus sign
 
 Maps back to the reduced form use unit-triangular solves only (N05 §8; no inverses):
 ``B = (A⁻¹Γ)ᵀ``, ``chol(Σ_t) = A⁻¹ Λ_t^{½}`` (lower, positive diagonal), ``E[y] = A⁻¹g + f``.
+
+CommonSV (P3 §5.3, E87): when the global volatility state is a ``CommonSVGlobal``,
+:meth:`Recursive.context` also sets ``EqContext.common_w = m_t e^{−h_t}`` from that state and
+``tmask`` alone. Both are closed over by the vmapped equation body (``SweepCtx``/``_Sweep``), so
+``common_w`` is **unbatched** and everything the shared-factor path builds from it (its Gram,
+scaling and Cholesky factor) is computed once per chain and sweep, outside the equation batch.
 """
 
 from __future__ import annotations
@@ -38,7 +44,9 @@ from rai_bvar.engines.mcmc.keys import Key, Sub, sub_key
 from rai_bvar.engines.mcmc.linalg import lstsq_draw, precision_draw, solve_unit_lower
 from rai_bvar.engines.mcmc.protocols import KernelBase, VolBlock
 from rai_bvar.engines.mcmc.state import (
+    CommonSVGlobal,
     Coupling,
+    Empty,
     EngineData,
     EqContext,
     EqPrior,
@@ -134,7 +142,9 @@ class Recursive(KernelBase):
         """Equation ``i``'s view: ``target = ỹ_i``, ``cols = −ỹ_{·,:n−1}``, ``cmask = 1{j < i}``,
         ``weights = m_t·exp(−log λ_eff,i,t)`` (masked before the ``exp``, never ``1/exp``) and
         ``log_scale = log λ_i`` when the ``a`` prior is λ-scaled (any λ-scaling implies it,
-        ``config.validate_composition`` rule 2), else 0."""
+        ``config.validate_composition`` rule 2), else 0. Under CommonSV (``gvol`` a
+        ``CommonSVGlobal``) also ``common_w = m_t e^{−h_t}`` from ``gvol`` and ``tmask`` only, so
+        it is unbatched inside the equation body (P3 §5.3, E87)."""
         n = ytil.shape[1]
         i = jnp.asarray(i, jnp.int32)
         tmask = jnp.asarray(data.tmask, jnp.float64)
@@ -142,6 +152,10 @@ class Recursive(KernelBase):
         lv = vol.log_var_eq(eq_i.vol, gvol)
         weights = jnp.where(live, jnp.exp(-jnp.where(live, lv, 0.0)), 0.0)
         log_scale = vol.log_scale_eq(eq_i.vol) if self.scaled else 0.0
+        common_w: Array | Empty = Empty()
+        if isinstance(gvol, CommonSVGlobal):  # closed-over glob.vol: unbatched (E87)
+            h = jnp.asarray(gvol.h, jnp.float64)
+            common_w = jnp.where(live, jnp.exp(-jnp.where(live, h, 0.0)), 0.0)
         return EqContext(
             i=i,
             target=jnp.take(ytil, i, axis=1),
@@ -150,6 +164,7 @@ class Recursive(KernelBase):
             weights=weights,
             log_scale=jnp.asarray(log_scale, jnp.float64),
             tmask=tmask,
+            common_w=common_w,
         )
 
     def residual(self, a_i: Array, ctx: EqContext, g_i: Array) -> Array:

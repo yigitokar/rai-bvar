@@ -401,6 +401,9 @@ class HostStore:
             if path == "glob.coef.incl":  # SSVS indicators γ, int8 (P3 E123 as amended)
                 data_vars["ssvs_gamma"] = xr.DataArray(arr, dims=(*base, "variable", "regressor"))
                 continue
+            if path in _COMMON_SV_POSTERIOR:  # glob.vol leaves mapped explicitly (P3 §2.2, E98)
+                data_vars[_COMMON_SV_POSTERIOR[path]] = xr.DataArray(arr, dims=base)
+                continue
             if key == "log1m_p":
                 continue
             if key == "log_p":
@@ -475,6 +478,9 @@ class HostStore:
             if key in ("h_mean", "h_sd"):
                 arr = arr[..., : names.T1] if names.T1 else arr
                 data_vars[key] = xr.DataArray(arr, dims=(*lead, "variable", "h_index"))
+            elif key in ("common_h_mean", "common_h_sd"):  # CommonSV h by data row (P3 §2.2)
+                arr = arr[..., : names.T] if names.T else arr
+                data_vars[key] = xr.DataArray(arr, dims=(*lead, "time"))
             elif key == "p_outlier":
                 arr = arr[..., : names.T] if names.T else arr
                 data_vars[key] = xr.DataArray(arr, dims=(*lead, "variable", "time"))
@@ -516,6 +522,15 @@ class HostStore:
 
 
 _POSTERIOR_NAMES = frozenset({"gamma", "Pi", "mu", "phi", "sigma", "h_T", "log_lam", "nu"})
+
+_COMMON_SV_POSTERIOR = {
+    "glob.vol.h_T": "common_h_T",
+    "glob.vol.rho": "rho",
+    "glob.vol.sigma": "sigma",
+}
+"""The ``CommonSVDraw`` leaves (``GlobDraw.vol``) and their names in ``posterior`` (P3 §2.2): scalar
+per draw, never mapped onto P2's per-equation ``h_T`` and ``sigma`` (a CommonSV composition has a
+Constant core, so the names are free)."""
 
 
 def _paths(record: Any) -> list[str]:
