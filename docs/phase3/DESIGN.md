@@ -14,7 +14,12 @@ numerics (with numerical checks of four claims), **Rb** engineering against the 
 oracles, exit criteria and process. They raised 97 findings (9 blockers). Every finding and its resolution is in
 §0.4 (errata E29–E86); the draft was revised (`6dbd426`), and two further reviewers, **R2a** (mathematics, with
 numerical checks) and **R2b** (engineering and process), verified the revision and raised 44 findings (3 blockers),
-resolved as errata E87–E116. No Phase 3 code was written before this version. The largest revisions: the
+resolved as errata E87–E116. No Phase 3 code was written before this version. The design was merged as PR #13
+(`552fe30`). A merge-gate review (**R3**: four lenses, mathematics, engineering, scope and validation, each major
+re-checked by a second reader) found no blocker, 12 majors and 26 minors; **Amendment 1** (errata E117–E159) applies
+them before the work packages they gate, with the §9.8 probe rules as WP29 implements them. A merge-gate review of the
+amendment and of WP26 (**R4**) found no blocker; its findings revised E124, E150, Q36 and row 28 in place and added
+E153–E159, and a re-check of those fixes revised E123, E124, E154 and E157 again. The largest revisions: the
 conjugate `CommonSV` became a shared-factor path of the per-equation sampler instead of a separate Kronecker program
 (E29), the GIG sampler follows Devroye (2014) §6 (E31), every parity and DGP criterion is pass/fail with its
 tolerance stated here (E34–E36), and conditional forecasts are labelled scenarios (E43); the second round made the
@@ -43,7 +48,10 @@ relies on it. `bayesianVARs`, `bvars`, `stochvol` and `BVAR` are GPL: they are r
 `tools/make_r_fixtures.R`, outside every test workflow, and only their manuals were read. Running a package and
 recording the **data** it returns (a default value, a grouping matrix, posterior draws) is allowed; printing an R
 function, closure, R6 method or `body()` is not, because that shows GPL source. The Bank of England `bvar` is MIT
-and may be read and used as a Python-side oracle in CI. No code is translated from GPL sources.
+and may be read and used as a Python-side oracle in CI. No code is translated from GPL sources. A failed build or
+install of a GPL package (D-54) is diagnosed from the exit status, the failing step and dependency or toolchain
+messages only; compiler diagnostics that quote package source are not read (the job's log step filters them if
+needed) (E143).
 
 ---
 
@@ -77,8 +85,8 @@ if the owner accepts it.
 | 2 | Coefficient groups: own lags, cross lags | SPEC §4.4 | **In**: groups over lag coefficients (D-38) |
 | 3 | Group "deterministics" | SPEC §4.4 | **Not shrunk**: fixed Normal prior (D-36), pending Q30; SPEC edit §4.4 Priors table |
 | 4 | Group "contemporaneous" | SPEC §4.4 | **Deferred**, pending Q17: `a_i` keeps the Phase 2 prior; SPEC edit §4.4 |
-| 5 | `AsymmetricConjugate` prior and engine rule | SPEC §4.4, §4.5 last table row, P2 Q13 | **In** (§4) |
-| 6 | `CommonSV` | SPEC §4.4, D2, N08 §A | **In** (§5) |
+| 5 | `AsymmetricConjugate` prior and engine rule | SPEC §4.4, §4.5 last table row, P2 Q13 | **In** (§4); SPEC edit §4.5: the row reads `× Constant("auto"\|"iw")` (E141) |
+| 6 | `CommonSV` | SPEC §4.4, D2, N08 §A | **In** (§5); SPEC edit §4.4/§13: "Chan (2020) common SV, the CCM (2016) model up to the presample state, priors and sampler" (E141) |
 | 7 | Conditional forecasts | SPEC §6.2, §12 tree `forecast/conditional.py` | **In** (§6), per-draw conditioning, parameters not updated; SPEC edit §6.2 (states the convention) |
 | 8 | `bayesianVARs` parity: reduced-form sampler, GL × SV, probes P1–P5 | SPEC §10.4, §13; P2 §9.9, WP21 | **In** (§9.8; WP29, WP38) |
 | 9 | `bvars` parity for `CommonSV` | SPEC §13, §2.2 | **In**, probes P11–P16 decide which quantities gate (§9.8) |
@@ -90,21 +98,25 @@ if the owner accepts it.
 | 15 | Continuous ν prior | P2 Q8 | **Deferred**, pending Q18 |
 | 16 | `solver="bcm"` (Bhattacharya et al. 2016) for `q > T` | P2 §3.9, N07 §5 | **Deferred**, pending Q19 (the Cholesky path stays exact for `q > T`, only slower) |
 | 17 | A GIG sampler | N07 §9 (open), P2 §3.9 | **In** (D-42) |
-| 18 | Analytic forecasts without `lag_coefs` | P2 D-34, §7.3 | **Changed**: analytic and structural-NIG forecasts attach `lag_coefs` (D-49) |
+| 18 | Analytic forecasts without `lag_coefs` | P2 D-34, §7.3 | **Changed**: analytic and structural-NIG forecasts attach `lag_coefs` on request (`forecast(..., lag_coefs=True)`; D-49, E120) |
 | 19 | The SV-t parity row stays an expected failure until a `stochvol` ≥ 3.2.5 fixture exists | P2 §2.10 Stage 4 (1) | **In** if WP29's R environment has `stochvol` ≥ 3.2.5 (regenerated); otherwise unchanged |
 | 20 | Two-series SBC for VAR-SV | N06 §6 (optional) | Not planned |
 | 21 | `HMP` (bayesianVARs' hierarchical Minnesota) | SPEC §2.2 table | Not in scope (Q20) |
 | 22 | `bvars` as oracle for common SV **with t errors**; `CommonSV` t, random walk, outliers | SPEC §2.2, N08 §A5.4, §A9 | **Deferred**, pending Q24: the t part of the bvars oracle row waits with the t extension |
 | 23 | Soft conditions; parameter-updating conditional forecasts | Waggoner & Zha (1999) | **Deferred**, pending Q25 |
-| 24 | SPEC §10.6 default-budget text; §10.4 "not run in CI"; §5.8 "CI never touches the network" | SPEC | **Edits** in WP41: CommonSV counts as SV (D-51); the R job is a dispatch-only, non-test job (D-54) |
+| 24 | SPEC §10.6 default-budget text; §10.4 "not run in CI"; §5.8 "CI never touches the network" | SPEC | **Edits** in WP41: CommonSV counts as SV (D-51); the R job is a dispatch-only, non-test job, and §5.8/§10.4 take D-54's wording: no test job installs R, only the network-marked weekly tests download data, the PR tier never touches the network (E136, E159) |
 | 25 | SPEC §12 tree paths (`vol/common_sv.py`, `components/priors/*`) | SPEC §12 | **Edit** in WP41 to the files of §1.2 |
+| 26 | The CommonSV false-alarm control of the detection test (`test_detection_power_and_false_alarm_control` uses a stand-in until Phase 3) | N08 §B5 item 5 | **In** (WP32 replaces the stand-in; E140) |
+| 27 | Ordering invariance within MCSE of the order-invariant CommonSV (conjugate × `CommonSV`), which `monitor.is_order_invariant` relies on | N08 §B5 item 2 | **In**: a weekly test that the user ordering and its reverse agree under the Phase 2 parity rule (WP35; E140) |
+| 28 | `bayesianVARs` parity under the user ordering and its reverse | N08 §B5 item 7 | **Deferred**, pending Q37: the SPEC §13 Phase 3 exit requires `bayesianVARs` parity for GL × SV and for the reduced-form sampler, not per-ordering parity. Every one of R1–R9 is order-dependent (Cholesky SV, or `Constant("ig")` with an unscaled `a` prior; `monitor.is_order_invariant` is false for them), so a per-ordering comparison is a separate run. The ordering machinery is checked by rows 26 (WP32) and 27 (WP35) (E140, E156) |
+| 29 | A qualitative CCM (2016) replication | N08 "Parity and replication (Phase 3)" | **Not planned**: the shipped model is Chan's (2020) specification (row 6); the GK replication (§9.10) is the Phase 3 replication target (E140) |
 
 ### 0.3 Decision register
 
 | ID | Decision | Source | Notes / supersedes |
 | :--- | :--- | :--- | :--- |
 | D-36 | **What is shrunk** (pending Q30). The global-local and SSVS priors govern the lag coefficients only (`n·p` per equation). Deterministic terms keep the fixed Normal prior of the form (structural Mode I `N(m, κ_d ψ_i/ι)`; reduced `N(0, κ_d ψ_j)`; `var_const`), the contemporaneous `a_i` keep the Phase 2 prior (Mode I `N(0, κ_a ψ_i/(ι ψ_j))`, or λ-scaled under `iw_equivalent`; Q17). Shrinkage is towards the transform-aware prior mean (SPEC §5.3): the prior governs the **deviation** `d = coefficient − m`. GL priors have no SOC/SUR dummy rows | GK (2025) §2 (intercept `N(0, 1000)`, unshrunk); `bayesianVARs` manual (`prior_intercept` fixed) | SPEC §4.4 lists deterministics and contemporaneous as groups (§0.2 rows 3–4) |
-| D-37 | **Scale.** Kernel variance `r_j v_j`: `r_j = ψ_i/(ι ψ_m)` (structural) or `ψ_i/ψ_m` (reduced) for the coefficient of equation `i` on a lag of variable `m`, so the prior is in the units of the Mode I Minnesota prior at `λ = 1` and the model is scale-equivariant (ψ per window, R9). `scale="none"` sets `r = 1` (raw coefficients; parity). No lag decay: lag-wise groups learn it | N05 §4.1; GK (2025) `r̃_i` | — |
+| D-37 | **Scale.** Kernel variance `r_j v_j`: `r_j = ψ_i/(ι ψ_m)` (structural) or `ψ_i/ψ_m` (reduced) for the coefficient of equation `i` on a lag of variable `m`, so the prior is in the units of the Mode I Minnesota prior at `λ = 1` and the model is scale-equivariant (ψ per window, R9). `ι` is unit-free, so an equivariance test cannot see a dropped `ι`; the value test of §9.2 item 5 pins it (E126). `scale="none"` sets `r = 1` (raw coefficients; parity). No lag decay: lag-wise groups learn it | N05 §4.1; GK (2025) `r̃_i` | — |
 | D-38 | **Groups.** `groups="olcl-lagwise"` (default; `2p` groups: own lags of lag `l` across equations, cross lags of lag `l` across equations), `"global"` (1), `"equation-wise"` (`n`), `"covariate-wise"` (`n·p`: regressor `(l, m)` across equations), or an explicit `(n, n·p)` integer array. Names follow `bayesianVARs`; their meaning there is probe P7 | GK (2025) §3.2: semi-global beats vanilla in every simulated design and in the application | — |
 | D-39 | **Prior families and parametrisations** (§3.2): HS (Makalic & Schmidt 2016), NG (`a, b, c`, GK/`bayesianVARs` meaning), R2D2 (`a, b`, GK gamma form), DL (`a`, gamma form), SSVS (`c0, c1, semiautomatic, p`). `a` is fixed or has a discrete hyperprior (default: GK's grid) | GK (2025) §2–3, App. B, re-derived here | — |
 | D-40 | **One post-phase scale step** `G_COEF_GLOBAL` (`Block 17`, reserved by P2 §5.6) draws every local, group and hyper parameter of a GL prior, for the structural and the reduced form alike, after the equation phase, in the order **local → `a_g` (its rate integrated) → rate `ξ_g | a_g`** (NG, R2D2), local → group (HS, SSVS), local → `a_g` (DL). The coefficient-prior kernel declares `has_local_state = False`, so no `coef_local` equation step is planned | P2 §3.4, §4.8 item 3 (post steps may write `eq.coef`, `glob.*`) | P2 §3.4 sketched local scales in `sample_local_eq`; one step is simpler because semi-global groups cross equations and the reduced form's coefficients are global (`ReducedEq.coefficients_eq` docstring) |
@@ -116,29 +128,37 @@ if the owner accepts it.
 | D-46 | **`CommonSV` model**: `u_t ~ N(0, e^{h_t} Σ)`, `h_t = ρ h_{t−1} + σ_h η_t`, `E h_t = 0` (identification), stationary `h_0 ~ N(0, σ_h²/(1 − ρ²))` at the first data row (0-based). Defaults `ρ ~ N(0.9, 0.2²)·1(|ρ| < 1)`, `σ_h² ~ IG(5, 0.04)`; options `ρ: Beta` on `(ρ+1)/2` and `σ_h²: ScaledChi2` (parity) | N08 §0, §A1–A3 (Chan 2020 priors) | — |
 | D-47 | **One `CommonSV` program, per equation, with a conjugate fast path.** Every `Linear × CommonSV()` runs the per-equation sampler: Constant cores `λ_i`, `λ_{i,t} = λ_i e^{h_t}`, a post step `h, ρ, σ_h | q_t = Σ_i e_{it}²/λ_i`. With `Minnesota(form="conjugate")` the composition is structural **Mode II at `cross = contemp = 1`**, which is the NIW prior exactly (P2 §6.1, N05 §4.2), so the model is Chan's (2020) common-SV model with the Phase 1
 prior, and the mean takes the **shared-factor path**: the λ-free prior precision and the weights `e^{−h_t}` are the same for every equation, so one Cholesky of the shared `q × q` matrix serves all equations through its leading blocks (§5.3): `O(T q² + q³ + n q²)` per sweep, the conjugate speed. `form="auto"` with `CommonSV` resolves to `"structural"` (D3 unchanged); the conjugate screen is explicit | N08 §A1, §A5, §A11 item 2; Chan (2022) Prop. 1 | the draft's Kronecker program needed hooks the engine lacks (E29); N08 §0's reduced-form NIW draw targets the same posterior |
-| D-48 | **`h` step**: blocked exact independence MH, blocks scanned **sequentially** (each conditions on its updated neighbours), block layout 0-based and covering `[0, T_eff)` every sweep (§5.4), Newton mode from a start that depends only on `q`, the neighbours and `(ρ, σ_h)`; `ρ` truncated-normal independence MH with the stationary-start factor (a uniform proposal when the data part has zero precision); `σ_h²` exact (IG, or GIG under `ScaledChi2`) | N08 §A5.2–A5.3 (derived there; Geweke-gated here) | the Omori-mixture variant (CCM 2016) is not shipped: it is not exact (N08 §A11); see P16 |
-| D-49 | **`lag_coefs` on every linear forecast.** Analytic (`AnalyticFit`) and structural-NIG forecasts attach the accelerator variable `lag_coefs` (P2 D-34), so the integrated LPD and conditional forecasts work on every engine. Contract fields unchanged; the Phase 2 test that expects analytic forecasts to raise is amended (E52) | P2 D-34, §7.3 | amends P2 §7.3 "analytic-engine forecasts carry no `lag_coefs`" |
+| D-48 | **`h` step**: blocked exact independence MH, blocks scanned **sequentially** (each conditions on its updated neighbours), block layout 0-based and covering `[0, T_eff)` every sweep (§5.4), Newton mode from a start that depends only on `q`, the neighbours and `(ρ, σ_h)`; `ρ` truncated-normal independence MH with the stationary-start factor (a uniform proposal under the Beta prior when `K_ρ` has zero precision; under TruncatedNormal always the TN proposal; E117, E158); `σ_h²` exact (IG, or GIG under `ScaledChi2`) | N08 §A5.2–A5.3 (derived there; Geweke-gated here) | the Omori-mixture variant (CCM 2016) is not shipped: it is not exact (N08 §A11); see P16 |
+| D-49 | **`lag_coefs` on request on every linear forecast** (amended by E120). `AnalyticFit.forecast` and `StructuralNIGFit.forecast` take a keyword-only `lag_coefs: bool = False`; when true, the accelerator variable `lag_coefs` (P2 D-34) is filled per chunk from the coefficient draws `_iter_draws` already yields (no new random numbers, so `paths`, `cond_mean` and `cond_chol` are bitwise the same either way). `models/base.py`'s forecast protocol gains the keyword (benchmarks accept and ignore it); `backtest` (with `estimate_cost`), `compare` and `ordering_sensitivity` request it when `lpd_method="integrated"` and some horizon is `> 1`; `score_forecast` makes no forecast and keeps raising (E52) for a forecast made without `lag_coefs=True` (E159); `conditional_forecast` builds its base forecast with it. So the integrated LPD and conditional forecasts work on every engine, while the default analytic forecast, its memory and its cache keys stay as in Phase 1. MCMC forecasts keep attaching it always (P2 D-34). Cost on request: `S·p·n²·8` bytes, `p` times the analytic `cond_chol`'s physical storage, which is a zero-stride view (1.04 GB at the SPEC §13 Phase 1 shape `n = 100, p = 13, S = 1000`, against a 0.45 GB peak) | P2 D-34, §7.3 | amends P2 §7.3 "analytic-engine forecasts carry no `lag_coefs`" for forecasts made with `lag_coefs=True` only |
 | D-50 | **Conditional forecasts are scenarios.** Hard conditions `y_{T+h, j} = r_{h,j}` on the model scale; per draw, the exact Gaussian conditioning of the unconditional joint path given the parameter draw and its drawn volatility path; the conditions update neither parameters nor volatilities, and draws are not reweighted by how likely they make the conditions (the per-draw convention; the log weights `log N(r; Rμ_s, R₁ᵀR₁)` are stored for users who want to reweight). Computed from an unconditional forecast without new random numbers; returned as `ConditionalForecastResult`, which `score_forecast` refuses (§6) | Waggoner & Zha (1999) §3 per-draw step; Bańbura, Giannone & Lenza (2015) | BoE `bvar` instead re-draws parameters from the data and the conditional path (`tests/parity/BOE_BVAR_NOTES.md` §10), so it is an oracle only per draw (A10b); Q25 |
 | D-51 | **Budgets** (extends D-35): `CommonSV` is a stochastic-volatility composition for D-35 (default 4 × 10,000 kept draws, warning below). GL compositions: the default is frozen by the WP36 pilot (§8; Q21, D-58); until then they take the D-35 default of their volatility. The convergence gate (P2 §8.2) is unchanged | P2 D-35, Q14 | — |
-| D-52 | **Monitors** (extends D-33): GL group log scales are **primary** when the number of groups `G ≤ max(2p, n)` (global, olcl-lagwise, equation-wise), secondary otherwise; SSVS `p_g` is primary under a Beta hyperprior; local scales, SSVS indicators and hyperprior indices are secondary. `CommonSV`: `h_T`, `ρ`, `σ_h` primary (with every `log λ_i`, as for `Constant`). They are monitor fields of `fit.posterior["monitor"]` | SPEC §10.6 ("monitored on hyperparameters") | — |
-| D-53 | **Grid harmonisation** (extends D-19): if any arm resolves to MCMC through a non-conjugate volatility (`SV`, or `CommonSV` with an `auto` form) or a GL prior, every `Minnesota(form="auto")` arm becomes `"structural"` and its `Constant("auto")` becomes `"ig"`. GL arms are structural already; `AsymmetricConjugate` arms are never rewritten (they stay analytic) and do not trigger the rewrite | P2 §11.4 | — |
-| D-54 | **Oracle environment** (Q22, resolved by the owner on 2026-10-25: "(a) CI job + artifact"). An input-gated job `r_fixtures` in the existing `ci.yml` (GitHub dispatches only workflows on the default branch), run by `workflow_dispatch` only (never on push, pull request or schedule), on `ubuntu-latest`, installs R and `bayesianVARs` 0.1.8, `bvars` 1.1 and `stochvol` from a pinned Posit Package Manager snapshot (CRAN sources built with gfortran), runs `tools/make_r_fixtures.R` and uploads the fixtures as an artifact, which is downloaded with `gh run download` and committed with R, package and snapshot versions in the fixtures' attributes. No local R and no container image. It is no test job: the weekly jobs are gated on `!inputs.r_fixtures` and the concurrency group includes the input. Test jobs never install R or touch the network (SPEC §5.8, §10.4 reworded to say so) | SPEC §10.4 | P2 failed on R 4.1.2 (no binary, no gfortran); E37 |
+| D-52 | **Monitors** (extends D-33): GL group log scales are **primary** when the number of groups `G ≤ max(2p, n)` (global, olcl-lagwise, equation-wise), secondary otherwise; SSVS `p_g` is primary under a Beta hyperprior; hyperprior indices are secondary; local scales are latent, neither monitored nor stored (§3.7). `CommonSV`: `h_T`, `ρ`, `σ_h` primary (with every `log λ_i`, as for `Constant`). They are monitor fields of `fit.posterior["monitor"]`. The SSVS indicators `γ` are stored as `int8` with the stored parameter draws (thinned like them; `n·k` bytes per stored draw, §10; E123, E155) | SPEC §10.6 ("monitored on hyperparameters") | — |
+| D-53 | **Grid harmonisation** (extends D-19 and keeps P2 §11.4's trigger; amended by E119): if any arm has a volatility other than `Constant` with prior `"auto"`/`"iw"` (that is, `Constant("ig")`, `Constant("iw_equivalent")`, any `SV(...)`, or a `CommonSV` whose Minnesota form is not explicitly `"conjugate"`), or has a GL prior, every `Minnesota(form="auto")` arm becomes `"structural"` and its `Constant("auto")` becomes `"ig"`. The one narrowing of P2 §11.4: a `CommonSV` arm with an explicit `Minnesota(form="conjugate")` (the conjugate screen) does not trigger, so it is compared against the analytic arms (§7.4). GL arms are structural already; `AsymmetricConjugate` arms are never rewritten (they stay analytic) and do not trigger the rewrite | P2 §11.4 | — |
+| D-54 | **Oracle environment** (Q22, resolved by the owner on 2026-10-25: "(a) CI job + artifact"). An input-gated job `r_fixtures` in the existing `ci.yml` (GitHub dispatches only workflows on the default branch), run by `workflow_dispatch` only (never on push, pull request or schedule), on `ubuntu-latest`, installs R and `bayesianVARs` 0.1.8, `bvars` 1.1 and `stochvol` from a pinned Posit Package Manager snapshot (its Linux binaries; CRAN sources built with gfortran where no binary exists; E147), runs `tools/make_r_fixtures.R` and uploads the fixtures as an artifact, which is downloaded with `gh run download` and committed with R, package and snapshot versions in the fixtures' attributes. No local R and no container image. It is no test job: the weekly jobs are gated on `!inputs.r_fixtures` and the concurrency group includes the input. No test job installs R; only the network-marked weekly tests download data (the pinned, checksummed datasets of SPEC §5.8); the PR tier never touches the network (SPEC §5.8, §10.4 reworded to say so; E136, E159) | SPEC §10.4 | P2 failed on R 4.1.2 (no binary, no gfortran); E37 |
 | D-55 | **Numbering** continues Phase 2 (Conventions); SPEC §14 points at both registers | — | — |
-| D-56 | **Validation designs for heavy-tailed coefficient priors.** GL composition rows run Geweke and SBC on an exogenous fixed design: `X` of shape `(T_eff, k)` with a column of ones for each deterministic term and `N(0, 1)` entries elsewhere, drawn once from the configuration seed and held fixed, `Y` simulated given `θ` without lag feedback (N08 §A11). The lagged-path GL rows use families with exponential or Gaussian tails and a scale knob (NG, SSVS; DL has no scale parameter) with scales whose explosive prior mass, measured by prior simulation in WP30, is ≤ 2e-4 (P2 §9.2; R2a measured the
-values of §9.4); the horseshoe's half-Cauchy tail makes that mass ≈ 0.4 at `global_scale = 0.1` (Ra8), so no lagged HS row runs with sampled scales | N06 §3.4; N08 §A11 | E46 |
+| D-56 | **Validation designs for heavy-tailed coefficient priors.** GL composition rows run Geweke and SBC on an exogenous fixed design: `X` of shape `(T_eff, k)` with a column of ones for each deterministic term and `N(0, 1)` entries elsewhere, drawn once from the configuration seed and held fixed, `Y` simulated given `θ` without lag feedback (N08 §A11). The lagged-path GL rows use families with exponential or Gaussian tails and a scale knob (NG, SSVS; DL has no scale parameter) with scales whose explosive prior mass, measured by prior simulation in WP30, is within Phase 3's target 2e-4 (E46, E93: the
+level Phase 2 measured for its corrected prior at `n = 3, p = 2`, P2 §9.2; Phase 2's own bound is `P(ρ > 1) < 10⁻³`, N06 §9.1;
+decided by E150's Monte Carlo rule, pending Q36(i)); the horseshoe's half-Cauchy tail makes that mass ≈ 0.4 at `global_scale = 0.1` (Ra8), so no lagged HS row runs with sampled scales | N06 §3.4; N08 §A11 | E46 |
 | D-57 | **Branches and PRs.** One PR per work package. Each work-package branch starts from the branch of the work package it depends on (named in §13), and its PR targets that branch, so the diff is the work package alone; GitHub retargets it to `main` when its base merges. WP29 (fixtures) is
-independent of the stack, targets `main` and is merged before WP38, whose branch is then rebased onto `main`, so WP38's
-diff stays its own. Merging is the owner's | task brief | E58 |
+independent of the stack, targets `main` and is merged before WP38. Mechanics (E129): the repository does not delete
+merged branches, so GitHub does not retarget a dependent PR; after a work package's PR merges, the next PR is
+retargeted to `main` (`gh pr edit <next> --base main`) before it is merged. After WP29 merges, `main` is merged into the
+lowest unmerged stack branch (and so carried up the stack), so WP38's diff stays its own; the same holds for WP39 and
+the DGP PR. Stacked PRs are merged with a merge commit (no squash or rebase merge), then the next PR is retargeted
+(E159). Merging is the owner's | task brief | E58, E129, E159 |
 | D-58 | (reserved) the GL default budget, decided by the owner from WP36's pilot (Q21) | — | — |
 | D-59 | **Every exit criterion is pass/fail.** An unresolved probe, a missing fixture, a skipped parity test or a comparison that fails means the criterion is **not met**; the owner then decides, and any substitution needs a named SPEC §13 amendment. No internal oracle stands in for an external one silently; the release run of WP41 must show the parity tests ran (no skips) | the project rule against changing criteria | E34 |
-| D-60 | **Stated tolerances.** Quantile comparisons use the Phase 2 parity rule (Conventions); KS tests use `α = 1e-3`; moment comparisons use `|z| ≤ 4` with Bonferroni over the compared moments; every Tier U tolerance is stated with its test (§9.2). Nothing is compared before its rule is written here or in a pre-registration | P2 §9.9 | E38 |
+| D-60 | **Stated tolerances.** Quantile comparisons use the Phase 2 parity rule (Conventions); KS tests use a **family-wise** `α = 1e-3`: a test function that runs `m` KS tests passes iff `min p > 1e-3/m` (Bonferroni, as `tests/mcmc/blocks/test_linear_fastpaths.py`), with `m` stated in the test (E124); moment comparisons use `|z| ≤ 4` with Bonferroni over the compared moments; every Tier U tolerance is stated with its test (§9.2). Nothing is compared before its rule is written here or in a pre-registration | P2 §9.9 | E38 |
 | D-61 | **Separate Phase 3 validation registry**: `validation.joint` gains `COMPOSITIONS_P3`, `BLOCK_CONFIGS_P3` (and `joint_spec` accepts their names); the Phase 2 tuples and the suites that assert them stay unchanged | P2 §9.2 | E51 |
 | D-62 | **Log-aware consumers.** Every reader of a coefficient prior's precision (failure diagnostics, implied prior moments, monitors) accepts `GaussianLogDiag`; implied reduced-form prior moments are reported "not applicable" under a GL prior (the horseshoe has no finite prior variance) | P2 §5.7, §8.4 | E53 |
 
-### 0.4 Review errata (E29–E116)
+### 0.4 Review errata (E29–E159)
 
 `Ra`, `Rb`, `Rc` = the first-round reviewers and `R2a`, `R2b` the second-round reviewers (header), with their finding
-numbers. Every finding has a row; related findings share one.
+numbers; `R3` = the merge-gate review of Amendment 1 (majors `R3-M1…M12`, each confirmed by a second reader; minors
+`R3-m1…m26`, each checked against the code or the text before it was applied); `R4` = the merge-gate review of the
+amendment (PR #16) and of WP26 (PR #17) (confirmed findings `R4-C1…C6`, minors `R4-m1…m24`). Every finding has a row;
+related findings share one.
 
 | # | Finding | Resolution | § |
 | :- | :--- | :--- | :- |
@@ -230,6 +250,49 @@ numbers. Every finding has a row; related findings share one.
 | E114 | R2b26: the CommonSV level shift may mix slowly | R31; WP36 measures; Q34 | §5.3, §11 |
 | E115 | R2a8, R2a9, R2a10, R2a11, R2a12, R2a13: ρ fallback threshold and ratio; A9 routes; M32's weight; M28's catcher; the conjugate test prior's reading; KS on correlated draws | each stated where it applies | §5.4, §9 |
 | E116 | R2a16, R2a17: mixed index conventions; "exactly" citations | 0-based throughout (`h_0` the first data row); Chan (2020), not CCM (2016) | D-46, §5 |
+| E117 | R3-M1, R3-m23: the `U(−1, 1)` fallback for `ρ` omits the TruncatedNormal prior ratio | The uniform branch is taken only under the Beta prior, when the full `K_ρ < 1e-8`; under TruncatedNormal the proposal is always the TN, so `log α = g(ρ*) − g(ρ)` is exact whatever `V_ρ` (revised by E158); pinned Tier U cases force the branch | D-48, §5.4, §9.2 |
+| E118 | R3-M2, R3-m19: the bitwise A/B does not run the Phase 2 paths WP33/WP34 rewrite (the EB plug-in through `structural_nig.eb_structural`, the analytic engine) | The A/B covers the EB plug-in at the default `hierarchy="eb"`, with `fit.hyper` in the digest, `AnalyticFit` at `fixed`, `eb` and `mh`, and an analytic `ordering_sensitivity`, beside every reachable Phase 2 composition (§2; extended by E154). The free-cross refactor of `eb_structural`/`_Window` is bitwise at a fixed `cross` (the same arithmetic, `cross`/`contemp` passed per evaluation) | §2, §4.3, §13 |
+| E119 | R3-M3: D-53's trigger list was narrower than P2 §11.4 (`Constant("ig")`, `Constant("iw_equivalent")` no longer triggered; `test_grid_harmonise[every-constant]` would fail) | P2's trigger kept; `CommonSV` triggers unless its form is explicitly conjugate; tests: the Phase 2 grids unchanged, `[Constant(), CommonSV()]` rewritten, `[conjugate × CommonSV, Constant()]` not | D-53, §7.5 |
+| E120 | R3-M4, R3-M5: an always-on analytic `lag_coefs` multiplies large-`n` forecast memory by about `p` and moves the SPEC §13 Phase 1 n = 100 figure | Opt-in `lag_coefs=True` (option (a) of the review), requested by the integrated-LPD and conditional-forecast paths; a WP33 test that the default analytic forecast carries no `lag_coefs`, keeps `cond_chol.strides[2] == 0` and the same retained memory (tracemalloc current); E-16 names the keyword | D-49, §0.2 row 18, §6.1, §7.3, §13 |
+| E121 | R3-M6: the bvars branch-2 gate compares two models that cannot be made equal; P13–P15 had no decision rule; a P16 failure was read as "approximate" | P13–P15 get stated rules (§9.8); a P16 failure is recorded as "mapping or sampler, undetermined" and cannot move the predictive into the gate; Q35 asks the owner what "bvars parity for CommonSV" means when branch 2 is selected (SPEC §10.4 prescribes comparing forecast distributions when no exact mapping exists; whether that comparison gates is the owner's) | §9.8, §12, §13 |
+| E122 | R3-M7, R3-M10: the P1–P5 decision rules were deferred to the script, where P4 had none and P2/P3 always answered | Every probe rule (P1–P16) is written in §9.8 as WP29 implements it at `7f4e570` (re-pinned at `d281276` by E157); any later change needs an amendment before any parity comparison runs. P2 now separates `U⁻¹` from `2I − U` on a new `n = 3` dataset; P3 and P4 have bands and a unique-match rule. The rules were revised after discovery runs of the R side only, before any parity comparison; the run ids are in §9.8 | §9.8 |
+| E123 | R3-M8: the SSVS inclusion comparison used a binomial MCSE (indicators are autocorrelated; the Rao–Blackwellised estimate is not binomial) | Each side's estimate is the mean of its per-draw indicator series `γ_j` with the MCSE of a mean, `sd/√ESS` (`diagnostics.mcse_mean_many`): the R side with the per-run ESS, our side with the chain ESS of the stored `γ` draws; Bonferroni as the Phase 2 rule; `p̂ ∈ {0, 1}` on both sides passes iff equal, on one side the other side's MCSE is used alone. The indicators `γ` are stored per draw (revised by E155: as `int8` with the stored parameter draws, not a monitor field; §3.7, D-52) | §3.7, §9.8 |
+| E124 | R3-M9, R3-m24, R4-C2: the GIG KS grid (≈ 180 cells at `α = 1e-3` each) had no multiplicity rule (a correct sampler fails ≈ 16%); M34 was not specified | D-60's KS rule is family-wise (Bonferroni over the `m` tests of one test function); the §3.5 grid is one family whose cells each have their own random stream (the `−λ` mirrors included); the same rule for §6.3's per-horizon KS, A11 and P16 (its marginals × volatilities). M34 is defined (§9.6). **Order of events, recorded as found** (revised after R4): WP28 had already run the grid under the per-cell rule when the review's rule reached it, and one of 180 cells failed (`λ = 0, log ω = −50`, `p = 6.2e-4`), the ≈ 16% false failure the review predicted from the design alone (200 independent replications at that cell gave uniform p-values, KS `p = 0.49`; one 2·10⁶-draw sample `p = 0.67`). The grid's original keys, `fold_in(key(1), i·10⁴ + j)`, already gave every cell, the mirrors included, its own stream. WP28 first changed the keys (to `fold_in(fold_in(key(1), i), j)`) in the same commit as the rule (PR #19's "WP28 tests: the GIG KS grid as one Bonferroni family (review M9)", first pushed as `7da32d7`), and under those keys even the per-cell rule passed (min `p = 3.3e-3`), so the keys rather than the rule would have carried the outcome. The keys are restored to the original ones in PR #19's "WP28 tests: keep the GIG grid's original keys (E124)" (`6b8f433` on `phase-3-wp28` when this was written; stacked rebases change the hashes, the subjects stay): under them the family-wise rule passes (min `p = 6.2e-4 > 1e-3/180 = 5.6e-6`; `E log X` max `|z| = 3.95 < 4.03`) and the per-cell rule fails, so the only change after the failure is the review's rule, written from the design before the run was known to it. The owner decides on the rule with this record | D-60, §3.5, §6.3, §9.6, §9.7, §9.8 |
+| E125 | R3-M11: P6's inference ran the wrong way (an internally standardising package is exactly equivariant, which the rule sent to "none") | P6 runs under a tight prior and compares the ×100 refit with (i) the equivariant image, (ii) the unchanged `PHI` and (iii) the image of a raw-unit-prior fit; (iii) ⇒ raw data, the SWA fixtures stand; (i) or (ii) ⇒ pre-standardised data in bayesianVARs' convention, which no probe establishes yet, so R1–R9 wait for a convention probe (an amendment); otherwise undecided | §9.8 |
+| E126 | R3-M12: the default `scale="psi"` value of `r_j` had no catching tier independent of WP31's author | §9.2 item 5 (WP31's acceptance): `log r` against WP30's `gl_log_r_reference` (1e-14), `ŝ` against WP30's dense `ssvs_shat_reference` (1e-10) with the `T_eff` boundaries of D-44, and scale equivariance for every family in both forms. `ι` is unit-free, so only the value test pins it | D-37, §9.1, §9.2, §13 |
+| E127 | R3-m1: A9's moment oracle cannot take posteriors (`implied_reduced_form_moments` is a prior-moment routine for diagonal arrays) | A9 compares `E[B] = (E[A]⁻¹E[Γ])ᵀ` (exact by row independence) and `E[Σ]` from a full-covariance recursion over the per-equation NIG posteriors (WP33) against `AnalyticFit` at 1e-10 | §9.7 |
+| E128 | R3-m2: two Phase 2 contract tests changed without being listed | `tests/mcmc/unit/test_keys.py` (WP26, the frozen `Sub` values) and `tests/mcmc/blocks/test_cccm.py`'s `reads` assertion (WP31) join §1.3 | §1.3 |
+| E129 | R3-m3 and the orchestrator: D-57's stacking mechanics were wrong (no automatic retargeting) | Retarget after each merge; carry `main` up the stack after WP29 | D-57 |
+| E130 | R3-m4: E99 changes a Phase 2 warning (Mode II × `Constant` at `cross = contemp = 1`, `n ≥ 4`, loses the R8 ordering note) without listing it | Listed as an intended Phase 2 behaviour change of WP32, with a test that that fit no longer warns and that `cross ≠ 1` still does | §1.3, §13 |
+| E131 | R3-m5: §4.2 gave `AsymmetricConjugate` the fit seed under `hierarchy="mh"`, against §7.2 and Phase 1 | Dropped: `uses_fit_seed` is `engine == "mcmc"` (the MH seed comes from `MHSettings` or `fit(seed=…)`, as Phase 1) | §4.2 |
+| E132 | R3-m6: `CommonSVGlobal`'s scalar accumulators would be read as per-equation columns when `chains == n` (and `acc_h` collides with `SV`'s) | Renamed `acc_csv_h`, `acc_csv_rho`, `acc_csv_newton` (WP26); WP32 adds them to the monitor's per-chain scalars | §2.2, §5.4 |
+| E133 | R3-m7: no seam gives `CommonSVStep.init` the residuals for the Newton start | `h` starts at 0 (a valid state; the first sweep's `h` step runs with fresh `q` before the `ρ` step) | §5.5 |
+| E134 | R3-m8: `pyproject.toml`/`uv.lock` (mpmath) and the `fit()` dispatch had no owner | `pyproject.toml` and `uv.lock` [WP28] (the lock regenerated, not hand-merged, on a rebase); `fit()` dispatches `AsymmetricConjugate` lazily to `StructuralNIGFit` by name [WP27], which WP33 provides | §1.2 |
+| E135 | R3-m9: `ci.yml` was co-owned by an off-stack and an on-stack work package | `ci.yml` [WP29] (r_fixtures) and [WP41] (tiers) only; the Phase 3 shards live in `tools/weekly_shards.py` (WP35), which the plan job already reads | §1.2 |
+| E136 | R3-m10, R3-m17: the planned SPEC §5.8/§10.4 wording ("CI never touches the network") is false for the weekly tier | WP41 writes: "No test job installs R; only the network-marked weekly tests download data (the pinned, checksummed datasets of §5.8); the PR tier never touches the network" | §0.2 row 24, D-54 |
+| E137 | R3-m11: §1.1 did not say `forecast/conditional.py` is NumPy-only | Stated | §1.1 |
+| E138 | R3-m12, R3-m14, R3-m26: Q28 was still open though the owner approved the full DGP run | Q28 resolved (owner, 2026-10-25); R30 mitigated; §9.9 names the registered run at the registration's commit; WP39 needs that run's report and the DGP PR merged; a harness change in the DGP PR before it merges triggers the registration's bug-fix rule | §9.9, §11, §12, §13 |
+| E139 | R3-m13, R3-m18, R3-m22: internal staleness | §9.11 lists M19–M36; `benchmarks/reports/dgp_study*` protected; WP39 records the readings in this document's exit map (SPEC is WP41's); one dims name for `incl_prob`, `(variable, regressor)`; the Block ids 17–18 already exist, only `Sub` is appended | §1.2, §2.2, §2.4, §3.7, §9.9, §9.11 |
+| E140 | R3-m15: four Phase 3 assignments of the Phase 2 notes were missing from §0.2 | Rows 26–29 | §0.2 |
+| E141 | R3-m16: two deliveries depart from SPEC wording without a named edit; E-3 told a `Constant("ig")` user "only with Constant()" | SPEC edits named in §0.2 rows 5–6; E-3 reworded | §0.2, §7.3 |
+| E142 | R3-m20: the DGP exit is read as met on one registered cell (`n = 3, p = 2, T = 200`) of SPEC §10.5's range without asking the owner | Q33 extended to that reading | §9.9, §12 |
+| E143 | R3-m21: build logs of GPL packages can quote GPL source | The clean-room paragraph covers build failures | header |
+| E144 | R3-m25: A10's oracle was owned by the author of the update it checks | WP30's author writes it (`validation/reference.py`, `conditional_forecast_reference`) | §9.1, §9.7, §13 |
+| E145 | R3 (refuted, engineering): "the group rules cannot be met at construction" | No contract change: `api.py` passes a provisional `n_groups = 1` at construction (rules (11)–(14) do not read `G`) and `resolve.py` passes `n`; §2.1 now says only the value of `G` depends on `n`. The two other refuted findings (the R6 coverage reading; bvars branch 2 being SPEC-prescribed) change nothing; the second informs Q35 | §2.1 |
+| E146 | WP29 discovery run 40226725087: bvars's ncSV sampler fails on the FRED-QD small set in levels (an `iwishrnd` error) | The bvars runs use `qd3_growth.csv` (growth rates: 4Δ of 100 × log `GDPC1`, `GDPCTPI`; `FEDFUNDS` in levels; 1960Q2–2019Q4), `n = 3`, `p = 4`; amends §9.8's "FRED-QD small set (federal series)" | §9.8 |
+| E147 | WP29's implementation of §9.8 | Recorded: the R side installs the snapshot's Linux binaries (D-54); P12 holds trivially (bvars 1.1 never moves `V`, even under its default prior, so the runs keep the default starting `V = Ω`); under an untruncated `ρ` prior the P16 posterior at `T = 2` may be improper, so WP38 establishes propriety before any KS verdict; R7 uses SSVS `c1 = 1` (chosen from mixing before any comparison); at the discovery runs' size both volatilities take branch 2; the `r_fixtures` dispatch skips the `lint` and `test` jobs | D-54, §9.8 |
+| E148 | WP30: under the §9.4 CommonSV test prior `ρ ~ N(0.8, 0.15²)·1(|ρ| < 1)` the density is positive at `ρ = ±1`, so `Var(h_t) = E[σ_h²/(1 − ρ²)]` is infinite | On every TruncatedNormal-`ρ` row (320–324, 328, 329, blocks 407, 408) the unbounded test functions (`h` at three dates, mean `h`, the exact log-likelihood, the log-scale data functions) are SBC-only (ranks need no moments); Geweke uses bounded transforms (`atan` of `h` at the three dates and of mean `h`) beside the other §9.4 functions. The PR-tier rows 320 and 321 are correspondingly weaker in `h` than §9.4 read | §9.4 |
+| E149 | WP30: `compose` accepted a `VolStatic(common=True)` static and built a Phase 2 program without the common-`h` step, so before WP32 `BVAR(vol=CommonSV()).fit()` on the stacked branches would have run a Constant-volatility model under the CommonSV label | `compose` raises `NotImplementedError` unless the volatility block brings a `G_COMMON_SV` step (WP26) | §2.4 |
+| E150 | WP30's explosive-mass measurement (10⁶ draws per size, seed 0; `validation.joint.EXPLOSIVE_MASS_P3`), revised after R4-C3. D-56's 2e-4 is Phase 3's target (E46, E93: the level Phase 2 measured for its corrected prior at `n = 3, p = 2`); Phase 2's bound is `P(ρ > 1) < 10⁻³` (N06 §9.1), which every row meets (largest 2.39e-4). D-56 states no Monte Carlo rule; the rule is now: a row exceeds the target iff its count is above the upper 99% Poisson limit at the target (234 of 10⁶ draws; ≈ 2.17e-4 at 4·10⁶). Rows 320 (238) and block 408 (239) exceed it, from the SOC/SUR rows of the conjugate prior (≈ 1.2e-4 without them, rows 325 and 329); row 321 (207; Phase 2's own test prior, reproducing Phase 2's measured level, 2.04e-4 ± 0.07e-4 at 4·10⁶) and row 323 (204) are within it. Rows 319 and 330 measure 0, against R2a's 4.6e-5 and 1.3e-5; an independent prior simulation in R4 confirms WP30's 0, so the gap lies in R2a's simulation | Not retuned: the test priors stay as §9.4 states; rows 320 and 408 are strict expected failures of WP30's target test; Q36 asks the owner, presenting the Monte Carlo rule as the definition of a criterion D-56 left incomplete (not a loosening); the target stays 2e-4 (moving it to `10⁻³` now that the results are known would loosen it). §9.4's figures for rows 319 and 330 are replaced by the measured 0 (R2a's kept as superseded) | §9.4, §12 |
+| E151 | WP30: where §9.3–§9.4 were silent | Recorded as WP30 chose: row 325's parity priors are P2 §9.2's SV values (`Beta(10, 2)` on `(ρ + 1)/2`, `ScaledChi2(0.1)`); row 320's dummy rows are SOC for every variable plus SUR (the Phase 2 rows); blocks 401–405 and 407 run only the named production global step (`kernel="global_step"`; their held blocks run before the live post step, so P2's restore after a full sweep would not be exact), 401–405 redraw the coefficients from `p(d | scales)` with zero data, and the hyperprior variants of 401–405 and the families of 406–407 are named in `BLOCK_CONFIGS_P3`; D-56's "a column of ones for each deterministic term" would be collinear with a trend, and every row has `n_det = 1`. For WP32 to confirm: the common step receives `EqOut.log_lam = log λ_i + h_t`; the block-401–405 coefficient redraw keys on `Block.EQ_COEF_LOCAL` (unused by Phase 3 steps); the densities are with respect to the natural scales and `σ_h` | §9.3, §9.4 |
+| E152 | WP28: design details | Recorded: the GK grid's "middle point" is both middle points (0.5 and 0.501); `E log X` uses `|z| ≤ max(4, z_{1−0.01/(2m)})` (= 4.03 at `m = 180`) as the Bonferroni rule over the compared moments; "1e-10 relative on `dev_log`" is relative, and "representable" is `ε(|θ| + |d|) ≤ 1e-13·|d|`; §10's GIG estimate (0.2–0.6 ms per sweep at `n = 20, p = 4`) is off: 7.6 ms per 6,400-lane call measured, 2.6 ms of it the limit-case gamma draw that `vmap` evaluates on every lane (WP31 may take the limits out of the production path; WP36 re-measures); §5.4's `K_h` diagonal at `T_eff = 1` is `(1 − ρ²)/σ_h²` (WP32); the `csv_newton_start` seam sets both the start and the iteration cap, as M28 changes both (WP32) | §3.5, §5.4, §9.2, §9.6, §10 |
+| E153 | R4-m20: rule (11) did not reject SOC/SUR dummy rows with a varying coefficient prior (reachable through engine-level `StaticConfig`s, not the API) | Rule (11) also needs `MeanStatic.n_dummy = 0` (GL priors have none, D-36); tested in `test_contracts_p3` (WP26) | §2.1 |
+| E154 | R4-C5, R4-C6, R4-m21–m24: the A/B tool ran 16 of the 23 Phase 2 composition rows while claiming "each Phase 2 MCMC composition"; the A/B record had no digests, machine or head; two contract defaults and resolve-level changes were unguarded; one Phase 2 test amendment was unlisted | `tools/phase3_bitwise_ab.py` builds its fixed-hierarchy cases from `validation.joint`'s registry (every row the public API can build: 22 of 23, row 17 `zero_sv` has no public mean) plus the option, EB-plug-in, default-`eb`, analytic and ordering cases of §2 (39 cases; `gram="batched"` runs on the two paths that read the Gram layout, after a re-check found it on the eigen path, where it equalled row 1, and `run` now refuses two MCMC cases with the same posterior digest), and a contract test checks the row coverage; the baseline is re-recorded twice on `552fe30` (sha256 `323d68b3…`); each PR records its head commit, the machine and the sha256 of both JSON files. New WP26 tests: every new leaf defaults to `Empty()` in constructor calls (`EqContext`, `CoefPriorArrays`, `SharedPrior`); a golden of the resolved `StaticConfig` of the MCMC golden models recorded at `552fe30`. §1.3 lists the `test_config.py` unknown-kind change | §1.3, §2 |
+| E155 | R4-m18: E123's per-draw `γ` was unpriced, and D-52 listed local scales as secondary monitors while §3.7 said they are not stored | `γ` is stored as `int8` with the stored parameter draws (thinned like them; `n·k` bytes per stored draw, §10), and WP38's ESS-based MCSE uses those draws; local scales are latent, neither monitored nor stored | D-52, §3.7, §9.8, §10 |
+| E156 | R4-C4: row 28 claimed the reduced-form runs R1–R9 are order-invariant (Cholesky SV and `Constant("ig")` are not), which dropped the per-ordering parity check without the owner question R3-m15 asked for | Row 28 deferred pending Q37 | §0.2, §12 |
+| E157 | R4-C1, R4-m1, R4-m11, R4-m12: the §9.8 pin was not accurate about which runs an undecided probe blocks (the script stages R1/R2 when P6 is unresolved and wbvars_* whenever P15 returns a row map, and withholds R2 when P4 is undecided and the SV runs when P5 is), the P13 (c)/P14 rule accepted conditioning variants the row did not name, branch 1's settings were unstated, and one fixture attribute stated a band the code does not use | "Not met" is applied at comparison from each fixture's `probe_answers` and `SV_PARAMETRIZATION.md` (D-59), not by the script's staging. WP38 applies each probe row's own consequence (revised after the re-check, which found that a flat "P11–P16 for wbvars_*" list contradicted the P12–P14 and P16 rows and decided Q35 in advance): P1–P3 and P6 for every R run, P4 for R1 and R3–R9, P5 for R2, P7 for R8, P8 for R4–R6 and R9, P10 for R3–R9, P9 for semi-automatic SSVS runs only, P11 and P15 for wbvars_*; P12–P14 choose the branch (unmapped ⇒ branch 2, whose status waits on Q35); P16 decides only branch 1's `h_t, ρ, σ_h` part; P8 and P16 count as answered once their later decision is recorded in `SV_PARAMETRIZATION.md` (the recording work package amends WP29's schema test so that, for those two probes only, a fixture's "pending" may stand beside the recorded decision); the fixtures from the `d281276` final run replace the first run's in PR #21, which checks their decisions. Branch 1 and the P16 row now agree that an unresolved P16 leaves that part not met, stricter than the merged design's "reported, not gating"; R21 matches. The exit map reads "after P1–P6". WP29 restricts the P13 (c)/P14 decision to the variants the rows name (the others are evidence), passes the mapped branch-1 settings (the P12 `V`, the P14 `(sv_a, sv_s)`), corrects the P3 attribute text and the P6 staging note, gates staging on the rows' dependencies (P8 and P9 gate at comparison only), and re-pins at `d281276`; recomputed from the final run's recorded p-values, the P13/P14 decisions are unchanged (cSV: only `U(−1, 1)` with `h_0 = 0` passes, `p = 0.058`; ncSV: no candidate passes), and discovery run 40242687927 checks the new records | §9.8, §13 |
+| E158 | R4-m2, R4-m3, R4-m16, R4-m17: "possible only under Beta" fails when `V_ρ > 10⁸`; the pinned case had `S_xy = 0`, so it could not catch a missing data term in the uniform branch | The uniform branch is a Beta-only branch (§5.4, D-48); two pinned Tier U cases: the all-zero `h` under both priors (TruncatedNormal shows the TN proposal), and under Beta a state with `S_xx/σ_h² = 10⁻¹⁰` and `S_xy/σ_h² = 10⁻²` (the uniform proposal with a non-zero data term) | D-48, §5.4, §9.2 |
+| E159 | R4-m4/m14, m5, m6, m9, m10, m15, m19: text consistency | D-54 and §0.2 row 24 carry E136's wording; R21's mitigation names P12–P15 as selecting the comparison and P16 as deciding only the `h_t, ρ, σ_h` part; D-57 requires merge commits, and §13's WP26 and WP38 bases are corrected; §1.3 lists `tests/integration/test_ordering.py` (WP32, the CommonSV false-alarm control of row 26) and the weekly ordering-invariance test (WP35, row 27), which also join the WP32/WP35 rows and §9.11; `score_forecast` drops out of D-49's plumbing; P16's KS is one family; §3.5's `E log X` bound matches E152; §9.4's masses for rows 319 and 330 are the measured ones | D-49, D-54, D-57, §1.3, §3.5, §9.4, §9.8, §9.11, §11, §13 |
 
 ---
 
@@ -241,7 +304,9 @@ P2 §1.1 holds unchanged: `import rai_bvar` imports no JAX; the new user-facing 
 `priors/asymmetric.py`, `components/specs.py` `CommonSV`) are pure Python; array builders that return engine pytrees
 live in `priors/global_local_arrays.py` and are imported only by `engines/mcmc/resolve.py`; kernels import JAX and
 are loaded only through `engines/mcmc/registry.py`. `rb.conditional_forecast` is resolved through the lazy table of
-`rai_bvar/__init__.py`. The analytic engine for `AsymmetricConjugate` is NumPy only.
+`rai_bvar/__init__.py`. The analytic engine for `AsymmetricConjugate` is NumPy only. `forecast/conditional.py` is
+NumPy-only at import (like `structural/ordering.py`), and `MCMCFit.conditional_forecast` imports nothing from JAX at
+module level, so `from rai_bvar import *` still loads no JAX (E137).
 
 ### 1.2 Files (new or changed; the owning work package of each part, §13)
 
@@ -253,7 +318,8 @@ the same time. `engines/mcmc/sweep.py` needs no change: the shared factor's inpu
 ```text
 src/rai_bvar/__init__.py                         [WP27] exports (GL classes, DiscreteGrid, AsymmetricConjugate, CommonSV)
                                                  [WP34] lazy conditional_forecast
-src/rai_bvar/api.py                              [WP27] resolution, engine table §7.2, errors §7.3, harmonise (D-53), coef_log
+src/rai_bvar/api.py                              [WP27] resolution, engine table §7.2, errors §7.3, harmonise (D-53), coef_log,
+                                                        fit() dispatch of AsymmetricConjugate to StructuralNIGFit by name (E134)
 src/rai_bvar/components/specs.py                 [WP27] + CommonSV
 src/rai_bvar/components/__init__.py              [WP27] re-exports CommonSV
 src/rai_bvar/priors/global_local.py        new   [WP27] user-facing GL specs, DiscreteGrid
@@ -288,7 +354,10 @@ src/rai_bvar/components/structure/recursive.py   [WP32] EqContext.common_w from 
 src/rai_bvar/priors/sv_arrays.py                 [WP32] CommonSVPrior builder
 src/rai_bvar/components/vol/robust.py            [WP32] passes gvol; log_var adds h_t; global_steps()
 src/rai_bvar/engines/structural_nig.py           [WP33] StructuralNIGFit, free cross/contemp, MH problem
-src/rai_bvar/engines/analytic.py                 [WP33] forecast lag_coefs (D-49)  [WP34] conditional_forecast method
+src/rai_bvar/engines/analytic.py                 [WP33] forecast(..., lag_coefs) on request (D-49)  [WP34] conditional_forecast method
+src/rai_bvar/models/base.py                      [WP33] the lag_coefs keyword of the forecast protocol (D-49)
+src/rai_bvar/evaluation/{backtest,compare}.py   [WP33] request lag_coefs for the integrated LPD (D-49)
+src/rai_bvar/evaluation/scores.py                [WP34] refuses ConditionalForecastResult
 src/rai_bvar/structural/ordering.py              [WP33] StructuralNIGFit support, permuted custom groups
 src/rai_bvar/forecast/conditional.py       new   [WP34] conditions, the exact update, ConditionalForecastResult
 src/rai_bvar/forecast/invariants.py              [WP34] check_conditional_structure
@@ -296,16 +365,18 @@ src/rai_bvar/evaluation/scores.py                [WP34] refuses ConditionalForec
 src/rai_bvar/validation/{reference,simulate,log_joint,testfns,joint}.py  [WP30] §9.1 (separate registry, D-61)
 tools/make_r_fixtures.R                          [WP29] sections bvars (bayesianVARs P1–P10, R1–R9), wbvars (P11–P16)
 tools/make_sv_parity_data.py                     [WP29] packing of the new fixtures
-.github/workflows/ci.yml                         [WP29] r_fixtures job (D-54)  [WP35] weekly shards  [WP41] tiers
-tools/weekly_shards.py                           [WP35] Phase 3 shards
+.github/workflows/ci.yml                         [WP29] r_fixtures job (D-54)  [WP41] tiers (E135)
+tools/weekly_shards.py                           [WP35] Phase 3 shards (the plan job reads them; no ci.yml change)
+pyproject.toml, uv.lock                          [WP28] mpmath in the dev group (the lock regenerated on a rebase)  [WP41] version
+tools/phase3_bitwise_ab.py                 new   [WP26] the same-machine A/B of §2 (E118)
 benchmarks/pilot/phase3_*.py               new   [WP36] pilot; docs/phase3/pilot.md
 benchmarks/phase3_perf.py                  new   [WP36] BENCH-P3 (reported)
 benchmarks/gruber_kastner.py               new   [WP40] replication; benchmarks/reports/gruber_kastner_*
-SPEC.md, README.md, pyproject.toml, docs/phase3/DESIGN.md   [WP41]
+SPEC.md, README.md, docs/phase3/DESIGN.md      [WP41]
 ```
 
 Files owned by the parallel sessions are not touched: `src/rai_bvar/validation/dgp.py`,
-`src/rai_bvar/validation/__init__.py`, `tests/dgp/`, `benchmarks/dgp_study.py`, `benchmarks/reports/dgp_study_*`
+`src/rai_bvar/validation/__init__.py`, `tests/dgp/`, `benchmarks/dgp_study*`, `benchmarks/reports/dgp_study*`
 (DGP harness) and every `*_bart_spike*` file (Phase 4 spike). New validation helpers are imported from their modules,
 not re-exported through `validation/__init__.py`.
 
@@ -322,6 +393,7 @@ tests/mcmc/blocks/    [WP31] test_global_local (conditionals, density ratios, bl
 tests/analytic/       [WP33] test_asymmetric (A9)    [WP31] A12, A13    [WP32] A8 (n = 3), A11    [WP37] A8 (n = 20), A9 MCMC leg
 tests/validation/     [WP30] test_reference_p3
 tests/geweke/test_geweke_p3*.py, tests/sbc/test_sbc_p3*.py, tests/mutation/test_mutants_p3.py   [WP35]
+tests/integration/    [WP35] the weekly ordering-invariance test of conjugate × CommonSV (row 27; E159)
 tests/parity/         [WP38] test_bayesianvars (fixtures present, no skip), test_wbvars_commonsv, test_boe_conditional
 tests/contract/       [WP35] the new MCMC compositions (fast: three; weekly: all)
 tests/integration/    [WP40] test_gruber_kastner_script
@@ -331,10 +403,18 @@ tests/integration/    [WP40] test_gruber_kastner_script
 `ed502d4`): WP26 — `tests/mcmc/unit/test_state.py` (the field lists of `SharedPrior`, `CoefPriorArrays`, `LinearEq`,
 `CCCMGlobal`, `EqContext`; the exact `OVERRIDABLE` set), `tests/mcmc/unit/test_config.py` (the `COEF_VARIES` table;
 the monkeypatched varying-prior case with Mode II `cholesky_const`, now rejected by rule (11); `registry.OWNERS ==
-kinds`; the `slot_kinds` dict). WP27 — `tests/unit/test_api_resolution.py` (the E-1, E-5, E-6 texts; "Linear ×
-Constant and Linear × SV" and "must be a Minnesota prior") and `tests/unit/test_api.py` (the same messages). WP33 —
-`tests/integration/test_backtest_lpd_integrated.py` (both analytic cases switch to `OLSVAR`). No other Phase 1–2 test
-changes; `tests/mcmc/diagnostics/test_monitor.py` stays as it is (order invariance keys on `shared_factor`, E99).
+kinds`; the `slot_kinds` dict; the unknown-kind case now uses an unregistered kind, since a GL kind without `n_groups`
+raises the `n_groups` message, E154), `tests/mcmc/unit/test_keys.py` (the frozen `Sub` values; E128). WP27 —
+`tests/unit/test_api_resolution.py` (the E-1, E-5, E-6 texts; "Linear × Constant and Linear × SV" and "must be a
+Minnesota prior") and `tests/unit/test_api.py` (the same messages, where its patterns no longer match);
+`tests/unit/test_grid_harmonise.py` stays unchanged (E119). WP31 — `tests/mcmc/blocks/test_cccm.py`'s `reads` assertion
+(`CCCMStep.reads` gains `eq.coef`, `glob.coef`; E128). WP32 — the R8 ordering note disappears for Mode II × `Constant`
+at `cross = contemp = 1` (E99), an intended Phase 2 behaviour change, with a test that that fit no longer warns and that
+`cross ≠ 1` still does (E130); `tests/integration/test_ordering.py` (the CommonSV false-alarm control replaces the Phase 2
+stand-in, row 26; E159). WP33 — `tests/integration/test_backtest_lpd_integrated.py` (the analytic cases: a default
+forecast still raises for the integrated estimator at `h > 1`; the backtest requests `lag_coefs=True`, E120). No other
+Phase 1–2 test changes; `tests/mcmc/diagnostics/test_monitor.py` stays as it is (order invariance keys on
+`shared_factor`, E99).
 
 ---
 
@@ -347,6 +427,19 @@ A golden test pins the templates and hashes of every Phase 2 composition and of 
 (`8aebe5adec44e966`, `b3daa828453542ed`, `7f0aeb733eb2d07e`) at `2c71fb2`, and short runs of every Phase 2
 composition are bitwise unchanged before and after each of WP26–WP34: a same-machine A/B of the parent commit and the
 work package's head, recorded in its PR (as WP25 did), because committed draws cannot be bitwise across CPU models.
+The A/B (`tools/phase3_bitwise_ab.py`, E118, E154) runs, at `hierarchy="fixed"`, every Phase 2 composition row the
+public API can build (22 of the 23 rows of `validation.joint.COMPOSITIONS`, built from the registry itself; row 17
+`zero_sv` has no public mean; a contract test checks the coverage); option cases (`const_path="cholesky"`, the branch
+E65 changes, `gram="batched"` on the weighted structural and the reduced-form steps, the paths that read the Gram
+layout, `store="paths"`, `deterministic="ct"`, `SV(exact=False)`, `SV(mixture="ksc7")`,
+`SV(tails="t", t_scale="unit")`, a structural `cross ≠ 1`); the EB plug-in at the default `hierarchy="eb"` (structural
+`cross ≠ 1` with Constant, SV, and Constant with SOC/SUR rows: the `eb_hyper → eb_structural` path WP33 refactors) and
+the default MCMC path at `cross = 1`, with `fit.hyper` in the digest; `AnalyticFit` at `hierarchy` `fixed`, `eb` and
+`mh` (`log_ml`, `hyper`, the MH chains, and the forecast's `paths`, `cond_mean`, `cond_chol`); and a forecast-mode
+`ordering_sensitivity` of an analytic model (R3-m19's ordering item; an MCMC ordering case costs `n_perm` fits and no
+work package touches that path): 39 cases, no two MCMC cases sharing a posterior digest, against a baseline recorded
+twice on the unmodified code (`552fe30`). Each
+PR records its head commit, the machine and the sha256 of both JSON files.
 
 ### 2.1 Static configuration (`engines/mcmc/config.py`)
 
@@ -379,8 +472,10 @@ needs `coef_log = True`, a `weighted` path and no λ-scaled coefficient block (M
 `transitory = "none"`, and makes `constant_weights` false; (14) `shared_factor` needs `linear_structural`, Mode II,
 `common = True`, a non-varying coefficient prior, and (checked by `resolve.py` on the arrays, since it is data) an
 equation-invariant λ-free prior precision; (15) `csv_block ≥ 2`. The group rules (`n_groups ≥ 1` iff a GL kind, `a_grid > 0` only for NG, R2D2 and DL,
-`p_beta` only for SSVS) depend on `n` and run in `CoefPriorStatic.__post_init__` and `resolve.check_coef_groups`.
-`api.py` passes `coef_log` to its construction-time check, so GL models pass rules (11)–(12) at construction.
+`p_beta` only for SSVS) run in `CoefPriorStatic.__post_init__`; only the value of `G` depends on `n` (equation-wise
+`G = n`, covariate-wise `G = n·p`), and `resolve.check_coef_groups` checks it at fit. `api.py` passes `coef_log` and a
+provisional `n_groups = 1` to its construction-time check (no rule (11)–(14) reads `G`; E145), so GL models pass rules
+(11)–(12) at construction; `resolve.py` passes `n` (`api.static_parts(model, n)`).
 `resolve.resolve_const_path` checks `COEF_VARIES` before an explicit `const_path="cholesky"` (E65).
 
 ### 2.2 State (each new class registered with `register_dataclass`; scales stored as logs)
@@ -399,7 +494,7 @@ DLGlobal          a_idx: i32[G]
 SSVSEq            gamma: i32[n, k]; rb_incl: f64[n, k]                      indicator; Σ P(γ = 1 | ·) over sampling sweeps
 SSVSGlobal        log_p, log1m_p: f64[G]
 CommonSVGlobal    h: f64[T_pad]; rho: f64[]; log_sigma: f64[]               index t = data row t (no presample state), 0 for t ≥ T_eff
-                  acc_h, acc_rho, acc_newton: f64[]; rb_ch_sum, rb_ch_sq: f64[T_pad]
+                  acc_csv_h, acc_csv_rho, acc_csv_newton: f64[] (E132); rb_ch_sum, rb_ch_sq: f64[T_pad]
 ```
 
 `EqState.coef` holds the `*Eq` class, `GlobalState.coef` the `*Global` class, `GlobalState.vol` `CommonSVGlobal`
@@ -409,7 +504,7 @@ not enter forecasts) and are stored as monitor fields (D-52). Storage (WP32): `l
 common_h_sd (chain, time)` from `rb_ch_*` (dimension `time` = data rows; P2's `h_index` has `T + 1` entries and is not
 reused), `posterior/common_h_T`, `rho`, `sigma` (`glob.vol` leaves mapped explicitly, not onto P2's per-equation
 `h_T`), with `runner._accumulators` special-casing `rb_ch_*` (WP32) and `rb_incl` (WP31; `latent_moments/incl_prob
-(variable, regressor)`).
+(variable, regressor)`); `acc_csv_*` are per-chain scalars, which WP32 adds to the monitor's `_CHAIN_SCALARS` (E132).
 Invariants (P2 §2.8) gain: GL leaves finite on GL slots and exactly 0 elsewhere; `a_idx` in range; `γ ∈ {0, 1}`;
 `|ρ| < 1`; `h[T_eff:] == 0`.
 
@@ -447,8 +542,8 @@ CommonSVPrior    rho_mean, rho_var, rho_a, rho_b: f64[]; s2_shape, s2_scale, s2_
   M1/M18 and `validation.joint.identity_cccm_core` use it).
 - `monitor.MonitorField` gains a `group` kind (`(G,)` group scales, `a_g`, `p_g`); `monitor_fields` takes the
   coefficient-prior static.
-- `Block` (append-only, P2 §5.6): `G_COEF_GLOBAL = 17` (post, GL scale step), `G_COMMON_SV = 18` (post). 19 stays
-  reserved (Q16).
+- `Block` (append-only, P2 §5.6): `G_COEF_GLOBAL = 17` (post, GL scale step), `G_COMMON_SV = 18` (post), both
+  already reserved in Phase 2 (no change); 19 stays reserved (Q16). Only `Sub` is appended (E139).
 - `Sub` (append-only): `GL_LOCAL = 15`, `GL_LOCAL_AUX = 16`, `GL_GROUP = 17`, `GL_GROUP_AUX = 18`, `GL_A = 19`,
   `CSV_OFFSET = 20`, `CSV_H = 21`, `CSV_H_ACC = 22`, `CSV_RHO = 23`, `CSV_RHO_ACC = 24`, `CSV_S2 = 25`. Per-coordinate
   draws fold the flat coordinate index (`uint32`), per-group draws the group id, per-block `h` draws the block index.
@@ -661,9 +756,11 @@ Tier U (WP28): Kolmogorov–Smirnov (`α = 1e-3`, 10⁴ draws) of `Y = log X −
 obtained by numerical integration in log space around the mode (`scipy.stats.geninvgauss` is not used as the oracle: it
 returns NaN or wrong values on much of this grid, R2a); a grid that pins `λ ∈ {0, ±1e-8, ±1e-3, ±0.5, ±1, ±10, ±50}`,
 every `a − ½` and `a − 1` at the GK grid's first, middle and last points, and `½ − T_max/2` for `T_max ∈ {200, 600}`,
-crossed with `log ω ∈ {−2000, −1000, −745, −300, −50, −12, −5, 0, 5, 12}` (the §3.4 regime reaches `log ω ≈ −800`);
-`E log X` against `log η + ∂_λ log K_λ(ω)` (mpmath at 50 digits; mpmath joins the `dev` group) within 4 Monte Carlo
-s.e.; the gamma and inverse-gamma limits at the extremes; lane invariance under `vmap` (1e-15); determinism by key;
+crossed with `log ω ∈ {−2000, −1000, −745, −300, −50, −12, −5, 0, 5, 12}` (the §3.4 regime reaches `log ω ≈ −800`),
+the whole grid one KS family under D-60's family-wise rule (`m` = its cell count, stated in the test; each cell its
+own random stream, the `−λ` mirror cells included, since step 2's sign flip makes same-key mirrors identical; E124);
+`E log X` against `log η + ∂_λ log K_λ(ω)` (mpmath at 50 digits; mpmath joins the `dev` group), Bonferroni over the
+`m` cells: `|z| ≤ max(4, z_{1−0.01/(2m)})` Monte Carlo s.e. (E152, E159); the gamma and inverse-gamma limits at the extremes; lane invariance under `vmap` (1e-15); determinism by key;
 mean and worst-case attempts reported; no `ok = False` on the grid.
 
 ### 3.6 Host builders (`priors/global_local_arrays.py`; WP31)
@@ -693,7 +790,9 @@ reduced, equation j:     ŝ²_{rj} = Ŝ_jj/(T_eff − k − n − 1) · [(XᵀX)
 - **Log prior** (monitors and validation): `Σ_j log N(d_j; 0, r_j v_j)` plus the scales' log densities, from the full
   chain state; `CCCMStep.log_prior` keeps its fixed-moment form for `FixedDiagonal` only.
 - **Storage**: the group log scales, `a_g` and SSVS `p_g` are monitor fields (D-52) of `fit.posterior["monitor"]`;
-  `latent_moments/incl_prob (equation, coefficient)` from `rb_incl`; local scales are not stored (they are latent).
+  the SSVS indicators `γ` are stored as `int8` with the stored parameter draws (thinned like them; E123, E155);
+  `latent_moments/incl_prob (variable, regressor)` from `rb_incl`; local scales are latent, neither monitored nor
+  stored.
 
 ### 3.8 Labels and spec
 
@@ -727,8 +826,8 @@ rng)` (iid `(a, γ, λ)` → `B = (A⁻¹Γ)'`, `chol = A⁻¹Λ^{½}`), `foreca
 on iid draws; attrs as `AnalyticFit` plus `ordering` and `lag_coefs`, D-49), `irf`, `conditional_forecast` (§6),
 `summary()`, `hyper`, `converged`, `warnings` (Phase 1 setting checks; the R8 note for `n ≥ 4`: `cross ≠ 1` is not
 order-invariant, Chan Cor. 2). `structural/ordering.py` supports it: the prior mode builds the NIG closed form, and
-`_posterior_summary` reads `StructuralNIGFit`. Backtests treat it as analytic (`uses_fit_seed = False` unless
-`hierarchy="mh"`, as Phase 1).
+`_posterior_summary` reads `StructuralNIGFit`. Backtests treat it as analytic (`uses_fit_seed = False`, as every
+analytic model in Phase 1; the MH seed comes from `MHSettings` or `fit(seed=…)`; E131).
 
 ### 4.3 Hyperparameters
 
@@ -738,7 +837,9 @@ order-invariant, Chan Cor. 2). `structural/ordering.py` supports it: the prior m
   takes them per evaluation). `lambda`, `soc`, `sur` keep the GLP hyperpriors; `cross` and `contemp` get a flat prior
   on their log over `[log 1e-3, log 10]` (marginal-likelihood maximisation, as Chan 2022 §4), stated in the label.
   Start: the Phase 1 EB mode at `cross = 1` (P2 §6.5 step 2). `alpha` free when listed, as Phase 1. `psi` is never free
-  when `cross` is free or `≠ 1` (E-15).
+  when `cross` is free or `≠ 1` (E-15). The free-cross refactor of `eb_structural`/`_Window` is bitwise identical at a
+  fixed `cross` (the same arithmetic, with `cross` and `contemp` passed per evaluation instead of read from the prior),
+  which the §2 A/B checks on the Phase 2 EB plug-in (E118); any deviation is justified in WP33's PR.
 - `"mh"`: random-walk Metropolis on the log free hyperparameters with Phase 1's `_metropolis`, through a small
   `_Free`-compatible problem class over the NIG log posterior (the same flat prior on `log cross` over the box), the
   proposal from the inverse Hessian at the EB mode, `MHSettings` and their convergence rule; then iid parameter draws
@@ -866,10 +967,11 @@ scan b = 0, 1, … sequentially (lax.scan): block B conditions on the CURRENT h 
     Newton from h⁰_t = log q_t − log n on B (depends on q, the neighbours and (ρ, σ_h) only), damped (halving ≤ 30),
     ≤ 50 iterations, stop when ‖Δ‖∞ < 1e-10; Hessian G_B = K_BB + diag(½ q e^{−h}) (tridiagonal, SPD)
     h* ~ N(ĥ_B, G_B⁻¹) by tridiag_precision_sample (Sub.CSV_H, b);  log α = ℓ(h*) − ℓ(h) + ½‖L_Bᵀ(h* − ĥ)‖² − ½‖L_Bᵀ(h − ĥ)‖²
-    accept iff log U (Sub.CSV_H_ACC, b) < log α;  acc_h averages over non-empty blocks
+    accept iff log U (Sub.CSV_H_ACC, b) < log α;  acc_csv_h averages over non-empty blocks
 ρ | h, σ_h:  K_ρ = Σ_{t=1}^{T−1} h_{t−1}²/σ_h² (+ 1/V_ρ for TruncatedNormal),  ρ̂ = K_ρ⁻¹(Σ_{t=1}^{T−1} h_{t−1}h_t/σ_h² (+ ρ₀/V_ρ))
-             proposal ρ* ~ TN(ρ̂, K_ρ⁻¹; −1, 1), or U(−1, 1) when the data part K_ρ^data < 1e-8 (the choice depends on h and
-             σ_h only, so the kernel is valid); a draw with |ρ*| ≥ 1 rejects
+             proposal ρ* ~ TN(ρ̂, K_ρ⁻¹; −1, 1); under the Beta prior U(−1, 1) when K_ρ < 1e-8 (E117, E158; under
+             TruncatedNormal always the TN) (the choice depends on h and σ_h only, so the kernel is valid);
+             a draw with |ρ*| ≥ 1 rejects
              log α = g(ρ*) − g(ρ) (+ the Beta log-density ratio; for U(−1, 1) also the Gaussian factor's ratio
              (S_xy(ρ* − ρ) − ½S_xx(ρ*² − ρ²))/σ_h² from the raw sums S_xy = Σ h_{t−1}h_t, S_xx = Σ h_{t−1}²),
              g(ρ) = ½ log(1 − ρ²) − (1 − ρ²) h_0²/(2σ_h²)
@@ -879,7 +981,7 @@ scan b = 0, 1, … sequentially (lax.scan): block B conditions on the CURRENT h 
 
 The proposal of each block depends only on `(q, ρ, σ_h, h outside the block)`, so it is an independence proposal
 whatever Newton's accuracy (N08 §A5.2); the random offset is an auxiliary choice of kernel independent of the state;
-the sequential scan is a systematic-scan Gibbs over blocks. Diagnostics: `acc_h`, `acc_rho`, `acc_newton` (Newton
+the sequential scan is a systematic-scan Gibbs over blocks. Diagnostics: `acc_csv_h`, `acc_csv_rho`, `acc_csv_newton` (Newton
 iterations that hit the cap; the warning of §8 if > 0, the draw stays exact). There is no mixture indicator, so the DNP
 rule (P2 §4.6 item 4) does not arise.
 
@@ -893,7 +995,9 @@ rule (P2 §4.6 item 4) does not arise.
   ones simulated forward with the copied `(ρ, σ_h)`, keyed `eq_key(kc, n)`, a slot beyond the equations), with the
   0-based layout of §2.2 (`glob.vol.h` joins `warmstart.TIME_INDEXED`); `λ_i` copied.
 - **Init**: `λ_i` from the Phase 2 Constant init; `ρ` = prior centre (clipped to `(−0.99, 0.99)`), `σ_h²` = prior mean,
-  `log σ_h` jittered by `N(0, 0.25²)` per chain; `h` = the Newton mode of the initial `q` (so `K_ρ > 0` almost surely).
+  `log σ_h` jittered by `N(0, 0.25²)` per chain; `h = 0` (a valid state: no seam gives a post step's `init` the
+  cold-start residuals, and the first sweep's `h` step runs with fresh `q` before the `ρ` step, so `K_ρ > 0` almost
+  surely when `ρ` is drawn; E133).
 - **Monitors** (D-52): primary `h_T`, `ρ`, `σ_h` and every `log λ_i` (with the log-likelihood and own first lags);
   secondary `h_0`, `h_mid`. **Storage**: `latent_moments/common_h_mean, common_h_sd` from `rb_ch_*`,
   `posterior/common_h_T, rho, sigma`.
@@ -913,7 +1017,8 @@ rb.conditional_forecast(fit, horizon, conditions, draws=1000, seed=None, base=No
 variables, `NaN` = free, values on the model's (transformed) scale; a mapping `{variable: sequence}` is accepted (`NaN`
 padding). Available on `AnalyticFit`, `StructuralNIGFit` and `MCMCFit` with a linear mean (any volatility, including
 CommonSV). Errors (E-16): unknown variable; horizon outside `1..H`; no condition; a non-finite condition; every cell
-conditioned; a forecast without `lag_coefs` (a non-linear mean, a benchmark model, or an in-loop forecast whose draws
+conditioned; a forecast without `lag_coefs` (a non-linear mean, a benchmark model, an analytic forecast made without
+`lag_coefs=True` (the message says "call forecast(..., lag_coefs=True)"; E120), or an in-loop forecast whose draws
 are not all stored); `R₁` with a diagonal below `1e-12·max|R₁|` (near-dependent conditions; never jittered).
 
 ### 6.2 The exact update
@@ -952,7 +1057,8 @@ a conditioned `(horizon, variable)` and for `lpd_method="integrated"`, and docum
 variables; `evaluation.scores.score_forecast` and the backtest refuse a `ConditionalForecastResult`.
 `forecast/invariants.check_conditional_structure` replaces `check_structure` for it: conditioned paths equal `r`
 exactly, conditioned rows and columns of `cond_chol` are exactly 0, the free block is lower triangular with a positive
-diagonal; simulation consistency (KS, `α = 1e-3`) of the standardised free residuals per horizon.
+diagonal; simulation consistency (KS, `α = 1e-3` family-wise over the horizons, D-60) of the standardised free
+residuals per horizon.
 
 ---
 
@@ -1012,7 +1118,7 @@ and `supports_warm_start` are `engine == "mcmc"`. `MCMCSettings.with_default_dra
 | :- | :--- | :--- | :--- |
 | E-1 | conjugate Minnesota × `SV`/`Constant("ig"|"iw_equivalent")` | `ValueError` | "the conjugate Minnesota prior requires Constant(prior='iw') or CommonSV(); use form='structural' (the MCMC default) or 'reduced'" |
 | E-2 | GL × `Constant("iw")` | `ValueError` | "Constant('iw') makes the coefficient prior λ-scaled (Mode II, the conjugate twin); global-local priors are independent priors: use Constant('ig'), Constant('iw_equivalent'), SV() or CommonSV()" |
-| E-3 | `AsymmetricConjugate` × not `Constant("auto"|"iw")` | `ValueError` | "AsymmetricConjugate is conjugate only with constant volatility (Constant()); for stochastic volatility use Linear(prior=Minnesota(form='structural', cross=...)) with SV(), or Minnesota(form='conjugate') with CommonSV()" |
+| E-3 | `AsymmetricConjugate` × not `Constant("auto"|"iw")` | `ValueError` | "AsymmetricConjugate is conjugate only with Constant('iw') (Constant() resolves to it); for Constant('ig') or stochastic volatility use Linear(prior=Minnesota(form='structural', cross=...)) with that volatility, or Minnesota(form='conjugate') with CommonSV()" (E141) |
 | E-4 | GL `form="conjugate"` | `ValueError` | "global-local priors are not conjugate; use form='structural' (default) or 'reduced'" |
 | E-5 | `Minnesota(hierarchy="mh")` on the MCMC engine | `NotImplementedError` | "hierarchy='mh' is not available on the MCMC engine in this version (DESIGN Q15); use 'eb' or 'fixed', or the analytic engine (Minnesota(form='conjugate') with Constant())" |
 | E-6 | Lenza–Primiceri on the MCMC engine | `NotImplementedError` | "Lenza-Primiceri scaling runs on the analytic engine only (DESIGN Q16); use SV(outliers=True) for outlier-robust MCMC models" (P2's double-treatment clause kept for `SV(outliers=True)`) |
@@ -1044,10 +1150,13 @@ engine, and `CommonSV` vs `SV` likewise with Mode I priors.
 
 ### 7.5 Grid harmonisation (D-53)
 
-`BVAR.harmonise_grid(combos)`: if any combination has an `SV` volatility, a `CommonSV` with an `auto` Minnesota form,
-or a GL prior, every `Minnesota(form="auto")` becomes `"structural"` and its `Constant("auto")` becomes `"ig"`.
-`AsymmetricConjugate` and GL arms are never rewritten. Explicit settings are never changed; rewrites are listed in the
-info note (P2 §11.4).
+`BVAR.harmonise_grid(combos)` (E119): if any combination has a volatility other than `Constant` with prior
+`"auto"`/`"iw"` (P2 §11.4's trigger: `Constant("ig")`, `Constant("iw_equivalent")`, any `SV`), a `CommonSV` whose
+Minnesota form is not explicitly `"conjugate"`, or a GL prior, every `Minnesota(form="auto")` becomes `"structural"` and
+its `Constant("auto")` becomes `"ig"`. A `CommonSV` arm with an explicit conjugate form does not trigger (the one
+narrowing of P2 §11.4); `AsymmetricConjugate` arms neither trigger nor are rewritten, and GL arms are never rewritten.
+Explicit settings are never changed; rewrites are listed in the info note (P2 §11.4). WP27 tests that the Phase 2
+grids of `test_grid_harmonise.py` come out unchanged.
 
 ---
 
@@ -1083,7 +1192,12 @@ deviations in log space, log densities of §3.2 written from the prior definitio
 `constant_common` (Constant cores with the common `h`, Mode I or coupled) and `common_sv` (stationary AR(1) `h`, `ρ` and
 `σ_h²` priors). `FixedDesign` gains `exogenous: bool` (D-56: a ones column per deterministic term, `N(0, 1)` elsewhere,
 drawn once from the configuration seed; `Y` simulated given `θ` without lag feedback). `simulate_obs` gains the
-common-`h` path. The Phase 3 rows and blocks live in `COMPOSITIONS_P3` and `BLOCK_CONFIGS_P3` (D-61).
+common-`h` path. The Phase 3 rows and blocks live in `COMPOSITIONS_P3` and `BLOCK_CONFIGS_P3` (D-61). Three
+references for other work packages' Tier U and Tier A tests (E126, E144): `gl_log_r_reference(psi, n, lags, n_det,
+form, scale)`, the D-37 table on the §3.1 slot layout (0 on deterministic slots; exactly 0 under `scale="none"`);
+`ssvs_shat_reference`, the §3.6 `ŝ` by a dense inverse (an error when a divisor is `≤ 0`); and
+`conditional_forecast_reference`, A10's stacked companion-form oracle from plain arrays (Schur complement and
+`log N(r; Rμ, RΣRᵀ)`).
 
 ### 9.2 Tier U (every PR; WP28, WP31–WP34)
 
@@ -1096,7 +1210,10 @@ common-`h` path. The Phase 3 rows and blocks live in `COMPOSITIONS_P3` and `BLOC
 2. **Density-ratio identities** (P2 §9.3 item 2, relative 1e-8) at 20 random states for every line of §3.2 (local,
    group, collapsed `a` and then `ξ`, SSVS `γ`, `p`), the deviation draw, each `h` block, the `ρ` and `σ_h²` steps, and
    the coupled common core, against the WP30 `log_joint`; MH steps: the computed log acceptance ratio equals target and
-   proposal densities (1e-10).
+   proposal densities (1e-10), including two pinned `ρ` cases at the branch of §5.4: `h_0 … h_{T−2} = 0` (`S_xx = 0`)
+   under both priors, TruncatedNormal showing the TN proposal; and, under Beta, `h_0 … h_{T−3} = 0`, `h_{T−2} =
+   10⁻⁵σ_h`, `h_{T−1} = 10³σ_h` (`S_xx/σ_h² = 10⁻¹⁰ < 10⁻⁸`, `S_xy/σ_h² = 10⁻²`): the uniform proposal with a non-zero
+   data term, so a missing prior or data term fails (E117, E158).
 3. **Closed forms**: collapsed `a` weights against numerical integration over `ξ` with `c` fixed and tied (1e-9); DL
    `θ̃ | d` against quadrature of the joint (1e-8); SSVS log odds against brute force (1e-12); `q_t e^{−h_t} | h ~ χ²_n`
    at the data-generating `θ` (simulator check, KS); the conditional-forecast update against the exact oracle (A10).
@@ -1104,6 +1221,14 @@ Every KS test on MCMC draws thins them to their ESS first (R2a).
 4. **Infrastructure**: the golden templates and hashes (§2); every Phase 2 composition bitwise unchanged on a short run
    before/after; float64 everywhere; plan invariants (P2 §4.8) with the write-set tree diff for every new composition;
    zero recompiles across windows of one bucket.
+5. **Host builders** (WP31, `tests/priors/test_global_local_arrays`; E126): (a) the builder's `log r` against WP30's
+   `gl_log_r_reference` at 1e-14 on every slot (`n = 3, p = 2`, unequal ψ, deterministic terms, structural and reduced,
+   and `scale="none"`, where `log r` is exactly 0); (b) `ŝ` against WP30's `ssvs_shat_reference` (1e-10), both forms,
+   and the fit-time error at the `T_eff` boundaries of D-44; (c) equivariance: with `y_j → c_j y_j`, `c = (3, 0.1, 7)`,
+   ψ rebuilt through `window_scales` and `gl_arrays`, the same key: `log r` shifts by `2(log c_i − log c_m)`, each GL
+   deviation and `δ` coefficient after one equation phase and one scale step scales by `c_i/c_m`, the scale-step draws
+   agree to 1e-9, and the semi-automatic `log τ₀`, `log τ₁` shift by `log c_i − log c_m`; every family, structural
+   Mode I and reduced.
 
 ### 9.3 Tier B: block configurations (`BLOCK_CONFIGS_P3`, ids 401–408)
 
@@ -1156,16 +1281,20 @@ argument, not by a row of their own; the exit-criteria map says so.
 
 **Test priors** (proper and tight, P2 §9.1): HS `global_scale = 0.1` (exogenous rows only, D-56); NG exogenous `a = 0.5,
 b = 2, c = 1`, lagged rows `a = 0.5, b = 10` with `c = 0.01` (reduced, row 316: explosive mass 1.7e-5) and `c = 0.005`
-(structural, row 319: 4.6e-5) (R2a's measurements; the earlier `c = 0.05` gave 2e-3 to 1.5e-2); R2D2 `a = 0.5, b = 2`; DL `a = 0.5`; grids of
-five points `{0.1, 0.25, 0.5, 0.75, 1}` with equal weights; SSVS `τ₀ = 0.01·√r`, `τ₁ = 0.5·√r` (lagged structural row 330: `0.05·√r`, mass 1.3e-5),
+(structural, row 319: 0 measured by WP30, R2a's 4.6e-5 superseded, E150) (R2a's measurements; the earlier `c = 0.05` gave 2e-3 to 1.5e-2); R2D2 `a = 0.5, b = 2`; DL `a = 0.5`; grids of
+five points `{0.1, 0.25, 0.5, 0.75, 1}` with equal weights; SSVS `τ₀ = 0.01·√r`, `τ₁ = 0.5·√r` (lagged structural row 330: `0.05·√r`, mass 0 measured by WP30, R2a's 1.3e-5 superseded),
 `p = 0.3` or `Beta(2, 3)`; `ψ = (0.5, 1, 2)` (n = 3) and `(0.5, 2)` (n = 2), fixed and unequal (so `r_j ≠ 1`, mutant M27); own-lag prior mean 0.4 (mutant M26); the
-lagged rows' explosive prior mass measured by WP30 and ≤ 2e-4; everything else P2 §9.2. CommonSV: `ρ ~ TN(0.8, 0.15²)`,
+lagged rows' explosive prior mass measured by WP30 against the target 2e-4 (D-56, E150); everything else P2 §9.2. CommonSV: `ρ ~ TN(0.8, 0.15²)`,
 `σ_h² ~ IG(5, 0.2)`; conjugate rows: NIW `Ψ = 0.5 I`, `d = n + 4`, `Ω_rr = 0.01` for every lag coefficient (own and cross, cross = 1; the
 Ω entries, not the implied prior variance; explosive mass 1.2e-4 at `p = 2`), intercept `Ω = 1`.
 `T_eff = 20 / 50` (never a multiple of 32). **Test functions**: bounded transforms of deviations (`arctan(d_j/√r_j)`,
 `1{|d_j| < 0.1√r_j}`) at fixed coordinates, group log scales, the joint `a_g·log ξ_g` (M35), two local log scales,
 `a`-grid indices, SSVS `N1_g` and `log p_g`, `h` at three dates and `mean h`, `ρ`, `σ_h`, `log λ_i`, the exact
-log-likelihood, `W = Σ_t q_t e^{−h_t}`, log-scale data functions.
+log-likelihood, `W = Σ_t q_t e^{−h_t}`, log-scale data functions. On the TruncatedNormal-`ρ` CommonSV rows the
+unbounded functions of `h` and the log-likelihood are SBC-only, and Geweke uses their `atan` transforms (E148). The
+lagged rows' explosive masses are recorded in `validation.joint.EXPLOSIVE_MASS_P3`; rows 320 and block 408 exceed the
+`2e-4` target under E150's Monte Carlo rule (pending Q36(i): WP30's test keeps rows 321 and 323 out of its strict
+expected failures under that rule; Q36).
 
 ### 9.5 Tier S: SBC (weekly; P2 §9.6 configuration: `N = 1000, L = 99`, the ESS rules, γ test, Bonferroni `α = 1e-2`)
 
@@ -1192,7 +1321,7 @@ Every row of §9.4. Quantities: the test functions above, the total and per-equa
 | M31 coupled common core without the `n_active/2` shape term | `csv_lambda_conditional` | U, G (row 320), A11 |
 | M32 shared-factor dummy rows weighted by `e^{−h_0}` (the first real row's weight; padded rows have `h ≡ 0`) | `shared_factor_rows` | U (against the weighted path), G (row 320) |
 | M33 conditional update with `Mᵀ` where `M` belongs | `_update` | U (A10) |
-| M34 GIG tails from secants instead of tangents (a hat below `f`) | `gig_sampler` | U (KS, `E log X`) |
+| M34 GIG tails from secants instead of tangents (a hat below `f`): the right tail is the chord of `f` through `(t, f(t))` and `(t + 1, f(t + 1))` extended beyond `t'`, the left the chord through `(−s, f(−s))` and `(−s − 1, f(−s − 1))` beyond `−s'` (E124) | `gig_sampler` | U (the §3.5 KS family or `E log X` at some grid cell) |
 | M35 `ξ_g | a_old` drawn before `a_g` (the reversed collapsed order, E30) | `gl_a_conditional` | G (joint test function `a_g·log ξ_g`, rows 304, 306) |
 | M36 coupled common core without the dummy rows (`n_active = q_i`, no dummy sum of squares; E88) | `csv_lambda_conditional` | U (density ratio at `m > 0`), G (row 320) |
 
@@ -1203,10 +1332,10 @@ The suite records the catching tier of each mutant (`mutation.jsonl`); a mutant 
 | Test | Oracle | Rule | Cadence |
 | :- | :--- | :--- | :--- |
 | A8 | conjugate × CommonSV: shared-factor path vs the weighted path (row 323's config), quantiles of `B`, `Σ`, `h_t`, `ρ`, `σ_h` | Phase 2 parity rule | PR (`n = 3, p = 2, T = 60`); weekly (`n = 20, p = 4, T = 300`) |
-| A9 | `StructuralNIGFit` at `cross = contemp = 1` equals `AnalyticFit`: log ML (1e-10); posterior moments of `B`, `Σ` from the per-equation NIG posteriors by `priors.structural.implied_reduced_form_moments`' closed form (row independence makes `E[A⁻¹] = E[A]⁻¹` exact) against `AnalyticFit` (1e-10); EB `λ` (1e-6); EB with free `cross`: projected gradient (the box boundary) below 1e-6 at the returned mode; MH: quantiles vs the posterior on a hyperparameter grid by quadrature; at `cross ≠ 1`: forecast quantiles vs MCMC Mode II | 1e-10 / 1e-6 / Phase 2 parity rule | PR; the MCMC leg weekly |
-| A10 | conditional forecasts per draw against an independent stacked companion-form oracle with Schur-complement conditioning (SciPy): `E_c`, `Cov_c`, `Y_c` from the same `ε`; analytic (constant `Σ`), MCMC SV and CommonSV draws; a conditioned variable ordered before a free one; sample moments of conditional paths vs `E_c`, `Cov_c` | 1e-10; `|z| ≤ 4` Bonferroni | PR |
+| A9 | `StructuralNIGFit` at `cross = contemp = 1` equals `AnalyticFit`: log ML (1e-10); posterior moments from the per-equation NIG posteriors against `AnalyticFit` (1e-10): `E[B] = (E[A]⁻¹E[Γ])ᵀ`, exact because the rows are independent (`(A⁻¹)_ij` does not involve row `j`, so `E[A⁻¹Γ] = E[A⁻¹]E[Γ]` and `E[A⁻¹] = E[A]⁻¹`), and `E[Σ]` from a full-covariance recursion over each equation's posterior second moments (WP33; `implied_reduced_form_moments` is a prior routine and is not used; E127); EB `λ` (1e-6); EB with free `cross`: projected gradient (the box boundary) below 1e-6 at the returned mode; MH: quantiles vs the posterior on a hyperparameter grid by quadrature; at `cross ≠ 1`: forecast quantiles vs MCMC Mode II | 1e-10 / 1e-6 / Phase 2 parity rule | PR; the MCMC leg weekly |
+| A10 | conditional forecasts per draw against an independent stacked companion-form oracle with Schur-complement conditioning (`validation.reference.conditional_forecast_reference`, written by WP30's author; E144): `E_c`, `Cov_c`, `Y_c` from the same `ε`; analytic (constant `Σ`), MCMC SV and CommonSV draws; a conditioned variable ordered before a free one; sample moments of conditional paths vs `E_c`, `Cov_c` | 1e-10; `|z| ≤ 4` Bonferroni | PR |
 | A10b | BoE `bvar` `draw_constrained_forecasts` at fixed `(beta, sigma)` (MIT, CI) vs our per-draw update on the same parameter draw: conditional mean (point output) and the covariance of 10⁴ draws | 1e-10; `|z| ≤ 4` Bonferroni | PR |
-| A11 | CommonSV closed forms (N08 §A11): the stationary distribution of block 408 (`h` fixed) vs the Phase 1 NIW posterior with `row_scales = e^{h/2}` (quantiles of `B`, `Σ`); `log p(Y | h)` = Phase 1 log ML − `(n/2)Σh`; the `h` posterior for `T ∈ {2, 3}`, `n = 5` by tensor quadrature vs MH draws (10⁵); proposal state independence | Phase 2 parity rule / 1e-10 / KS `α = 1e-3` | PR |
+| A11 | CommonSV closed forms (N08 §A11): the stationary distribution of block 408 (`h` fixed) vs the Phase 1 NIW posterior with `row_scales = e^{h/2}` (quantiles of `B`, `Σ`); `log p(Y | h)` = Phase 1 log ML − `(n/2)Σh`; the `h` posterior for `T ∈ {2, 3}`, `n = 5` by tensor quadrature vs MH draws (10⁵); proposal state independence | Phase 2 parity rule / 1e-10 / KS `α = 1e-3` family-wise (D-60) | PR |
 | A12 | GL deviation path with frozen finite scales equals the Phase 2 path on the same noise, structural and CCCM | conditioning-aware rule | PR |
 | A13 | SSVS with `τ₀ = τ₁` (engine-level arrays) equals the Normal prior (`FixedDiagonal`): posterior quantiles | Phase 2 parity rule | PR |
 
@@ -1216,17 +1345,42 @@ The suite records the catching tier of each mutant (`mutation.jsonl`); a mutant 
 fixture whose result is recorded in `tests/parity/SV_PARAMETRIZATION.md` before any parity comparison runs; a probe
 that cannot be decided leaves the runs that depend on it **not met** (D-59).
 
-| Probe | Question | Decision rule |
-| :- | :--- | :--- |
-| P1–P5 | P2 §9.9 (`normal_sds` variance vs s.d.; `U` vs `U⁻¹` and sign; intercept row; `sv_para` layout; `cholesky_priorhomoscedastic` scale) | the bands already in `tools/make_r_fixtures.R` |
-| P6 | internal standardisation | refit with one series × 100: `PHI` rescales equivariantly within the Phase 2 rule ⇒ none; otherwise both sides receive pre-standardised data |
-| P7 | the grouping matrices for `"global"`, `"equation-wise"`, `"covariate-wise"`, `"olcl-lagwise"` | recorded as data (the prior object's grouping field); where one differs from D-38's, the run passes the recorded matrix to us as a custom `groups` array (not a failure) |
-| P8 | the meaning of the GL hyperparameters (and `DL_a = "1/K"`) | both samplers on the same tiny-`T` data under each candidate mapping; candidates (each at least × 2 apart in implied prior scale): NG `ϑ ~ G(a, a/2)` vs `G(a, 1/2)`, `NG_c` a rate vs a scale of `ζ⁻¹`; R2D2 `R2D2_b` the Beta second shape vs a rate; DL `K` = coefficients per equation vs all coefficients; HS has no tuning and is checked only; the mapping that passes the Phase 2 rule while every other fails is adopted; none or several ⇒ unresolved |
-| P9 | the SSVS semi-automatic `τ` | the prior object's `τ₀, τ₁` fields equal D-44's formula to 1e-8, else the runs use `semiautomatic=False` with explicit `τ` on both sides and the difference is recorded |
-| P10 | the intercept is outside the shrinkage, `prior_intercept` is an s.d., and every `*_tol` accepts 0 | prior-only run: intercept quantiles vs `N(0, s_c²)` within the Phase 2 rule; the call with all tolerances 0 succeeds; if a tolerance cannot be 0, the smallest accepted value is used and a run is valid only if no draw sits at that floor (the fraction is recorded; any draw at the floor makes that run not met) |
+The rules below are those `tools/make_r_fixtures.R` implements at `d281276` (WP29; E122, E125, E157: `7f4e570`'s
+rules with the P13 (c)/P14 decision restricted to the variants the rows name and E157's staging fixes); any later change to a rule needs an amendment here before any parity comparison runs.
+The configurations, comparisons and decisions below are the script's. The "its runs (…) not met" consequence is applied
+at comparison and at the exit criterion, from the probe status recorded in each fixture's `probe_answers` and in
+`SV_PARAMETRIZATION.md` (D-59), not by the script's staging (E157). WP38 applies each probe row's own consequence:
+the rows are the dependency lists. A run is not met when a probe whose row names that run is not "answered": P1–P3
+and P6 for every R run, P4 for R1 and R3–R9, P5 for R2, P7 for R8, P8 for R4–R6 and R9, P10 for R3–R9 (P9 only for
+semi-automatic SSVS runs, of which there are none), P11 and P15 for wbvars_*. P12–P14 decide the gating branch, not a
+run's status (unmapped or undecided ⇒ branch 1 is not available and branch 2 applies, whose status waits on Q35), and
+P16 decides only whether branch 1's `h_t`, `ρ`, `σ_h` part is met. P8 and P16 are decided after the fixtures (by
+WP30's comparison and WP38's quadrature) and stay "pending" in them; they count as answered once that decision is
+recorded in `SV_PARAMETRIZATION.md`, and the work package that records it amends WP29's schema test (which today
+requires a fixture's status to equal the document's, with P8 and P16 pending in both) so that, for those two probes
+only, a fixture's "pending" may stand beside the document's recorded decision. The fixtures committed in PR #21 so far
+come from the first final run (40234562983 at `83c13b4`, `7f4e570`'s rules; its old P6 staging note); the final run
+at `d281276` (40243289623) replaces them in PR #21, which checks and records whether its decisions equal those of the
+first run before any parity comparison uses them. The R side is R 4.5.3 with the Linux binaries of
+the Posit Package Manager snapshot 2026-10-20 (bayesianVARs 0.1.8, bvars 1.1, bsvars 4.0, stochvol 3.2.9); the probe
+datasets are `tests/parity/fixtures/data/*.csv` at that commit (`probe_corr3.csv`, `probe_gl.csv`, `probe_t2n5.csv` and
+`qd3_growth.csv` are new in WP29, written by `tools/make_sv_parity_data.py`). Common definitions: **Phase 2 rule**: each of `m` compared quantiles passes when `|z| ≤ max(4, z_{1−0.01/(2m)})`, `z` = difference / combined quantile MCSE (Vehtari et al. 2021 §4.3 and batch MCSE, the larger), one-sided MCSE when one side is exact. **Loose prior** (P2, P3, P4): `prior = "normal", normal_sds = 100, priormean = 0, PHI_tol = 0`, `cholesky_normal_sds = 100`, `cholesky_U_tol = 0`, `prior_intercept = 100`; constant variances `cholesky_priorhomoscedastic = cbind(rep(3, M), rep(2, M))` unless SV is named. Probe fits use fixed seeds (`BV_PROBE_SEED = 20261400` plus a fixed offset per fit, `WB_SEED = 20261800` plus offsets; every seed is recorded in the fixture), one chain unless stated. **PIT test**: for a state component drawn from its full conditional, `u = F(x | conditioning values)` is iid U(0, 1); KS test against U(0, 1) at `α = 1e-3`, the CDF on a 4,001-point (ρ) or 8,001-point (log variance) grid by the trapezoid rule.
+
+| Probe | Configuration | Comparison and bands | Decision |
+| :- | :--- | :--- | :--- |
+| P1 (`normal_sds`, `cholesky_normal_sds`: variance or s.d.; fill order) | `probe_tiny.csv` (n = 2, p = 1, T_eff = 4); `prior = "normal", normal_sds = 1e-3·(1, 2, 3, 4), priormean = 0, PHI_tol = 0`; `cholesky_normal_sds = 1e-3`, `cholesky_U_tol = 0`; constant variances IG(3, 2); `prior_intercept = 1e3`; 20,000 draws after 2,000 | the four lag-coefficient posterior variances `v` (the PHI row with the largest variance is the intercept); slot numbers `v/1e-3` (variance reading) and `√v/1e-3` (s.d. reading); a reading is valid iff its rounded slot numbers are a permutation of 1..4 and every raw/rounded ratio is within 10% of 1; the free U element's posterior variance within ±0.5 decades of 1e-3 (variance) or 1e-6 (s.d.) | decided iff exactly one reading is valid, its slot numbers are column-major or row-major over (PHI lag rows × equations), and the U reading is decided; `V_prior` is recorded as evidence; otherwise undecided ⇒ unresolved ⇒ its runs (R1–R9, P6) not met (D-59) |
+| P2 (U vs U⁻¹, layout, sign) | (a) `var_sv_n7.csv`, p = 1, SV, loose prior, 1,000 draws after 300; (b) `probe_corr3.csv` (n = 3, p = 1, T = 600, A u = e with a21 = −0.6, a31 = 0.5, a32 = −0.7, e ~ N(0, diag(1, 0.5, 2))), loose prior, 5,000 draws; (c) `probe_corr.csv` (n = 2, corr(u1, u2) = +0.8), loose prior, 1,000 draws | (a) every candidate reading of the U draws (M × M matrix or free-element vector; upper or lower triangle, column- or row-major; A = t(U), 2I − t(U), solve(t(U)) or A = U, 2I − U, solve(U)) against the documented `vcov()` Σ_t at three (t, draw) pairs, Σ = A⁻¹ diag(exp(logvar)) A⁻ᵀ: match iff relative max error < 1e-8 and A unit lower triangular (1e-12); (b) under the selected layout, the posterior mean of every free a_ij under A = U′, 2I − U′ and (U′)⁻¹ against the A of the LDLᵀ factor of the OLS residual covariance: within 0.05 (max abs) or not; (c) posterior mean corr(u1, u2) by `vcov()` and by the selected mapping | decided iff (a) at least one reading matches and all matching readings give the same A on every checked draw (one mapping), (b) exactly the selected one of the three is within 0.05, and (c) both correlations are +0.8 ± 0.1; otherwise undecided ⇒ unresolved ⇒ its runs (R1–R9, P6) not met (D-59) |
+| P3 (intercept row, lag order of PHI) | `probe_corr.csv` (p = 1) and `var_sv_n3.csv` (p = 2), loose prior, 5,000 draws each | the returned X columns against the rai-bvar design (const, lag-1 block, …, lag-p block) built from the CSV: exact match iff max abs difference < 1e-10, PHI row r taken to belong to X column r; the mapped posterior mean of every PHI entry against the OLS coefficients: max abs difference < 0.05 on both datasets | decided iff every X column matches exactly one design column, the intercept is the first or the last row on both datasets, the lag rows follow rai-bvar's order, and both OLS checks pass; every parity run re-derives its row map from its own X and stops if it differs from the predicted one; otherwise undecided ⇒ unresolved ⇒ its runs (R1–R9, P6–P9) not met (D-59) |
+| P4 (`sv_para` layout) | `probe_sv.csv` (n = 3, p = 1, T = 400, μ = (−3, 0, 2), φ = (0.8, 0.9, 0.97), σ = (0.4, 0.3, 0.15)), SV, loose prior, 5,000 draws | for each of the 2 orientations × 6 permutations of the series axis: the posterior means of the slices against the true rows (μ, φ, σ, σ²) by max abs distance; a pair satisfies the rule iff every slice is nearest to exactly one target at less than 0.5 × its distance to the second-nearest target, and μ, φ and one of σ / σ² are each matched once (two slices near μ: the one most correlated with h_1 is h_0) | decided iff exactly one (orientation, permutation) pair satisfies the rule; σ vs σ² and any h_0 slice are recorded; otherwise undecided ⇒ unresolved ⇒ its runs (R1, R3–R9) not met (D-59) |
+| P5 (`cholesky_priorhomoscedastic` scale; the NA default) | `probe_tiny.csv`, `normal_sds = 1`, `cholesky_heteroscedastic = FALSE, cholesky_priorhomoscedastic = cbind(rep(50, M), rep(100, M))`, `prior_intercept = 100`, 20,000 draws; a second fit with the default NA | the median over equations of the posterior mean of λ | decided: within ±0.2 decades of 100/49 ⇒ the inverse-gamma scale β₀; below 0.2 ⇒ the scale of a Gamma on 1/λ; the NA default's substituted field is recorded as data; otherwise undecided ⇒ unresolved ⇒ its runs (R2, P8, P10) not met (D-59) |
+| P6 (internal standardisation) | `var_sv_n3.csv`, p = 2, SV defaults, `cholesky_normal_sds = 1e6`; prior P: Normal with s.d. 0.05 on every lag coefficient and 0.1 on every intercept (`priormean = 0`); fits B (data, P), S (series 1 × 100, P), T (data, the raw-unit image of P: s.d. × d_j/d_i, intercept s.d. / d_i); 4 runs × 10,000 draws after 2,000 per fit | S against (i) the equivariant image D·PHI_B·D⁻¹, (ii) PHI_B unchanged, (iii) the image of PHI_T, each over the 105 quantiles of PHI under the Phase 2 rule | decided iff exactly one of (i), (ii), (iii) passes: (i) or (ii) ⇒ both sides receive pre-standardised data in bayesianVARs' own convention (sample, divisor, demeaning) in R1–R9 and the SWA fixtures are regenerated on the same data — that convention is not established by any WP29 probe, so in that case the script runs none of R1–R9 and a convention probe (a design amendment) must precede them; (iii) ⇒ raw data, the committed SWA fixtures stand; otherwise undecided ⇒ unresolved ⇒ its runs (R1–R9) not met (D-59) |
+| P7 (grouping matrices) | `var_sv_n3.csv`, p = 2, `specify_prior_phi(prior = "HS", global_grouping = g)` for g ∈ {global, equation-wise, covariate-wise, olcl-lagwise} | the integer-valued (≥ 0) fields of length lags·M² present for every g; the grouping field is the one whose number of distinct values varies with g; mapped to rai-bvar's order (P3, P1 fill order) and compared as a partition with D-38 | decided iff exactly one such field exists; the four matrices are recorded as data and a matrix that differs from D-38 is passed to rai-bvar as a custom `groups` array (not a failure); otherwise undecided ⇒ unresolved ⇒ its runs (R8) not met (D-59) |
+| P8 (meaning of the GL hyperparameters) | `probe_gl.csv` (n = 3, p = 2, T_eff = 8), constant variances IG(3, 2), `cholesky_normal_sds = 1`, `prior_intercept = 10`, `priormean = 0`, every tol 0, global grouping; HS; NG (a, b, c) = (0.1, 1, 4) and (0.1, 1, 1); R2D2 (a, b) = (0.1, 4) and (0.1, 0.5); DL a = "1/K" and 0.5; 4 runs × 50,000 after 10,000 each | R side only (fixtures `probe_bvars_p8_*.nc`: PHI, A, λ summaries, all hyperparameter and `V_prior` draws thinned to 500 per run); WP30 runs rai-bvar under each candidate mapping of §9.8 on the same data, the Phase 2 rule on the PHI quantiles | data committed, decision pending WP30: the mapping that passes while every other candidate fails is adopted; none or several ⇒ undecided ⇒ unresolved ⇒ its runs (R4–R6, R9) not met (D-59) |
+| P9 (SSVS semi-automatic τ) | `var_sv_n3.csv`, p = 2, `specify_prior_phi(prior = "SSVS", SSVS_c0 = 0.01, SSVS_c1 = 100, SSVS_semiautomatic = TRUE)` | every positive finite numeric field of length lags·M² (or a chunk of one up to 4 × that length) against c·ŝ, c·ŝ² and c²·ŝ² (c ∈ {c0, c1}) for ŝ = D-44's flat-prior normal–Wishart s.d. (df T − k − n − 1) and the variants df T − k, df T, and X without the intercept (df T − k + 1 − n − 1, T − k + 1), in rai-bvar → slot order (P1, P3): equal iff max relative difference < 1e-8 | decided iff a τ field exists: equal to D-44 ⇒ semi-automatic runs may be compared; otherwise the runs use `SSVS_semiautomatic = FALSE` with explicit τ on both sides (R7 does) and the difference (with any variant that matches) is recorded; no τ field ⇒ undecided ⇒ unresolved ⇒ semi-automatic runs not met (D-59; R7 is unaffected) |
+| P10 (intercept outside the shrinkage; `prior_intercept` an s.d.; every tol accepts 0) | (a, b) `probe_tiny.csv`, `prior_intercept = 1e-3`, constant variances IG(3, 2) (P5), (a) `prior = "normal", normal_sds = 1`, (b) `prior = "HS"`, 2 runs × 20,000 each; (c) `var_sv_n3.csv`, p = 2, SV, 2,000 draws after 500, for HS, NG (0.1, 1, 1), R2D2 (0.1, 0.5), DL 0.5, SSVS (0.01, 100, FALSE, 0.5) | (a) the intercept quantiles of both equations against N(0, 1e-6) (s.d. reading) and N(0, 1e-3) (variance reading), Phase 2 rule with the R MCSE, m = 10; (b) the HS fit against the s.d. reading; (c) the call with `PHI_tol`, the family's `*_tol` and `cholesky_U_tol` all 0 succeeds with finite draws, else the smallest accepted of 1e-300, 1e-100, 1e-50, 1e-18 | decided iff exactly one reading passes (a) and (c) finds an accepted tolerance for every family; (b) passing ⇒ the intercept is outside the shrinkage; failing ⇒ inside, which no rai-bvar option reproduces, so R3–R9 are not met at comparison (their fixtures are still staged, flagged by the P10 answer); a run at a positive floor is valid only if no draw sits at it (`floor_fraction_phi`, `floor_fraction_u` recorded per run; any draw at the floor ⇒ that run not met); otherwise undecided ⇒ unresolved ⇒ its runs (R3–R9) not met (D-59) |
 
 Parity runs (one parameter set per run, both sides derived from it, E11's lesson); data: P2's simulated parity sets
-`tests/parity/fixtures/data/var_sv_n3.csv`, `var_sv_n7.csv`, standardised if P6 says so. This amends P2 §9.9, which
+`tests/parity/fixtures/data/var_sv_n3.csv`, `var_sv_n7.csv`, raw or pre-standardised as P6 decides (E125). This amends P2 §9.9, which
 named FRED-MD subsets for the bayesianVARs runs: the simulated sets are the SWA oracle's, so R1 and R2 at its shapes
 (`n3p2`, `n7p4`) are a three-way check.
 
@@ -1234,7 +1388,7 @@ named FRED-MD subsets for the bayesianVARs runs: the simulated sets are the SWA 
 | :--- | :--- | :--- |
 | R1 | reduced × SV, Normal coefficient prior: the Phase 2 criterion (P2 §9.9 parameter set) | `n ∈ {3, 7}`, `p ∈ {2, 4}` |
 | R2 | reduced × `Constant("ig")`, Normal prior | `n = 3, p = 2` |
-| R3–R7 | reduced × SV × {HS, NG, R2D2, DL, SSVS} (`"global"`, fixed `a`, fixed `p`, `semiautomatic=False`, `scale="none"`) | `n ∈ {3, 7}`, `p = 2` |
+| R3–R7 | reduced × SV × {HS, NG, R2D2, DL, SSVS} (`"global"`, fixed `a`, fixed `p`, `semiautomatic=False`, `scale="none"`; R7's SSVS `c0 = 0.01, c1 = 1`, since `c1 = 100` mixed badly in discovery run 40226725087, chosen before any comparison; E147) | `n ∈ {3, 7}`, `p = 2` |
 | R8 | reduced × SV × HS (`"olcl-lagwise"`) | `n = 7, p = 4` |
 | R9 | reduced × SV × NG with a discrete grid on `a` (`NG_b`, `NG_c` and the grid matrix stated in the fixture) | `n = 7, p = 2` |
 
@@ -1245,30 +1399,47 @@ derived call. Draws: on the R side 4 independent `bvar()` runs with recorded see
 burn-in, MCSE from the per-run ESS; on our side 4 chains × 50,000 (weekly) and 4 × 6,000 (PR short run, P2 §9.10).
 Compared with the Phase 2 rule: 5/25/50/75/95% quantiles of `Π`, `A`, `h_t` (`t ∈ {1, T/4, T/2, T}`), `μ, φ, σ`, the
 predictive at horizons 1–4, and, where `bayesianVARs` returns them with the same meaning, the SSVS inclusion
-probabilities (`|z| ≤ 4` Bonferroni with binomial MCSE), the HS global scale (`C⁺(0, 1)` on both sides) and R9's
-posterior of `a`. The tests fail, never skip, when a fixture is missing in the release run (D-59).
+probabilities (each side's mean of its per-draw indicator series `γ_j`, with the MCSE of a mean `sd/√ESS`: the R side
+with the per-run ESS, our side with the chain ESS of the stored `γ` draws (E155); `z` the difference over the combined
+MCSE, Bonferroni as the Phase 2 rule; `p̂ ∈ {0, 1}` on both sides passes iff equal, on one side the other side's MCSE
+is used alone; E123), the HS global scale (`C⁺(0, 1)` on both sides) and R9's posterior of `a`. The tests fail, never skip, when a fixture is missing in the release run (D-59).
 
 **`bvars` 1.1** (Woźniak; section `wbvars` of `make_r_fixtures.R`, fixtures `wbvars_*.nc`; the conjugate CommonSV of
-§5.3). Probes, recording **data fields only**: **P11** the defaults of `specify_prior_bvar` (`A`, `S`, `nu`, `Psi`,
-`Gamma`, `lambda`, `sv_a`, `sv_s`) and of `specify_starting_values_bvar` (`V`, `sigma2_omega`, `s_`, `rho`, `omega`, `h`,
-`S`); **P12** whether `V` can be held fixed: posterior draws of `V` (the documented output) under a concentrated matrix-GIG
-setting must have `sd(V_ij) ≤ 1e-3·√(Ω_ii Ω_jj)`; **P13** the common-volatility normalisation (`E h = 0`, initial condition) under `"cSV"`
-and `"ncSV"`; **P14** the `ρ` and `ω`/`σ_ω²` priors and whether a setting fixes `σ_ω²`; **P15** the `Σ` convention
-(covariance vs scale), the prior mean (`stationary`) and the intercept; **P16** whether bvars's `h` sampler is exact. Its
-documented output has `A`, `Sigma` and `V` only; `h`, `rho`, `omega` exist as the `last_draw` starting values, so the
-draws are extracted by chained `estimate(·, S = 1)` calls, recording those data fields after each (feasible at P16's
-size). The oracle is the joint posterior of `(h, ρ, σ_h)` on a `T = 2`, `n = 5` dataset under the P11–P14 mapping, by
-4-D quadrature with the closed-form `p(Y | h)` (N08 §A4); KS `α = 1e-3` on draws thinned to their ESS, `k = 4` seeded
-runs pooled. P16 runs only if P13–P14 map the SV prior and the extraction works; otherwise it is recorded as not run. `estimate(spec, S, thin)` runs one chain without a burn-in argument: each R run is a 10,000-draw `estimate`
-followed by a 50,000-draw `estimate` restarted from its `last_draw`, `k = 4` runs with recorded seeds, MCSE from the
-per-run ESS. Data: FRED-QD small set (`n = 3`, federal series), `p = 4`. **Gating comparison**, decided by the probes
-and recorded before it runs:
+§5.3). Probes record **data fields only** (rules at `d281276`, E121, E157). The documented output of `estimate()` has `A`,
+`Sigma` and `V` only; `h`, `rho`, `omega` exist as the `last_draw` starting values, so P16's draws are extracted by
+chained `estimate(post, S = 2)` calls (`estimate` refuses `S = 1`), recording those data fields after each.
 
-1. If P12 holds and P13–P14 map bvars's SV prior onto a `CommonSV` option (or a bvars setting onto ours): posterior
-   quantiles of `B` and `Σ` under the Phase 2 rule, plus `h_t`, `ρ`, `σ_h` **if P16 shows bvars is exact**; if P16 shows
-   an approximate sampler or was not run, `h_t`, `ρ`, `σ_h` are reported where available, not gating, and the 1- and
-   4-step predictive quantiles join the gate.
-2. Otherwise: the 1- and 4-step predictive quantiles under the Phase 2 rule, same data and draw counts.
+| Probe | Configuration | Comparison and bands | Decision |
+| :- | :--- | :--- | :--- |
+| P11 (defaults) | `qd3_growth.csv` (FRED-QD small set: 4Δ of 100 × log GDPC1 and GDPCTPI, FEDFUNDS; 1960Q2–2019Q4), p = 4; `specify_bvar$new(data, p, common_volatility ∈ {homoskedastic, cSV, ncSV}, distribution = "norm")` | the `get_prior()` and `get_starting_values()` lists recorded as arrays (data fields only) | decided iff the fields are retrieved; otherwise undecided ⇒ unresolved ⇒ its runs (wbvars_*) not met (D-59) |
+| P12 (can V be held fixed?) | `qd3_growth.csv`, p = 4, cSV; Ω = the default starting V; Psi = c·Ω, Gamma = c·Ω⁻¹ and the swapped orientation, c ∈ {1e4, 1e6, 1e8}, lambda = (K + 1)/2, starting V = Ω; 1,000 + 2,000 draws each; controls: default prior, and default prior with starting V = 2Ω | posterior draws of V: max_ij sd(V_ij)/√(Ω_ii Ω_jj) and max_ij \|mean V_ij − Ω_ij\|/√(Ω_ii Ω_jj) | holds iff some setting gives both ≤ 1e-3; does not hold iff every setting ran and none does; the controls are recorded (when V does not move under the default prior either, the runs keep the default starting V = Ω and the conjugate comparison uses V = Ω); otherwise undecided ⇒ unresolved ⇒ its runs (gating branch 1) not met (D-59) |
+| P13 (E h = 0, initial condition) | (a) the length of h; (b) `qd3_growth.csv`, p = 4, data × 10 with S0 × 100 (the starting V, from AR fits, rescales itself) against the base fit, cSV and ncSV, 4 runs × 10,000 after 2,000 each; (c) the P16 chained draws (`probe_t2n5.csv`) | (b) A (intercept / 10) and Σ/100 quantiles of the scaled fit against the base fit, Phase 2 rule (m = 225); (c) PIT test of every ρ draw against its conditional given the same sweep's h and variance (cSV: σ_v², equal to ω² in the state; ncSV: unit variance on the stored h̃) under three candidates: ρ ~ U(−1, 1) with h_0 = 0 (h_1 ~ N(0, σ²)), ρ ~ U(−1, 1) with a stationary h_1 (N(0, σ²/(1 − ρ²))) — both rejected outright (p = 0) if any ρ draw lies outside (−1, 1) — and a flat prior on the real line with h_0 = 0 (the exact normal conditional), which passes only if, in addition, the observed number of draws with |ρ| ≥ 1 is consistent with the sum over draws of its conditional mass outside (−1, 1) (two-sided Poisson test, α = 1e-3; a pass reads "untruncated: flat, or a normal prior too diffuse to detect at this size"); Metropolis repeats: fraction of iterations with ρ unchanged ≤ 0.01 | decided iff (b) passes for both volatilities and, for each volatility, the repeat fraction is ≤ 0.01 and exactly one candidate has a passing same-sweep PIT; it maps onto CommonSV (stationary h_0 at the first data row, E h = 0) for a volatility iff that candidate's initial condition is the stationary one; otherwise undecided ⇒ unresolved ⇒ its runs (gating branch 1) not met (D-59) |
+| P14 (ρ and ω / σ_ω² priors; does a setting fix σ_ω²?) | the P16 chained draws; fixing scan on `probe_t2n5.csv`: (sv_a, sv_s) multiplied by (1e6, 1e-6), (1e6, 1), (1e6, 1e6), (1e8, 1), (1e8, 1e-2), 2,000 burn-in + 200 calls of S = 10 | PIT tests (same sweep): ρ by the candidates of P13 (c), its prior being that of the one passing candidate; ncSV σ_ω² against the GIG conditional of ω ~ N(0, σ_ω²), σ_ω² ~ G(sv_a, scale s_) and G(sv_a, rate s_); cSV σ_v² against σ_v² ~ σ_ω² χ²₁ (h_0 = 0 and stationary) and σ_ω² against G(sv_a, s_) with w² = ω² or σ_v²; fixing: posterior CV of σ_ω² (ncSV) or σ_v² (cSV) ≤ 1e-3 | decided iff the ρ prior is decided (exactly one P13 (c) candidate passes) for both volatilities and one ncSV σ_ω² candidate passes; maps onto a CommonSV option for a volatility iff ρ ~ U(−1, 1) (= `Beta(1, 1)` on (ρ + 1)/2) and the variance prior has the family and every parameter of an option (ncSV: σ_ω² fixed by a setting ⇒ `ScaledChi2(σ_ω²)`; cSV: a fixed inverse gamma ⇒ `InvGamma`, which these candidates do not establish); otherwise undecided ⇒ unresolved ⇒ its runs (gating branch 1) not met (D-59) |
+| P15 (Σ covariance or scale; prior mean; intercept) | `probe_corr.csv` (n = 2, p = 1), homoskedastic normal, 2,000 + 5,000 draws; `specify_prior_bvar$new(N = 3, p = 4, stationary = rep(FALSE / TRUE, 3))`; the X of the `qd3_growth` specification | posterior mean Σ against the OLS residual covariance (df T − k): max relative difference < 5% ⇒ covariance; A0 with stationary = FALSE: 1 on every own first lag and 0 elsewhere, with TRUE: 0 everywhere; the X row equal to the design's constant column (< 1e-10) is the intercept, checked by its A column: posterior mean within 1.5 of (5, −3), every entry above 2 in absolute value, every other entry below 2 | decided iff all three hold; otherwise undecided ⇒ unresolved ⇒ its runs (wbvars_*) not met (D-59) |
+| P16 (is bvars' h sampler exact?) | `probe_t2n5.csv` (n = 5, p = 1, T = 2, iid N(0, 1), seed 20261032); the specification is built on a carrier (the data plus 40 N(0, 1) rows, because `specify_bvar$new` fits AR models) and its data matrices, prior and starting values are replaced by those of the data; cSV and ncSV, k = 4 seeded runs each: a 10,000-draw burn-in, then 10,000 chained `estimate(post, S = 2)` calls (`estimate` refuses S = 1), h, ρ, ω, σ_v², σ_ω², s_, S recorded after each; extraction check: 4 independent single runs (the same burn-in, then one `estimate()` of 10,000 draws), A and Σ quantiles against the chained runs' A and Σ draws, Phase 2 rule | WP38: the joint posterior of (h, ρ, σ_h) by 4-D quadrature with the closed-form p(Y \| h) (N08 §A4) under the P11–P14 reading, KS α = 1e-3 family-wise over its marginals × volatilities (D-60) on ESS-thinned draws pooled over the k = 4 runs | data committed, decision pending WP38: KS passes ⇒ exact; a KS failure is recorded as "mapping or sampler, undetermined", never as "approximate", and cannot move predictive quantiles into the gate; under an untruncated ρ prior (P13 (c), P14) the (h_1, ρ) posterior at T = 2 may be improper (∫ N(h̃_2; ρh̃_1, 1) dρ = 1/|h̃_1| is not integrable at h̃_1 = 0), so WP38 must establish propriety before any KS verdict, otherwise P16 for that volatility is "no proper posterior at T = 2" (the evidence records the fractions of draws with |ρ| > 1 and > 10); an extraction check failure ⇒ undecided; otherwise undecided ⇒ unresolved ⇒ its runs (the h_t, ρ, σ_h part of branch 1) not met (D-59) |
+
+Parity runs: `estimate(spec, S, thin)` runs one chain without a burn-in argument, so each R run is a 10,000-draw
+`estimate` followed by a 50,000-draw `estimate` restarted from its `last_draw`, `k = 4` runs with recorded seeds, MCSE
+from the per-run ESS. Data: `qd3_growth.csv`, the FRED-QD small set as growth rates (4Δ of 100 × log `GDPC1` and
+`GDPCTPI`, `FEDFUNDS` in levels; 1960Q2–2019Q4), `p = 4` (E146). **Gating comparison**, per volatility (`cSV`,
+`ncSV`), decided by the probes and recorded before it runs:
+
+1. Branch 1 iff P12 holds, P13 and P14 map bvars's SV prior exactly onto a `CommonSV` option, and P15 is decided:
+   posterior quantiles of `B` and `Σ` under the Phase 2 rule; `h_t`, `ρ`, `σ_h` gate only if P16 passes (exact); if
+   P16 fails ("mapping or sampler, undetermined"), is "no proper posterior at `T = 2`" or was not run, they are
+   reported where available and that part of branch 1 is not met (the P16 row, D-59). Branch-1 runs use the mapped
+   settings: the P12 `V` and the P14 `(sv_a, sv_s)` that fixes `σ_ω²`, recorded with their values (E157).
+2. Otherwise (no exact mapping): the 1- and 4-step predictive quantiles under the Phase 2 rule, same data and draw
+   counts, as SPEC §10.4 prescribes when no exact mapping exists. Whether this comparison **gates** "bvars parity for
+   CommonSV" or is reported as evidence (the criterion then not met for want of a mapping) is Q35, the owner's; until
+   Q35 is answered branch 2 is computed and reported, and the criterion's status waits on the answer (E121).
+
+The discovery runs whose R-side output informed the revisions of these rules (R side only; no rai-bvar code ran
+against any R output, and no Phase 3 fixture was committed before the rules were written here; E122): 40226143296,
+40226725087, 40227507036, 40228156925, 40231286955, 40232663417, 40233547243, and 40242687927 (the `d281276` records);
+run 40228777915 used the earlier rules and counts as discovery only. At their (quick) size both volatilities take branch 2 (cSV resolves to `ρ ~ U(−1, 1)`
+with `h_0 = 0`, which no `CommonSV` option has; ncSV's `ρ` prior fits no candidate); the final run's draw counts
+decide (E147).
 
 A failure under the selected comparison is **not met** (D-59); A8 and A11 are evidence, never a substitute (E35).
 
@@ -1285,9 +1456,13 @@ commit) has been run and its readings pass: both null pairs of `linear-homoskeda
 `linear-sv-outliers` are "not above nominal" (the registration's Wilson rule) at `h = 1` and at `h = 4`; power
 (`linear-sv`) and the gate-pass share are reported, not gated, as registered and as SPEC §10.5 asks ("Size … and power are
 reported"); a power threshold set now would be post hoc (a pilot record exists), so Q33 asks the owner to confirm this
-reading, and WP41 states it in SPEC §13's Phase 3 status. Otherwise not met (D-59). The full study takes about 10 h on the reference
-laptop by the registration's own estimate (Q28). The readings refer to the registration's commit (Phase 2 code); WP39
-records them in SPEC §13. Phase 3 rows of the study (CommonSV or GL arms) would be pre-registered separately and are not
+reading (and that the exit is met on the one registered cell `n = 3, p = 2, T = 200` of SPEC §10.5's range, other
+cells left to a later registration; E142), and WP41 states it in SPEC §13's Phase 3 status. Otherwise not met (D-59).
+The full study takes about 10 h on the reference laptop by the registration's own estimate; the owner approved it on
+2026-10-25 (Q28, resolved), and the registered run is the one at the registration's commit `58ab09f`, after the pilot
+(E138). The readings refer to that commit (Phase 2 code); if the DGP PR changes harness code before it merges, the
+registration's bug-fix rule applies (the affected rows are rerun in full). WP39 records the readings in this document's
+exit map; SPEC §13 is WP41's (E139). Phase 3 rows of the study (CommonSV or GL arms) would be pre-registered separately and are not
 part of the exit.
 
 ### 9.10 Replication target (SPEC §10.7): Gruber & Kastner (2025), qualitative (WP40)
@@ -1325,7 +1500,8 @@ documented" is the owner's decision (Q31).
   to the weekly tier from the end of this priority list: Tier U, A10/A10b, A11, A12, A13, per-PR block Geweke, A9,
   G-small 320, 301, 311, 321, A8 (`n = 3`), contract tests, short parity runs. This amends P2 §9.10's "no test leaves
   the PR tier to meet it" for Phase 3 tests only.
-- **Weekly tier**: G-full and S for rows 301–330, G-small for 401–408, M19–M35, A8 (`n = 20`), A9's MCMC leg, the long
+- **Weekly tier**: G-full and S for rows 301–330, G-small for 401–408, M19–M36, A8 (`n = 20`), A9's MCMC leg, the
+  ordering-invariance test of conjugate × CommonSV (row 27; E159), the long
   parity runs, contract tests for every new MCMC composition.
 - **Shards** (WP35, `tools/weekly_shards.py`): `geweke-p3a` (structural rows), `geweke-p3b` (reduced and CommonSV rows),
   `sbc-p3a`, `sbc-p3b` (same split, by file); the Phase 2 shards `--ignore` the Phase 3 files; each shard ≤ 200 min on a
@@ -1338,6 +1514,9 @@ documented" is the owner's decision (Q31).
 ## 10. Performance
 
 Estimates to be replaced by WP36's measurements (`docs/phase3/pilot.md`):
+
+- **SSVS indicators** (E155): `γ` is stored as `int8` with the stored parameter draws, `n·k` bytes per stored draw
+  (`n = 20, p = 4`: 1.6 kB per draw, 65 MB at 4 × 10,000 stored draws).
 
 - **GL scale step**: elementwise work on `n²p` coordinates per chain plus `G` segment sums and an `A × G` grid. Under
   `vmap` the GIG `while_loop` runs to the slowest lane: with the measured rejection constant ≤ 1.40 (R2a; bound 3.46),
@@ -1361,7 +1540,7 @@ Estimates to be replaced by WP36's measurements (`docs/phase3/pilot.md`):
 | R18 | GL mixing (HS global scale; small `a` on the grid) leaves fits unconverged | WP36 pilot; group scales primary (D-52); budget D-58; warnings |
 | R19 | GIG sampler wrong at extreme parameters | Devroye (2014) §6 with a uniform bound, log-space evaluation, the pinned Tier U grid, M34 |
 | R20 | `bayesianVARs` cannot be built, or a probe stays undecided | D-54 (Linux with gfortran); an undecided probe is recorded with its evidence and its runs are **not met** (D-59); the owner decides |
-| R21 | bvars is approximate (auxiliary mixture) or its `V` cannot be fixed | P16 and P12 select the gating comparison before it runs (§9.8) |
+| R21 | bvars is approximate (auxiliary mixture) or its `V` cannot be fixed | P12–P15 select the comparison before it runs (§9.8); P16 decides whether branch 1's `h_t`, `ρ`, `σ_h` part is met; branch 2's role is Q35 (E157, E159) |
 | R22 | CommonSV `h` acceptance falls with `T` and `σ_h²` (N08 §A5.2) | blocks of 100 dates; acceptance warning; pilot at `T = 600` |
 | R23 | Conditional forecasts near rank deficiency | the `R₁` diagonal check of E-16; never jitter |
 | R24 | CI time grows with 30 rows × (G, S) | four new weekly shards; four PR rows; the +10 min PR cap |
@@ -1370,7 +1549,7 @@ Estimates to be replaced by WP36's measurements (`docs/phase3/pilot.md`):
 | R27 | GK sample details (UMCSENTx gaps) | the sample start fixed in the pre-registration |
 | R28 | GitHub Actions minutes for R builds | dispatch-only job with a cached library |
 | R29 | The shared-factor path's two-block `(θ_i, λ_i)` Gibbs mixes slowly when `q_i ≈ T` | WP36 measures; Q32 (a collapsed `λ_i` draw) |
-| R30 | The DGP full study's compute (≈ 10 h) is not scheduled | Q28 |
+| R30 | The DGP full study's compute (≈ 10 h) | Mitigated: approved by the owner (Q28, 2026-10-25); run at the registration's commit after the pilot (E138) |
 | R31 | The CommonSV level shift `(λ_i e^c, h − c)` is identified only by the zero-mean `h` prior and may mix slowly for `ρ` near 1 | WP36 measures the ESS of `log λ_i` and `mean h`; Q34 |
 
 ---
@@ -1392,13 +1571,16 @@ Estimates to be replaced by WP36's measurements (`docs/phase3/pilot.md`):
 | Q25 | Conditional forecasts: soft conditions, parameter updating (Waggoner–Zha Gibbs), weighting by `w_s` | Defer; the weights are stored |
 | Q26 | Compute for the GK acceptance run | Estimate from WP36; run locally after the pre-registration, with a documented quick config first |
 | Q27 | Keep D3 for `Minnesota(form="auto") × CommonSV` (structural), or make the conjugate screen the `auto` default (D2's spirit, a SPEC D3 change) | Keep D3; the conjugate screen is one keyword away |
-| Q28 | Compute for the DGP full study (≈ 10 h, the registration's estimate) | Run it on the reference laptop once the DGP PR merges |
+| Q28 | Compute for the DGP full study (≈ 10 h, the registration's estimate) | **Resolved (owner, 2026-10-25): "evet 10 saatlik tam DGP koşusunu başlat"** (yes, start the full 10-hour DGP run): run at the registration's commit `58ab09f`, after the pilot (E138) |
 | Q29 | "Recovery" in the DGP layer (SPEC §10.1) | Defer (posterior coverage of the true parameters needs fits the study does not keep); SPEC §10.1 edit |
 | Q30 | Deterministic terms outside the shrinkage (D-36) | Keep (GK, `bayesianVARs`); SPEC §4.4 edit |
 | Q31 | The GK acceptance cannot fail ("met or documented"), as with Clark–Ravazzolo | Accept, as in Phase 2 |
 | Q32 | A collapsed `λ_i | h, y` draw for the shared-factor path (better mixing at `q ≈ T`) | Later, if WP36 shows the need; it needs the mean step to draw a vol-state leaf |
-| Q33 | The DGP exit gates size (null pairs and the `not_worse` pair) and reports power and the gate-pass share, as registered and as SPEC §10.5 words it | Confirm; WP41 states it in SPEC §13 |
+| Q33 | The DGP exit gates size (null pairs and the `not_worse` pair) and reports power and the gate-pass share, as registered and as SPEC §10.5 words it; and it is met on the one registered cell (`n = 3, p = 2, T = 200`) of SPEC §10.5's range, other cells left to a later registration (E142) | Confirm both; WP41 states them in SPEC §13 |
 | Q34 | An interweaving (ASIS-type) shift move for the CommonSV level `(λ_i e^c, h − c)` | Later, if WP36 shows slow mixing of `log λ_i` or `mean h` |
+| Q35 | What "bvars parity for CommonSV" (SPEC §13) means when §9.8's branch 2 is selected (no exact prior mapping: bvars's `V` cannot be held fixed, or its SV prior has no `CommonSV` counterpart). SPEC §10.4 prescribes comparing forecast distributions on the same data then; the question is whether that equality comparison of two different posteriors gates the criterion (E121) | Report it as evidence, not gated: the criterion is **not met** for want of an exact mapping, and any other criterion is pre-registered before a fixture exists; WP38 and the exit map follow the answer |
+| Q36 | Rows 320 (238 of 10⁶ draws) and block 408 (239) exceed D-56's explosive-mass target `2e-4` under E150's Monte Carlo rule (a count above the upper 99% Poisson limit at the target, 234), from the SOC/SUR dummy rows of the conjugate test prior; every row meets Phase 2's bound `P(ρ > 1) < 10⁻³`. Two decisions: (i) accept the Monte Carlo rule as the definition of D-56's target, which states none (rows 321 and 323 are then within it); (ii) for rows 320 and 408: (a) tighten their lag prior (for example the conjugate `Ω_rr` from 0.01 to 0.008) until WP30's author measures them within the target at 4·10⁶ draws, before any Geweke run of them; (b) keep the priors and accept their masses (≈ 2.4e-4); (c) drop the dummy rows from 320 and 408 (which removes M32's and M36's G catcher) | (i) accept; (ii) (a): the target protects Geweke from explosive simulated paths, and no sampler result exists yet for these rows. Until answered the rows stay as stated and WP30's test marks them strict expected failures (E150) |
+| Q37 | Add a reversed-ordering twin of R1 (reduced × SV, `n = 3, p = 2`, the same matched priors and the same Phase 2 criterion) to WP29's `bvars` section and WP38, per N08 §B5 item 7 (row 28, E156) | Defer past v0.3.0 (scope: SPEC §13 does not require per-ordering parity). The alternative is cheap: the R1 fixture machinery and the P3 row map serve a permuted dataset unchanged |
 
 ---
 
@@ -1415,20 +1597,20 @@ and is merged before WP38 (D-57). WP31 and WP32 run their acceptance G-small row
 
 | WP | Content | Needs | Base | Acceptance |
 | :- | :--- | :--- | :--- | :--- |
-| WP26 | Contracts (§2): config rules, state classes, prior arrays, keys, registry, protocols, compose hooks, goldens, its §1.3 amendments | this design | `phase-3-design` | rules tested; Phase 2 templates, hashes (and the DGP arms') unchanged; bitwise A/B |
+| WP26 | Contracts (§2): config rules, state classes, prior arrays, keys, registry, protocols, compose hooks, goldens, its §1.3 amendments | this design | `main` (`phase-3-design` merged as PR #13) | rules tested; Phase 2 templates, hashes (and the DGP arms') unchanged; bitwise A/B |
 | WP27 | Specs and API (§7): GL classes, `DiscreteGrid`, `AsymmetricConjugate`, `CommonSV`, `TruncatedNormal`; resolution, engine table, E-1…E-16, spec/hash, labels, harmonise; its §1.3 amendments | WP26 | WP26 | every §7.2 row and §7.3 message tested; golden hashes unchanged; `import rai_bvar` imports no JAX |
-| WP28 | Numerics (§3.4, §3.5, §5.3, §5.4): `log_gig`, `precision_draw_log`, `shared_factor_*`, tridiagonal Newton; mpmath in `dev` | WP26 | WP27 | §9.2 item 1 green |
+| WP28 | Numerics (§3.4, §3.5, §5.3, §5.4): `log_gig`, `precision_draw_log`, `shared_factor_*`, tridiagonal Newton; mpmath in `dev` (`pyproject.toml`, `uv.lock`) | WP26 | WP27 | §9.2 item 1 green (the KS family rule of D-60); M34 caught by it (checked locally, E124) |
 | WP29 | Oracle environment and fixtures (D-54, §9.8): `make_r_fixtures.R` sections `bvars` (P1–P10, R1–R9) and `wbvars` (P11–P16 and its runs), packing, the dispatch-only `r_fixtures` CI job, the SV-t fixture if `stochvol` ≥ 3.2.5 | this design (Q22 resolved) | `main` | fixtures committed with versions; every probe decided or recorded undecided with evidence; the bvars gating comparison recorded |
-| WP30 | References (§9.1), the exogenous design, `COMPOSITIONS_P3`, `BLOCK_CONFIGS_P3`; explosive-mass measurement of the lagged rows | WP26 | WP28 | prior moments vs closed forms; simulators vs NumPy loops (1e-12); `log_joint` vs SciPy (1e-10) |
-| WP31 | GL kernels and `GLScaleStep`, deviation paths, adapter and builders, resolve, monitors, runner init order, storage (§3) | WP28, WP30 | WP30 | Tier U, B green; rows 301 and 311 G-small green (ad hoc); A12, A13 green; bitwise A/B |
-| WP32 | CommonSV (§5): common cores, `CommonSVStep`, the shared-factor path, forecasts, warm starts, monitors, storage | WP28, WP30, WP31 (shared files) | WP31 | Tier U, B green; rows 320 and 321 G-small green (ad hoc); A8 (`n = 3`), A11 green; bitwise A/B |
-| WP33 | `StructuralNIGFit` and its adapter, EB with free `cross`, MH, `lag_coefs` on analytic forecasts (D-49), ordering support, its §1.3 amendment (§4) | WP27 | WP32 | A9 green; Phase 1 tests unchanged; bitwise A/B |
+| WP30 | References (§9.1), the exogenous design, `COMPOSITIONS_P3`, `BLOCK_CONFIGS_P3`; explosive-mass measurement of the lagged rows; `gl_log_r_reference`, `ssvs_shat_reference`, `conditional_forecast_reference` (E126, E144) | WP26 | WP28 | prior moments vs closed forms; simulators vs NumPy loops (1e-12); `log_joint` vs SciPy (1e-10); the three references against direct formulas |
+| WP31 | GL kernels and `GLScaleStep`, deviation paths, adapter and builders, resolve, monitors, runner init order, storage (§3) | WP28, WP30 | WP30 | Tier U (including §9.2 item 5, E126), B green; rows 301 and 311 G-small green (ad hoc); A12, A13 green; bitwise A/B |
+| WP32 | CommonSV (§5): common cores, `CommonSVStep`, the shared-factor path, forecasts, warm starts, monitors, storage; the CommonSV false-alarm control (row 26) | WP28, WP30, WP31 (shared files) | WP31 | Tier U, B green; rows 320 and 321 G-small green (ad hoc); A8 (`n = 3`), A11 green; the R8-note test (E130); bitwise A/B |
+| WP33 | `StructuralNIGFit` and its adapter, EB with free `cross`, MH, `lag_coefs` on request on analytic forecasts and its plumbing (D-49, E120), ordering support, its §1.3 amendment (§4) | WP27 | WP32 | A9 green; Phase 1 tests unchanged; the default analytic forecast carries no `lag_coefs` and keeps its memory (E120); bitwise A/B including the EB plug-in and analytic cases of §2 (E118) |
 | WP34 | Conditional forecasts (§6) | WP32, WP33 | WP33 | A10, A10b green on every engine; contract checks; bitwise A/B |
-| WP35 | Composition suites (§9.4–§9.6): rows 301–330, blocks, SBC, mutants M19–M36, contract tests, weekly shards | WP30–WP34 | WP34 | G-small (PR rows) green; G-full, S and M green on a dispatched weekly run; every mutant caught |
+| WP35 | Composition suites (§9.4–§9.6): rows 301–330, blocks, SBC, mutants M19–M36, contract tests, the ordering-invariance test (row 27), weekly shards | WP30–WP34 | WP34 | G-small (PR rows) green; G-full, S and M green on a dispatched weekly run; every mutant caught |
 | WP36 | Pilot: GL and CommonSV mixing and cost on the validated kernels, BENCH-P3 (§8, §10) | WP35 | WP35 | measurements with machine fingerprint; recommendation for D-58; compute estimate for Q26 |
 | WP37 | Twins at scale: A8 (`n = 20`), A9's MCMC leg | WP35 | WP36 | green weekly |
-| WP38 | Parity tests (§9.8) | WP29 (merged), WP37 | WP37, rebased on `main` after WP29 | the parity exit criteria (map below) |
-| WP39 | DGP exit (§9.9): the DGP session's merged PR and its full study's readings | the DGP PR | WP38 | the readings recorded; criterion met or not |
+| WP38 | Parity tests (§9.8) | WP29 (merged), WP37 | WP37 (`main` merged into the stack after WP29, D-57) | the parity exit criteria (map below) |
+| WP39 | DGP exit (§9.9): the DGP session's merged PR and its full study's readings | the registered run's report (at `58ab09f`) and the DGP PR merged (E138) | WP38 | the readings recorded in this document's exit map; criterion met or not |
 | WP40 | GK replication: pre-registration, then the acceptance run and report (§9.10) | WP36 (budget), WP38 | WP39 | report against C1–C6 |
 | WP41 | Release: SPEC v2.4 (status, the §0.2 edits the owner accepted), README roadmap, this document's exit map, `ci.yml` tiers, `pyproject` 0.3.0, release notes; tag only on the owner's approval after a status report | all | WP40 | CI green; the weekly tier green on the release commit with no skipped parity test |
 
@@ -1437,8 +1619,8 @@ and is merged before WP38 (D-57). WP31 and WP32 run their acceptance G-small row
 | Criterion | Delivered by |
 | :--- | :--- |
 | `bayesianVARs` parity, global-local priors × SV | WP38 runs R3–R9 (fixtures WP29, probes P6–P10); pass/fail (D-59) |
-| `bayesianVARs` parity, reduced-form sampler, after P1–P5 | WP38 runs R1–R2 (fixtures WP29); pass/fail |
-| `bvars` parity for `CommonSV` | WP38, the comparison selected by P11–P16 (§9.8); pass/fail; A8 and A11 are evidence only |
+| `bayesianVARs` parity, reduced-form sampler, after P1–P6 | WP38 runs R1–R2 (fixtures WP29); pass/fail |
+| `bvars` parity for `CommonSV` | WP38, the comparison selected by P11–P16 (§9.8); pass/fail; under branch 2 its status follows the owner's answer to Q35 (E121); A8 and A11 are evidence only |
 | DGP verdict-engine tests on linear DGPs | WP39: the registered full study's readings (§9.9); pass/fail |
 | R6: Geweke and SBC for every new block and interaction class | WP35 (references WP30), with the coverage argument of §9.4 |
 | Replication target (SPEC §10.7) | WP40 (C1–C6; acceptance per Q31) |
