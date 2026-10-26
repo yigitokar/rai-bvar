@@ -594,6 +594,18 @@ class _LinearDraws:
             extra=None if lag is None else {"lag_coefs": (LAG_DIMS, lag)},
         )
 
+    def conditional_forecast(
+        self, horizon: int, conditions: Any, draws: int = 1000, seed: SeedLike = None
+    ):
+        """Hard-condition scenarios (P3 DESIGN §6, D-50; WP34): each draw of
+        ``forecast(horizon, draws, seed, lag_coefs=True)`` conditioned exactly on ``conditions``
+        (a ``DataFrame`` indexed by horizon or forecast period, ``NaN`` = free, or ``{variable:
+        sequence}``; model scale). Returns a ``ConditionalForecastResult``, a scenario that
+        ``score_forecast`` refuses; see ``rai_bvar.forecast.conditional``."""
+        from rai_bvar.forecast.conditional import conditional_forecast
+
+        return conditional_forecast(self, horizon, conditions, draws=draws, seed=seed)
+
     def irf(self, horizon: int = 20, draws: int = 1000, seed: SeedLike = None, shock: str = "sd"):
         """Recursive (Cholesky) impulse responses to pre-COVID one-s.d. (or unit) shocks."""
         from rai_bvar.structural import IRFResult, recursive_irf
