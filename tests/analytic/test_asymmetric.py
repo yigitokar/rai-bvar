@@ -133,6 +133,19 @@ def test_bvar_fit_is_a_structural_nig_fit(data):
     assert fit.log_ml() == sum(p.log_ml for p in posts)
 
 
+def test_2020_warning_does_not_advise_lenza_primiceri():
+    """Phase 1's 2020 advice (``outliers='lenza-primiceri'``) is refused by AsymmetricConjugate at
+    construction (E-8), so its fit advises what the model accepts (the R6 review of PR #22)."""
+    rng = np.random.default_rng(7)
+    index = pd.period_range("2005Q1", periods=72, freq="Q")
+    frame = pd.DataFrame(rng.standard_normal((72, 3)), index=index, columns=["v0", "v1", "v2"])
+    with pytest.warns(UserWarning) as record:
+        ac(hierarchy="fixed").fit(rb.VARData.from_frame(frame, tcodes=1))
+    notes = [str(w.message) for w in record if "covers 2020" in str(w.message)]
+    assert notes and all("consider outliers='lenza-primiceri'" not in m for m in notes)
+    assert all("not available with AsymmetricConjugate" in m for m in notes)
+
+
 def test_fixed_hierarchy_uses_the_prior_values(data):
     fit = fitted(ac(hierarchy="fixed", lambda_=0.3, cross=0.4, contemp=0.6), data)
     assert fit.optimization is None and fit.converged and fit.summary().empty

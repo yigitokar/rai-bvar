@@ -34,9 +34,9 @@ class FittedModel(Protocol):
 def forecast_options(fit: Any, *, lag_coefs: bool) -> dict[str, Any]:
     """Keywords for ``fit.forecast`` (P3 DESIGN D-49): ``{"lag_coefs": True}`` when
     ``lag_coefs`` is requested and ``fit.forecast`` takes the keyword, else ``{}`` (the call is
-    then exactly the Phase 1 one). A forecast without the keyword is a fit that attaches
-    ``lag_coefs`` whenever it can (``MCMCFit``, P2 D-34) or a model written to the Phase 1
-    protocol; it is called as before."""
+    then exactly the Phase 1 one). ``MCMCFit.forecast`` takes the keyword and attaches
+    ``lag_coefs`` always (P2 D-34, P3 E162(a)); a forecast without the keyword is a model written
+    to the Phase 1 protocol (a benchmark) and is called as before."""
     if not lag_coefs:
         return {}
     try:

@@ -82,6 +82,12 @@ _HYPER_NAMES = (*_EB_NAMES, *_SCALE_NAMES)
 # path so A9's projected gradient at the mode is below 1e-6). The Phase 2 plug-in (cross and contemp
 # fixed) keeps ftol = 1e-12 and SciPy's default gtol, so its results stay bitwise (E118).
 _FREE_SCALE_OPTIONS = {"ftol": 1e-15, "gtol": 1e-9}
+# Phase 1's 2020 advice; AsymmetricConjugate refuses Lenza-Primiceri scaling at construction (E-8)
+_LP_ADVICE = "consider outliers='lenza-primiceri'"
+_LP_ADVICE_NIG = (
+    "Lenza-Primiceri scaling is not available with AsymmetricConjugate; consider excluding or "
+    "dummying 2020, or Minnesota(form='conjugate') with outliers='lenza-primiceri'"
+)
 
 
 @dataclass(frozen=True)
@@ -741,7 +747,10 @@ class StructuralNIGFit(_LinearDraws):
         self.k, self.n, self.n_det = base.k, base.n, base.n_det
         periods = data.index[self.lags :]
         shim = _SettingInputs(base.scales.own_means, periods)
-        for note in (*base.scales.notes, *_setting_warnings(shim, model, data)):
+        settings = (
+            n.replace(_LP_ADVICE, _LP_ADVICE_NIG) for n in _setting_warnings(shim, model, data)
+        )
+        for note in (*base.scales.notes, *settings):
             self._warn(note)
         free = spec.free
         self.free_names = (

@@ -43,7 +43,7 @@ MCMC models (DESIGN §11.6, WP23):
   default estimator next to it (``score_forecast``). At ``h > 1`` the integrated estimator needs
   the forecast's ``lag_coefs``: with ``"integrated"`` and ``horizon > 1`` every origin's forecast
   is made with ``forecast(..., lag_coefs=True)`` (P3 DESIGN D-49, E120; analytic and structural
-  NIG fits then attach it, MCMC fits attach it always and are called as before,
+  NIG fits then attach it, MCMC fits attach it always and accept the keyword, E162(a),
   ``models.base.forecast_options``); a model that cannot provide it (a benchmark) raises
   ``ValueError`` at its first origin, after that origin's fit, with the model's name and the
   origin in the message (``compare`` runs its backtests one after another, so list such a model
