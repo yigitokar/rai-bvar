@@ -58,9 +58,11 @@ proposal is ``TN(ρ̂, K_ρ⁻¹; −1, 1)`` (``Sub.CSV_RHO``; inverse CDF in lo
 **Accumulators** (E132): ``acc_csv_h`` the accepted fraction of the non-empty blocks of a sweep,
 ``acc_csv_rho`` the ρ acceptance, ``acc_csv_newton`` the number of blocks whose Newton hit the
 cap or stalled (the draw is exact either way), all summed over sampling sweeps; ``rb_ch_sum``,
-``rb_ch_sq`` the sums of ``h`` and ``h²``. **Init** (§5.5, E133): ``h = 0``, ``ρ`` the prior centre
+``rb_ch_sq`` the sums of ``h`` and ``h²``. **Init** (§5.5, E133, E175): ``ρ`` the prior centre
 clipped to ``(−0.99, 0.99)``, ``σ_h²`` the prior mean (the IG mode when ``c₀ ≤ 1``) with ``log σ_h``
-jittered by ``N(0, 0.25²)`` per chain. **Forecast** (:meth:`CommonSVStep.future`): ``h_{T+j} =
+jittered by ``N(0, 0.25²)`` per chain, and ``h`` on the real dates one draw of its stationary AR(1)
+prior given that ``(ρ, σ_h)`` (0 on the padded rows). Not ``h = 0``: if the first ``h`` step rejects
+every block, ``S = 0`` and the ``ScaledChi2`` conditional ``GIG(½ − T/2, 1/B, 0)`` is improper. **Forecast** (:meth:`CommonSVStep.future`): ``h_{T+j} =
 ρh_{T+j−1} + σ_hη_j`` from ``h_T = h[T − 1]``.
 
 Overridable internals (P3 §2.4, §9.6; test seam only): ``csv_newton_start`` (M28),
@@ -129,6 +131,7 @@ __all__ = [
     "rho_proposal",
     "rho_sufficient",
     "sigma2_conditional",
+    "stationary_ar1_path",
     "tridiag_quadratic",
 ]
 
@@ -137,6 +140,21 @@ INIT_RHO_BOUND = 0.99  # ρ starts at the prior centre clipped to (−0.99, 0.99
 INIT_LOG_SIGMA_SD = 0.25  # per-chain N(0, 0.25²) jitter of log σ_h at the cold start
 _LOG_2 = math.log(2.0)
 _LOG_2PI = math.log(2.0 * math.pi)
+
+
+def stationary_ar1_path(key: Key, rho: Array, log_sigma: Array, T: int) -> Array:
+    """One path ``h_0 ~ N(0, σ_h²/(1 − ρ²))``, ``h_t = ρh_{t−1} + σ_hη_t`` of length ``T`` (the
+    cold start's ``h``, E175)."""
+    eta = jnp.exp(log_sigma) * jr.normal(key, (T,), dtype=_F64)
+    eta = eta.at[0].divide(jnp.sqrt(1.0 - rho * rho))
+
+    def step(prev: Array, e: Array) -> tuple[Array, Array]:
+        h = rho * prev + e
+        return h, h
+
+    _, h = lax.scan(step, jnp.zeros((), _F64), eta)
+    return h
+
 
 RhoKind = Literal["truncated_normal", "beta"]
 S2Kind = Literal["inv_gamma", "scaled_chi2"]
@@ -534,8 +552,10 @@ class CommonSVStep(KernelBase):
         log_sigma = 0.5 * jnp.log(s2) + INIT_LOG_SIGMA_SD * jitter
         T = int(self.T_pad)
         zf, zh = jnp.zeros((), _F64), jnp.zeros((T,), _F64)
+        h = stationary_ar1_path(sub_key(key, Sub.CSV_H), rho, log_sigma, T)
+        h = jnp.where(jnp.asarray(data.tmask, _F64) > 0.0, h, 0.0)
         gv = CommonSVGlobal(
-            h=zh, rho=rho, log_sigma=log_sigma, acc_csv_h=zf, acc_csv_rho=zf, acc_csv_newton=zf,
+            h=h, rho=rho, log_sigma=log_sigma, acc_csv_h=zf, acc_csv_rho=zf, acc_csv_newton=zf,
             rb_ch_sum=zh, rb_ch_sq=zh,
         )  # fmt: skip
         return dataclasses.replace(st, glob=dataclasses.replace(st.glob, vol=gv))

@@ -801,8 +801,9 @@ def test_shared_factor_rows_seam_moves_the_draw():
 
 
 def test_cold_start_of_the_common_volatility():
-    """P3 §5.5, E133: ``h = 0``, ``ρ`` the prior centre clipped to ``(−0.99, 0.99)``, ``log σ_h``
-    the prior mean's log jittered per chain, accumulators zero; the state passes the invariants."""
+    """P3 §5.5, E133, E175: ``ρ`` the prior centre clipped to ``(−0.99, 0.99)``, ``log σ_h`` the
+    prior mean's log jittered per chain, ``h`` a stationary AR(1) draw on the real dates (0 on the
+    padded rows), accumulators zero; the state passes the invariants."""
     from rai_bvar.engines.mcmc.runner import make_runner
 
     for name, kw in (("structural_commonsv", {}), ("conjugate_commonsv_parity", {})):
@@ -812,7 +813,9 @@ def test_cold_start_of_the_common_volatility():
         cache = fns.prepare(data, spec.prior)
         st0 = fns.init(K.init_keys(1, 2, 3), data, spec.prior, cache)
         gv, csv = st0.glob.vol, spec.prior.shared.csv
-        assert np.all(np.asarray(gv.h) == 0.0)
+        h, T_eff = np.asarray(gv.h), int(data.T_eff)
+        assert np.all(np.isfinite(h)) and np.all(h[:, T_eff:] == 0.0)
+        assert np.all(np.abs(h[:, :T_eff]) > 0.0) and len({row.tobytes() for row in h}) == 3
         if spec.static.vol.csv_rho_prior == "truncated_normal":
             centre = float(csv.rho_mean)
             s2 = float(csv.s2_scale) / (float(csv.s2_shape) - 1.0)
@@ -825,6 +828,67 @@ def test_cold_start_of_the_common_volatility():
         for leaf in ("acc_csv_h", "acc_csv_rho", "acc_csv_newton", "rb_ch_sum", "rb_ch_sq"):
             assert not np.any(np.asarray(getattr(gv, leaf)))
         assert check_state_invariants(jax.device_get(st0), spec.static, int(data.T_eff)) == []
+
+
+def test_stationary_ar1_path_has_the_stationary_law():
+    """E175: the cold start's ``h`` path is the stationary AR(1): ``Var h_t = σ²/(1 − ρ²)`` at
+    every ``t`` and ``Cov(h_t, h_{t+1}) = ρ Var h_t`` (20,000 paths, ``|z| ≤ 4``)."""
+    from rai_bvar.components.vol.common import stationary_ar1_path
+
+    rho, sigma, T, N = 0.9, 0.3, 4, 20_000
+    keys = jax.random.split(jax.random.key(20261027), N)
+    draw = jax.vmap(lambda k: stationary_ar1_path(k, jnp.asarray(rho), jnp.log(sigma), T))
+    h = np.asarray(draw(keys))
+    v = sigma**2 / (1.0 - rho**2)
+    for t in range(T):
+        x = h[:, t] ** 2 - v
+        assert abs(x.mean()) / (x.std(ddof=1) / math.sqrt(N)) <= 4.0, t
+    for t in range(T - 1):
+        x = h[:, t] * h[:, t + 1] - rho * v
+        assert abs(x.mean()) / (x.std(ddof=1) / math.sqrt(N)) <= 4.0, t
+
+
+def test_scaled_chi2_cold_start_with_a_short_sample():
+    """E175 (the PR #25 review): with ``ScaledChi2`` and ``T_eff`` below the block length, a cold
+    start at ``h = 0`` failed whenever the first ``h`` step rejected every block (``S = 0``, an
+    improper GIG conditional; about one fit in three at ``T = 60``, 4 chains). Ten seeds fit."""
+    rng = np.random.default_rng(5)
+    T, n = 60, 3
+    y = np.zeros((T, n))
+    for t in range(1, T):
+        y[t] = 0.5 * y[t - 1] + rng.standard_normal(n)
+    frame = pd.DataFrame(y, index=pd.period_range("1990Q1", periods=T, freq="Q"),
+                         columns=["a", "b", "c"])  # fmt: skip
+    data = rb.VARData.from_frame(frame, tcodes=1)
+    vol = rb.CommonSV(sigma2_prior=rb.sv_priors.ScaledChi2(0.1))
+    assert vol.block > T
+    for seed in range(10):
+        settings = rb.MCMCSettings(chains=4, draws=20, burn=20, seed=seed)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            fit = rb.BVAR(vol=vol, lags=1, mcmc=settings).fit(data)
+        assert np.all(np.isfinite(fit.posterior["posterior"].ds["sigma"].values)), seed
+
+
+def test_prior_covariance_draws_and_ordering_sensitivity_under_commonsv():
+    """The PR #25 review: ``structural.ordering``'s prior sampler reads the effective log
+    variance with the common ``h`` (``state_log_var``), so the prior mode runs on a CommonSV
+    model."""
+    from rai_bvar.structural.ordering import ordering_sensitivity, prior_covariance_draws
+
+    rng = np.random.default_rng(6)
+    T, n = 80, 3
+    y = np.zeros((T, n))
+    for t in range(1, T):
+        y[t] = 0.4 * y[t - 1] + rng.standard_normal(n)
+    frame = pd.DataFrame(y, index=pd.period_range("1990Q1", periods=T, freq="Q"),
+                         columns=["a", "b", "c"])  # fmt: skip
+    data = rb.VARData.from_frame(frame, tcodes=1)
+    model = rb.BVAR(vol=rb.CommonSV(), lags=1, mcmc=rb.MCMCSettings(chains=2, draws=20, burn=20))
+    pd_ = prior_covariance_draws(model, data, draws=50)
+    assert np.all(np.isfinite(pd_.sigma))
+    res = ordering_sensitivity(model, data, n_perm=2, mode="prior", draws=50)
+    assert res is not None
 
 
 def test_kernel_module_imports_inside_a_trace():
@@ -1029,6 +1093,41 @@ def test_warm_start_remaps_the_common_h_by_period(fits):
                                   np.asarray(fit.final_state.state.glob.vol.rho))  # fmt: skip
     assert not np.any(np.asarray(new.glob.vol.acc_csv_h))
     assert check_state_invariants(new, r.static, T_new) == []
+
+
+def test_warm_start_simulates_the_new_rows_of_the_common_h(fits):
+    """The remap's new rows (P3 §5.5, E171(e); the PR #25 review): onto a window extended forward
+    each new trailing row is ``ρh_{t−1} + σ_hη_t``; onto a window that starts earlier the new first
+    row is the stationary ``σ_h/√(1 − ρ²)·η_last`` and the next new rows follow the recursion;
+    copied rows equal the old ones (``η`` from ``eq_key(eq_key(key, c), n)``, as documented)."""
+    from rai_bvar.engines.mcmc import warmstart as W
+    from rai_bvar.engines.mcmc.resolve import resolve, warm_key
+    from rai_bvar.settings import Runtime
+
+    fit = fits["mode1"]
+    old = fit.final_state.state.glob.vol
+    old_h, rho = np.asarray(old.h), np.asarray(old.rho)
+    sigma = np.exp(np.asarray(old.log_sigma))
+    n = int(np.asarray(fit.final_state.state.eq.vol.core.log_lam).shape[1])
+    old_periods = list(fit.periods)
+    for data_new, kind in ((_data(T=94), "forward"), (_data(T=94, start="1989Q1"), "earlier")):
+        r = resolve(fit.model, data_new, Runtime())
+        key = warm_key(0, r.salt)
+        new_h = np.asarray(W.remap(fit.final_state, r.data, r.periods, r.static, key).glob.vol.h)
+        new_periods = list(r.periods)
+        T_new = len(new_periods)
+        assert any(p not in old_periods for p in new_periods), kind
+        for c in range(new_h.shape[0]):
+            eta = np.asarray(random.normal(K.eq_key(K.eq_key(key, c), n), (T_new + 1,)))
+            for t, per in enumerate(new_periods):
+                if per in old_periods:
+                    assert new_h[c, t] == old_h[c, old_periods.index(per)], (kind, c, t)
+                elif t == 0:
+                    first = sigma[c] / np.sqrt((1.0 - rho[c]) * (1.0 + rho[c])) * eta[-1]
+                    np.testing.assert_allclose(new_h[c, 0], first, rtol=1e-12)
+                else:
+                    step = rho[c] * new_h[c, t - 1] + sigma[c] * eta[t]
+                    np.testing.assert_allclose(new_h[c, t], step, rtol=1e-12, atol=1e-15)
 
 
 def test_monitored_log_prior_equals_the_reference():
