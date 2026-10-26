@@ -35,6 +35,15 @@ KERNELS: dict[str, str] = {
     "outlier_t": "rai_bvar.components.vol.transitory:OutlierTScale",
     # the volatility block = transitory ∘ persistent (the only VolBlock in Phase 2)
     "vol_block": "rai_bvar.components.vol.robust:VolBlockImpl",
+    # Phase 3 (P3 DESIGN §2.4): global-local and SSVS coefficient priors and their scale step
+    "horseshoe": "rai_bvar.components.coef.global_local:Horseshoe",
+    "normal_gamma": "rai_bvar.components.coef.global_local:NormalGamma",
+    "r2d2": "rai_bvar.components.coef.global_local:R2D2",
+    "dirichlet_laplace": "rai_bvar.components.coef.global_local:DirichletLaplace",
+    "ssvs": "rai_bvar.components.coef.global_local:SSVS",
+    "gl_scales": "rai_bvar.components.coef.global_local:GLScaleStep",
+    # Phase 3: the common stochastic volatility step (returned by the vol block's global_steps)
+    "common_sv": "rai_bvar.components.vol.common:CommonSVStep",
 }
 
 OWNERS: dict[str, str] = {
@@ -51,6 +60,13 @@ OWNERS: dict[str, str] = {
     "t": "WP13",
     "outlier_t": "WP13",
     "vol_block": "WP13",
+    "horseshoe": "WP31",
+    "normal_gamma": "WP31",
+    "r2d2": "WP31",
+    "dirichlet_laplace": "WP31",
+    "ssvs": "WP31",
+    "gl_scales": "WP31",
+    "common_sv": "WP32",
 }
 
 
@@ -98,4 +114,6 @@ def slot_kinds(static: StaticConfig) -> dict[str, str | tuple[str, ...]]:
         "transitory": static.vol.transitory,
         "vol": "vol_block",
         "global_pre": ("cccm",) if reduced else (),
+        # Phase 3: the global steps a volatility block brings (collected from VolBlock.global_steps)
+        "global_vol": ("common_sv",) if static.vol.common else (),
     }

@@ -1,6 +1,6 @@
 # `rai-bvar`: Technical Architecture & Engineering Specification
 
-**Version:** 2.4 (revision of v1) · **Status:** Draft; decisions D1–D5 settled (§14); Phases 0–2 delivered (§13) · **Date:** 2026-10-25
+**Version:** 2.3 (revision of v1) · **Status:** Draft; decisions D1–D5 settled (§14); Phases 0–2 delivered (§13) · **Date:** 2026-10-24
 
 ---
 
@@ -24,7 +24,9 @@
 
 **v2.2 → v2.3 (2026-10-24).** §10.6 states the composition-dependent default MCMC budget (4 × 10,000 kept draws for compositions with stochastic volatility, 4 × 2,000 otherwise) and the warning for SV fits below it, the owner's resolution of DESIGN Q14 (D-35); §13 records it. The convergence gate is unchanged.
 
-**v2.3 → v2.4 (2026-10-25).** §10.1 and §10.5 record the DGP tests of the verdict engine: the harness (`rai_bvar.validation.dgp`, `benchmarks/dgp_study.py`), the pre-registration of the study (`benchmarks/reports/dgp_study_preregistration.md`) and its pilot (`benchmarks/reports/dgp_study_pilot.md`); §13 notes the Phase 3 and Phase 4 exit criteria it serves. The verdict rule, the priors, the sampler settings and the convergence gate are unchanged.
+**v2.3, amended 2026-10-25 (DESIGN P3 Amendment 2).** §10.4's `bvars` bullet, §13's Phase 3 exit line and D2 name the exact independent `CommonSV` oracle, with `bvars` as evidence (DESIGN P3 Q35, Q40, E168); WP41's v2.4 note carries them.
+
+**v2.3, amended 2026-10-25 (DGP tests of the verdict engine).** §10.1 and §10.5 record the DGP tests of the verdict engine: the harness (`rai_bvar.validation.dgp`, `benchmarks/dgp_study.py`), the pre-registration of the study (`benchmarks/reports/dgp_study_preregistration.md`) and its pilot (`benchmarks/reports/dgp_study_pilot.md`); §13 notes the Phase 3 and Phase 4 exit criteria it serves. The verdict rule, the priors, the sampler settings and the convergence gate are unchanged.
 
 ---
 
@@ -524,6 +526,7 @@ Output per comparison: `better` / `worse` / `inconclusive`, with the reasons. Fo
   - `BVAR`: log-ML at fixed hyperparameters (deterministic; equal up to a documented constant, relative tolerance 1e-8); posterior quantiles of `B`, `Σ` and hyperparameters within 4 MCSE.
   - `stochvol`: posteriors of `μ`, `φ`, `σ` and log-volatility path quantiles within 4 MCSE.
   - `bayesianVARs`: `Linear(form="reduced")` × SV, since it implements the corrected CCCM triangular algorithm, and global-local priors × SV, both at the Phase 3 exit. bayesianVARs 0.1.8 could not be installed for Phase 2 (no binary for the installed R and no Fortran compiler for a source build), so the reduced-form sampler was checked instead against an exact system-wide Gibbs oracle written in R (`vec Π` drawn jointly from its full conditional; `tests/parity/fixtures/bvars_swa_*.nc`; DESIGN §2.10 Stage 4 amendment 2), which shares no code with the JAX engine. Its SV step is one sweep of `stochvol`'s sampler, as in bayesianVARs. The convention probes P1–P5 (DESIGN §9.9) stay open until bayesianVARs runs.
+  - `bvars`: `CommonSV`. Its CommonSV prior has no exact mapping onto ours (DESIGN P3 §9.8: probes P13–P14), so only its forecast distributions are compared, as evidence (P3 Q35). The `CommonSV` criterion uses an exact independent oracle written in NumPy (DESIGN P3 §9.8, WP38a; P3 Q40), which shares no code with the JAX engine: a joint matrix-normal–inverse-Wishart block, elliptical slice sampling of the common log-volatility path and slice sampling of `ρ`.
   - `factorstochvol`: `FactorSV` (Phase 5).
   - `bvarsv`: TVP-VAR-SV, small `n` (Phase 5).
 - **Python-side oracle:** the Bank of England `bvar` (MIT, pip-installable) covers the conjugate GLP path. It runs directly in CI as a second check on Phase 1, without R.
@@ -725,7 +728,7 @@ CI: the fast suite is green on the merged Phase 2 commits (`3802295`, `08e1eda`,
 - `CommonSV` (Carriero, Clark & Marcellino 2016): a conjugate-speed SV screen for large `n` (decision D2).
 - Conditional forecasts. (The Model Confidence Set landed in Phase 0.)
 
-**Exit:** `bayesianVARs` parity for the global-local priors × SV and for the reduced-form sampler (moved from the Phase 2 exit on 2026-10-23), after its convention probes P1–P5 are settled (DESIGN §9.9); `bvars` parity for `CommonSV`; DGP verdict-engine tests on linear DGPs (harness, pre-registration and pilot delivered; the full study is pending: §10.5).
+**Exit:** `bayesianVARs` parity for the global-local priors × SV and for the reduced-form sampler (moved from the Phase 2 exit on 2026-10-23), after its convention probes P1–P5 are settled (DESIGN §9.9); `CommonSV` parity with an exact independent oracle (amended 2026-10-25: first written "`bvars` parity for `CommonSV`"; bvars's CommonSV prior has no exact mapping onto ours, so its forecast distributions are compared as evidence; DESIGN P3 §9.8, Q35, Q40); DGP verdict-engine tests on linear DGPs (harness, pre-registration and pilot delivered; the full study is pending: §10.5).
 
 ### Phase 4: Nonlinear mean
 
@@ -773,7 +776,7 @@ The Phase 2 implementation decisions (D-1…D-35) and open questions (Q1…Q14; 
 | ID | Question | Decision | Rationale |
 | :--- | :--- | :--- | :--- |
 | D1 | Licence | **Apache-2.0** | Patent grant, enterprise-friendly, compatible with all core dependencies (JAX, ArviZ, `scoringrules`: Apache-2.0; `bartz`: MIT). Cost: GPL R code cannot be translated, so the clean-room rule applies (§2.1) |
-| D2 | Where does `CommonSV` go? | **Phase 3** | Phase 2 is already heavy and its baseline is `Linear × SV`. `CommonSV` earns its place as a fast SV screen for large `n`, with `bvars` as oracle |
+| D2 | Where does `CommonSV` go? | **Phase 3** | Phase 2 is already heavy and its baseline is `Linear × SV`. `CommonSV` earns its place as a fast SV screen for large `n`, checked against an exact independent oracle, with `bvars` as evidence (amended 2026-10-25, DESIGN P3 Q35, Q40) |
 | D3 | Default Minnesota form for MCMC models | **Structural**, with the prior mean of `γ_i` centred on `a_i` so the reduced-form prior mean is preserved (§4.1) | Equations stay independent and parallel; `Linear` and `BART` share one structural treatment of `a_i`, keeping the mean-axis ablation clean; Chan (2022) gives an analytic twin. `form="reduced"` (CCCM 2022) remains available |
 | D4 | Reference datasets | **FRED-QD + FRED-MD**, small / medium / large sets, downloaded on demand with pinned vintages (§5.8) | Literature standard (GLP, CCM, Clark-Ravazzolo); not bundled because of third-party copyrights; fixtures use federal-agency series only |
 | D5 | Relationship with the Bank of England `bvar` | **Build our own analytic engine; use BoE `bvar` as a Python-side parity oracle in CI** | The conjugate model is the baseline of every ablation, so its contract (conditional moments), MH over hyperparameters, Lenza-Primiceri scaling and look-ahead-free refits must stay under our control. The engine is small (about 1–2 weeks) |

@@ -50,6 +50,7 @@ from rai_bvar.engines.mcmc.state import (
     EqState,
     FitCache,
     GaussianDiag,
+    GaussianLogDiag,
     GaussianPrec,
     GlobalState,
     GlobDraw,
@@ -110,6 +111,19 @@ INTERNALS: frozenset[str] = frozenset(
         "p_conditional",
         "nu_logits",
         "tau_conditional",
+        # Phase 3 (P3 DESIGN §2.4, §9.6): the mutation seam of the new kernels
+        "gl_local_conditional",
+        "gl_group_conditional",
+        "gl_a_conditional",
+        "ssvs_logodds",
+        "gl_deviation",
+        "csv_newton_start",
+        "csv_q",
+        "csv_rho_accept",
+        "csv_lambda_conditional",
+        "shared_factor_rows",
+        "gig_sampler",
+        "cccm_core_log",
     }
 )
 """Named kernel internals replaceable through :meth:`KernelBase.impl` (DESIGN §4.9)."""
@@ -359,6 +373,38 @@ class SupportsCollapsedQuadratic(Protocol):
 
 
 @runtime_checkable
+class SupportsGlobalSteps(Protocol):
+    """Optional capability of a ``VolBlock`` with global state (P3 §2.4; CommonSV): the global
+    steps it brings (``compose`` collects them beside the mean's and the coefficient prior's) and
+    the draw of its global parameters (``GlobDraw.vol``). Kernels without it have neither."""
+
+    def global_steps(self) -> tuple[GlobalStep, ...]: ...
+
+    def extract_global(self, glob: GlobalState) -> Any: ...
+
+
+@runtime_checkable
+class SupportsGlobalVol(Protocol):
+    """Optional capability of a ``PersistentCore`` (P3 §2.4): when ``uses_global_vol`` is true,
+    ``VolBlockImpl`` passes the global volatility state ``gvol`` to ``sample`` and ``log_var`` and
+    the future ``gfut[Block.G_COMMON_SV]`` to ``ahead``. A property, because one core class serves
+    ``Constant`` and ``CommonSV`` (``VolStatic.common``)."""
+
+    @property
+    def uses_global_vol(self) -> bool: ...
+
+
+@runtime_checkable
+class SupportsInitGlobal(Protocol):
+    """Optional capability of a ``CoefPrior`` (P3 §2.4, §3.7): initialise its global state before
+    every ``global_pre`` init and the mean's cold draw (the default is the identity)."""
+
+    def init_global(
+        self, key: Key, st: ChainState, data: EngineData, prior: PriorArrays
+    ) -> ChainState: ...
+
+
+@runtime_checkable
 class CoefPrior(Protocol):
     """Prior of the coefficients a mean exposes (DESIGN §3.4). Phase 3 global-local priors are
     siblings: local scales in ``eq.coef``, global scales in ``glob.coef`` via a post GlobalStep."""
@@ -370,8 +416,9 @@ class CoefPrior(Protocol):
 
     def moments_eq(
         self, cs_i: CoefEq, i: Array, prior_i: EqPrior, glob_coef: PyTree
-    ) -> GaussianDiag:
-        """λ-free ``(mean0, prec0)`` of the coefficients."""
+    ) -> GaussianDiag | GaussianLogDiag:
+        """λ-free ``(mean0, prec0)`` of the coefficients; a varying prior returns
+        ``GaussianLogDiag`` (log precisions; P3 §3.3), which selects the mean's deviation path."""
         ...
 
     def sample_local_eq(
