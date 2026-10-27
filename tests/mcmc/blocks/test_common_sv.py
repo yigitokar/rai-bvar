@@ -848,20 +848,17 @@ def test_stationary_ar1_path_has_the_stationary_law():
         assert abs(x.mean()) / (x.std(ddof=1) / math.sqrt(N)) <= 4.0, t
 
 
-def test_scaled_chi2_cold_start_with_a_short_sample():
-    """E175 (the PR #25 review): with ``ScaledChi2`` and ``T_eff`` below the block length, a cold
-    start at ``h = 0`` failed whenever the first ``h`` step rejected every block (``S = 0``, an
-    improper GIG conditional; about one fit in three at ``T = 60``, 4 chains). Ten seeds fit."""
-    rng = np.random.default_rng(5)
-    T, n = 60, 3
-    y = np.zeros((T, n))
-    for t in range(1, T):
-        y[t] = 0.5 * y[t - 1] + rng.standard_normal(n)
-    frame = pd.DataFrame(y, index=pd.period_range("1990Q1", periods=T, freq="Q"),
-                         columns=["a", "b", "c"])  # fmt: skip
-    data = rb.VARData.from_frame(frame, tcodes=1)
+@pytest.mark.parametrize("T", [60, 150])
+def test_scaled_chi2_cold_start_below_and_above_the_block_length(T):
+    """E175 (the PR #25 review and its re-check): with ``ScaledChi2``, a cold start at ``h = 0``
+    failed whenever the first ``h`` step rejected every non-empty block (``S = 0``, an improper
+    GIG conditional), with ``T_eff`` below the block length (one block, ``T = 60``) and above it
+    (two blocks, ``T = 150``). Ten seeds fit at each ``T`` (4 chains, ``_data``'s DGP; on the
+    pre-fix source 4 and 3 of these 10 seeds fail)."""
+    data = _data(T=T)
     vol = rb.CommonSV(sigma2_prior=rb.sv_priors.ScaledChi2(0.1))
-    assert vol.block > T
+    T_eff = len(data.values) - 1  # lags = 1
+    assert (T_eff < vol.block) if T == 60 else (T_eff > vol.block)
     for seed in range(10):
         settings = rb.MCMCSettings(chains=4, draws=20, burn=20, seed=seed)
         with warnings.catch_warnings():
@@ -871,10 +868,19 @@ def test_scaled_chi2_cold_start_with_a_short_sample():
 
 
 def test_prior_covariance_draws_and_ordering_sensitivity_under_commonsv():
-    """The PR #25 review: ``structural.ordering``'s prior sampler reads the effective log
-    variance with the common ``h`` (``state_log_var``), so the prior mode runs on a CommonSV
-    model."""
+    """The PR #25 review (E176) and its re-check: ``structural.ordering``'s prior sampler reads
+    the effective log variance with the common ``h`` (``state_log_var``), so the prior mode runs
+    on a CommonSV model, and the prior covariance carries the common volatility: equation 0 has
+    a unit-lower ``A``, so ``Σ_T[0, 0] = exp(log λ_0 + h_{T−1})`` exactly (rtol 1e-12) on each
+    draw's own prior state (the same keys as ``prior_draws_from_arrays``)."""
+    from rai_bvar.engines.mcmc import _jax
+    from rai_bvar.engines.mcmc.config import Shapes, bucket
+    from rai_bvar.engines.mcmc.keys import PRNG_IMPL
+    from rai_bvar.engines.mcmc.resolve import resolve
+    from rai_bvar.settings import Runtime
+    from rai_bvar.structural import ordering as O
     from rai_bvar.structural.ordering import ordering_sensitivity, prior_covariance_draws
+    from rai_bvar.validation.simulate import prior_sample
 
     rng = np.random.default_rng(6)
     T, n = 80, 3
@@ -889,6 +895,27 @@ def test_prior_covariance_draws_and_ordering_sensitivity_under_commonsv():
     assert np.all(np.isfinite(pd_.sigma))
     res = ordering_sensitivity(model, data, n_perm=2, mode="prior", draws=50)
     assert res is not None
+
+    S = 16
+    with _jax.x64():
+        r = resolve(model, data, Runtime())
+        T_eff = int(np.asarray(r.data.T_eff))
+        sigma, _ = O.prior_draws_from_arrays(r.static, r.prior, T_eff, draws=S, seed=0)
+        static, s = r.static, r.static.shapes
+        if T_eff >= s.T_pad:  # prior_draws_from_arrays' re-bucketing (room for row T + 1)
+            shapes = Shapes.of(s.n, s.lags, s.n_det, bucket(T_eff + 1, O._T_BUCKET))
+            static = dataclasses.replace(static, shapes=shapes)
+        prior = jax.tree.map(np.asarray, r.prior)
+        root = random.fold_in(random.key(O._seed_int(0), impl=PRNG_IMPL), O._tag("prior-mode"))
+        h_T, expect = [], []
+        for i in range(S):
+            key_i = random.fold_in(root, np.uint32(i))
+            st = prior_sample(random.fold_in(key_i, 0), prior, static, T_eff + 1)
+            h = np.asarray(st.glob.vol.h)
+            h_T.append(h[T_eff - 1])
+            expect.append(np.exp(np.asarray(st.eq.vol.core.log_lam)[0] + h[T_eff - 1]))
+    assert np.all(np.abs(h_T) > 0.0) and np.std(h_T) > 0.1  # the check sees e^{h_T} move
+    np.testing.assert_allclose(sigma[:, 0, 0], expect, rtol=1e-12)
 
 
 def test_kernel_module_imports_inside_a_trace():
