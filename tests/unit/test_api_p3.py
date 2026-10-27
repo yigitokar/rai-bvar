@@ -172,8 +172,14 @@ def test_row_14_asymmetric_conjugate_with_anything_else_raises_e3(vol):
     assert str(err.value) == E3
 
 
-def test_fitting_an_asymmetric_conjugate_model_needs_structural_nig_fit():
-    # StructuralNIGFit arrives with WP33; until then the analytic dispatch says so (no data read)
+def test_fitting_an_asymmetric_conjugate_model_needs_structural_nig_fit(monkeypatch):
+    # the analytic dispatch reaches StructuralNIGFit by name (E134): with WP33 it exists and
+    # validates its data; a build without it says so (no data read)
+    from rai_bvar.engines import structural_nig
+
+    with pytest.raises(TypeError, match="data must be a VARData"):
+        rb.BVAR(mean=AC).fit(None)
+    monkeypatch.delattr(structural_nig, "StructuralNIGFit")
     with pytest.raises(NotImplementedError, match="StructuralNIGFit"):
         rb.BVAR(mean=AC).fit(None)
 

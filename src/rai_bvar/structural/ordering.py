@@ -6,7 +6,9 @@ ordering: through the prior (constant volatility, N08 §B1 (i)) or through the m
 Constant("iw_equivalent")`` is order-invariant (Chan 2022, Prop. 1; N08 §B2), besides the analytic
 NIW engine. :func:`ordering_sensitivity` measures how much a model's results move when the
 variables are reordered, against a Monte Carlo noise floor, and :func:`permute_model` makes the
-per-variable settings follow their variables.
+per-variable settings follow their variables. ``AsymmetricConjugate`` models (P3 §4, the analytic
+structural NIG fit) are supported in every mode: the prior mode draws the NIG closed form's prior,
+and the posterior summary reads its exact posterior means.
 
 **Permutation design** (:func:`permutation_design`; N08 §B4). ``F`` are the free (unpinned)
 variables, ``m = |F|``. With ``m! ≤ n_perm`` or ``design="all"`` every ordering of ``F`` is used
@@ -32,9 +34,11 @@ maximum is the conservative choice: noise is never understated (ARRS's 30-chain 
 Backtest scores carry no MCSE, so ``mode="backtest"`` needs ``noise_reps ≥ 1`` (otherwise no
 signal-to-noise ratio exists and "not material" would mean "undetermined").
 ``lpd_method`` (forecast and backtest modes) selects the estimator of every LPD statistic (DESIGN
-§7.3, D-34): the default is the SPEC §7 estimator, ``"integrated"`` the path-integrated one (MCMC
-models at ``h > 1``). The pooled forecast carries no ``lag_coefs``, so the integrated estimator
-raises for it at ``h > 1``.
+§7.3, D-34): the default is the SPEC §7 estimator, ``"integrated"`` the path-integrated one; with
+it and some horizon ``> 1`` every forecast is requested with ``lag_coefs=True`` (P3 DESIGN D-49:
+analytic and structural NIG fits then attach it, MCMC fits always do; benchmarks cannot and
+raise). The pooled forecast carries no ``lag_coefs``, so the integrated estimator raises for it
+at ``h > 1``.
 
 **Metrics** (per variable × horizon, joint where defined; over orderings; heuristic thresholds
 of N08 §B4 in :data:`THRESHOLDS`):
@@ -96,7 +100,8 @@ from rai_bvar._version import __version__
 from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import regressor_names
 from rai_bvar.forecast.result import LPD_METHODS, ForecastResult
-from rai_bvar.models.base import Model, spec_hash
+from rai_bvar.models.base import Model, forecast_options, spec_hash
+from rai_bvar.priors.asymmetric import AsymmetricConjugate
 
 __all__ = [
     "MAX_ALL_ORDERINGS",
@@ -167,10 +172,14 @@ def permute_model(
     ``order`` lists the variables in their new order, by name (then ``variables``, the current
     ordering, is needed whenever the model has positional settings) or by current position
     (``order[i]`` is the current index of the variable that moves to position ``i``). Positional
-    settings are the ``Minnesota.psi`` tuple; settings keyed by name (``Minnesota(mean={...})``)
-    and data-dependent ones (``psi="ar"``, own-lag means from tcodes, EB values) follow their
-    variables by construction (R9), and scalar settings are order-free. Models without
-    positional settings (including non-``BVAR`` models) are returned unchanged.
+    settings are the ``psi`` tuple of the prior (``Minnesota``, ``AsymmetricConjugate`` or a
+    global-local prior) and a global-local prior's custom ``groups`` array (P3 §3.8), whose entry
+    ``(i, (l−1)n + j)`` (equation ``i``, lag ``l`` of variable ``j``) moves with both variables:
+    ``new[i][(l−1)n + j] = old[π(i)][(l−1)n + π(j)]``. Settings keyed by name (``mean={...}``)
+    and data-dependent ones (``psi="ar"``, own-lag means from tcodes, EB values, the named
+    ``groups`` such as ``"olcl-lagwise"``) follow their variables by construction (R9), and
+    scalar settings are order-free. Models without positional settings (including non-``BVAR``
+    models) are returned unchanged.
     """
     from rai_bvar.api import BVAR
 
@@ -194,18 +203,35 @@ def permute_model(
     if not isinstance(model, BVAR):
         return model
     prior = model.mean.prior
-    if isinstance(prior.psi, str):  # "ar": recomputed per variable from the permuted window
+    changes: dict[str, Any] = {}
+    if not isinstance(prior.psi, str):  # "ar": recomputed per variable from the permuted window
+        if perm is None:
+            raise ValueError(
+                "permute_model needs variables= (the current ordering) to move the positional "
+                "Minnesota psi tuple when the new order is given by name"
+            )
+        if len(prior.psi) != n:
+            raise ValueError(f"Minnesota psi has {len(prior.psi)} values for {n} variables")
+        changes["psi"] = tuple(prior.psi[i] for i in perm)
+    groups = getattr(prior, "groups", None)
+    if isinstance(groups, tuple):  # a custom global-local groups array (P3 §3.8)
+        if perm is None:
+            raise ValueError(
+                "permute_model needs variables= (the current ordering) to move the custom "
+                "groups array when the new order is given by name"
+            )
+        width = len(groups[0]) if groups else 0
+        if len(groups) != n or width % n or not width:
+            raise ValueError(
+                f"groups array has shape ({len(groups)}, {width}); expected (n, n·lags) with "
+                f"n = {n}"
+            )
+        cols = [lag * n + j for lag in range(width // n) for j in perm]
+        changes["groups"] = tuple(tuple(groups[i][c] for c in cols) for i in perm)
+    if not changes:
         return model
-    if perm is None:
-        raise ValueError(
-            "permute_model needs variables= (the current ordering) to move the positional "
-            "Minnesota psi tuple when the new order is given by name"
-        )
-    if len(prior.psi) != n:
-        raise ValueError(f"Minnesota psi has {len(prior.psi)} values for {n} variables")
-    psi = tuple(prior.psi[i] for i in perm)
     return dataclasses.replace(
-        model, mean=dataclasses.replace(model.mean, prior=dataclasses.replace(prior, psi=psi))
+        model, mean=dataclasses.replace(model.mean, prior=dataclasses.replace(prior, **changes))
     )
 
 
@@ -365,7 +391,10 @@ def prior_covariance_draws(
     level centres; R9) and the independent reference prior sampler (``validation.simulate.
     prior_sample``, DESIGN §9.1) of ``(a, λ / h, o, τ)``; ``Λ_t`` is the effective variance
     ``e^{h_t}o_t²τ_t`` at the last sample row ``T`` and at ``T + 1`` (one step of the volatility
-    process). Analytic compositions: ``Σ ~ IW(diag ψ, n + 2)`` (Phase 1; time-invariant).
+    process). Analytic compositions: ``Σ ~ IW(diag ψ, n + 2)`` (Phase 1; time-invariant);
+    ``AsymmetricConjugate`` (P3 §4.2): the NIG closed form's prior ``λ_i ~ IG(1 + ι/2, ψ_i/2)``,
+    ``a_ij | λ_i ~ N(0, λ_i κ_a/ψ_j)`` and ``Σ = A⁻¹ΛA⁻ᵀ`` (the IW prior at ``κ_a = 1``), with ψ
+    and ``κ_a`` the window's (their EB values when free).
     """
     from rai_bvar.api import BVAR
 
@@ -375,6 +404,8 @@ def prior_covariance_draws(
     seed = _seed_int(seed)
     variables = tuple(data.variables)
     n = len(variables)
+    if model.engine == "analytic" and isinstance(model.mean.prior, AsymmetricConjugate):
+        return _nig_prior_draws(model, data, draws, seed)
     if model.engine == "analytic":
         from rai_bvar.engines.analytic import AnalyticFit, ConjugateProblem
         from rai_bvar.linalg import sample_inverse_wishart_chol
@@ -400,6 +431,34 @@ def prior_covariance_draws(
             r.static, r.prior, int(np.asarray(r.data.T_eff)), draws=draws, seed=seed
         )
     return PriorDraws(sigma, shock, variables)
+
+
+def _nig_prior_draws(model: Any, data: VARData, draws: int, seed: int) -> PriorDraws:
+    """Prior draws of ``Σ`` and the one-step shock under an ``AsymmetricConjugate`` model: the
+    Mode II prior of the structural NIG closed form (``engines.structural_nig``), per equation
+    ``λ_i = (ψ_i/2)/G``, ``G ~ Gamma(1 + ι/2)``, ``a_ij | λ_i ~ N(0, λ_i κ_a/ψ_j)`` (``j < i``),
+    ``Σ = A⁻¹ΛA⁻ᵀ`` and ``u = A⁻¹Λ^{½}ε``. ψ and ``κ_a`` are the window's, or the EB values of
+    a fit when ``psi`` or ``contemp`` is free."""
+    from rai_bvar.engines.structural_nig import StructuralNIGFit, structural_to_reduced
+    from rai_bvar.priors.scales import window_scales
+
+    prior = model.mean.prior
+    if {"psi", "contemp"} & set(prior.free):
+        hyper = StructuralNIGFit(model, data, None).hyper
+        psi, contemp = np.asarray(hyper["psi"], dtype=np.float64), float(hyper["contemp"])
+    else:
+        psi = window_scales(data, prior, model.lags, model.deterministic).psi
+        contemp = float(prior.contemp)
+    n = psi.size
+    rng = np.random.default_rng([seed, _tag("nig-prior")])
+    lam = (psi / 2.0) / rng.standard_gamma(1.0 + np.arange(1.0, n + 1.0) / 2.0, size=(draws, n))
+    a = np.zeros((draws, n, n - 1))
+    for i in range(1, n):
+        sd = np.sqrt(lam[:, i, None] * contemp / psi[None, :i])
+        a[:, i, :i] = sd * rng.standard_normal((draws, i))
+    _, chol = structural_to_reduced(a, np.zeros((draws, n, 1)), lam)
+    shock = np.einsum("sij,sj->si", chol, rng.standard_normal((draws, n)))
+    return PriorDraws(chol @ np.swapaxes(chol, -1, -2), shock, tuple(data.variables))
 
 
 def prior_draws_from_arrays(
@@ -585,13 +644,17 @@ def _posterior_summary(
     fit: Any, order: Sequence[str], variables: Sequence[str], lags: int, det: str
 ) -> dict[str, Any] | None:
     """Posterior means of ``B`` (``(R, V)``, original regressor labels) and ``Σ_T`` (``(V, V)``),
-    the scalar hyperparameters and ψ, un-permuted. ``None`` for fits other than ``AnalyticFit``
-    and ``MCMCFit``."""
+    the scalar hyperparameters and ψ, un-permuted. ``StructuralNIGFit``: the exact means of the
+    NIG closed form (``posterior_moments``). ``None`` for fits other than ``AnalyticFit``,
+    ``StructuralNIGFit`` and ``MCMCFit``."""
     from rai_bvar.engines.analytic import AnalyticFit
+    from rai_bvar.engines.structural_nig import StructuralNIGFit
 
     if isinstance(fit, AnalyticFit):
         post = fit.posterior()
         B, sigma = np.asarray(post.mean), np.asarray(post.sigma_mean)
+    elif isinstance(fit, StructuralNIGFit):
+        B, sigma = fit.posterior_moments()
     elif getattr(fit, "engine", None) == "mcmc" and hasattr(fit, "param_draws"):
         lead = np.shape(next(iter(_leaves(fit.param_draws))))[:2]
         coefs, chol = fit.draw_parameters(int(np.prod(lead)))
@@ -1323,6 +1386,8 @@ def _forecast_mode(
     batch: bool,
     lpd_method: str = "conditioned",
 ) -> OrderingSensitivityResult:
+    from rai_bvar.evaluation.backtest import needs_lag_coefs
+
     draws = FORECAST_DRAWS if draws is None else _positive_int(draws, "draws")
     data = ctx.data
     origin = _forecast_origin(origins, data)
@@ -1349,6 +1414,8 @@ def _forecast_mode(
 
     lags = getattr(ctx.model, "lags", None)
     det = getattr(ctx.model, "deterministic", None)
+    # the integrated LPD at h > 1 needs each forecast's lag_coefs (P3 D-49; no new random numbers)
+    lag = needs_lag_coefs(lpd_method, ctx.horizons)
     values, joints, posts, conv, forecasts = [], [], [], [], []
     mcse = mcse_joint = None
     for j in range(K + R):
@@ -1360,7 +1427,7 @@ def _forecast_mode(
             )[0]
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            fc = fit.forecast(H, draws, seed=fc_seeds[j])
+            fc = fit.forecast(H, draws, seed=fc_seeds[j], **forecast_options(fit, lag_coefs=lag))
         log.record(labels[j], caught)
         v, jt, mc, mcj = _forecast_stats(
             fc, run_orders[j], ctx.variables, ctx.horizons, ctx.quantiles, realized,

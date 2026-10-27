@@ -269,7 +269,8 @@ class ForecastResult:
         formula) understates the spread across forecast seeds. At ``h = 1`` the two
         estimators coincide and the conditioned code runs (bitwise equal; ``lag_coefs`` is not
         needed there). For ``h > 1`` it needs ``lag_coefs`` (MCMC forecasts of a linear or zero
-        mean; analytic, benchmark and ordering-pooled forecasts do not carry it) and raises
+        mean; analytic forecasts only when made with ``forecast(..., lag_coefs=True)``, P3 D-49;
+        benchmark and ordering-pooled forecasts do not carry it) and raises
         ``ValueError`` without it, and ``rb_transitory=True`` raises (the transitory scales of
         ``T+1..T+h−1`` would have to be integrated jointly: no closed form), whatever the
         ``transitory`` attribute.
@@ -384,7 +385,8 @@ class ForecastResult:
         if da is None:
             raise ValueError(
                 "lpd_method='integrated' at horizon > 1 needs the 'lag_coefs' variable, which "
-                "MCMC forecasts of a linear or zero mean carry (DESIGN §7.3); analytic, benchmark "
+                "MCMC forecasts of a linear or zero mean carry (DESIGN §7.3) and analytic "
+                "forecasts carry when made with forecast(..., lag_coefs=True) (P3 D-49); benchmark "
                 "and ordering-pooled forecasts do not"
             )
         if da.dims != LAG_DIMS:
