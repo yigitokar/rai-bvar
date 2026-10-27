@@ -1,18 +1,18 @@
 """The GIG sampler on the log scale and the Bernoulli-logit draw (P3 D-42, §3.5, §9.2 item 1).
 
 ``random.log_gig`` (Devroye 2014 §6, every term in logs) against the Tier U list of P3 §3.5,
-with the multiplicity rule of the review erratum (M9, E117+; it replaces the per-cell KS rule of
-§3.5/D-60): on the pinned grid (``λ ∈ {0, ±1e-8, ±1e-3, ±0.5, ±1, ±10, ±50}``, every ``a − ½``
-and ``a − 1`` at the GK grid's first, middle and last points, ``½ − T_max/2`` for
-``T_max ∈ {200, 600}``, crossed with ``log ω ∈ {−2000, …, 12}``; ``m`` cells, each with its own
-random stream, the ``−λ`` mirrors included) one family of Kolmogorov–Smirnov tests
+with D-60's family-wise KS rule (E124): on the pinned grid (``λ ∈ {0, ±1e-8, ±1e-3, ±0.5, ±1,
+±10, ±50}``, every ``a − ½`` and ``a − 1`` at the GK grid's first, middle and last points,
+``½ − T_max/2`` for ``T_max ∈ {200, 600}``, crossed with ``log ω ∈ {−2000, …, 12}``; ``m`` cells,
+each with its own random stream, the ``−λ`` mirrors included) one family of Kolmogorov–Smirnov tests
 (10⁴ draws per cell) of ``Y = log X − log η`` against the CDF of ``exp(λy − ω cosh y)`` from
 numerical integration in log space around the mode, passing iff ``min p > 1e-3/m``; and
 ``E log X`` against ``log η + ∂_λ log K_λ(ω)`` (mpmath, 50 digits) within 4 Monte Carlo s.e.,
 Bonferroni over the ``m`` compared moments (D-60: ``|z| ≤ max(4, z_{1−0.01/(2m)})``, the Phase 2
 rule's form); no ``ok = False`` on the grid, mean and worst-case attempts reported; the gamma and
-inverse-gamma limits; improper input as a status; ``vmap`` lanes equal unbatched calls (1e-15);
-determinism by key. Beyond the list: the hat dominates ``f`` on every grid point.
+inverse-gamma limits at the extremes (``|λ|`` from 1e-8 to 299.5, ``log ψ`` or ``log χ`` = ∓800);
+improper input as a status; ``vmap`` lanes equal unbatched calls (1e-15); determinism by key.
+Beyond the list: the hat dominates ``f`` on every grid point.
 ``random.bernoulli_logit``: frequencies (``|z| ≤ 4``), extreme logits, one uniform per element.
 """
 
@@ -35,7 +35,7 @@ pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
 KEY = jr.key(20261025, impl="threefry2x32")
 N_DRAWS = 10_000
-KS_ALPHA = 1e-3  # family-wise (P3 D-60, §3.5; review M9: Bonferroni over a family of m tests)
+KS_ALPHA = 1e-3  # family-wise (P3 D-60, §3.5, E124: Bonferroni over a family of m tests)
 MC_SE = 4.0  # E log X within 4 Monte Carlo standard errors (P3 §3.5)
 MOMENT_FAMILY = 1e-2  # D-60 Bonferroni over compared moments, in the Phase 2 rule's form
 
@@ -198,7 +198,7 @@ def moment_z(Y: np.ndarray) -> np.ndarray:
 def test_ks_of_log_y_against_the_numerical_cdf(grid_draws):
     """One family of ``m = len(GRID)`` (180) KS tests, 10⁴ draws per cell, of
     ``Y = log X − log η`` against the CDF of ``exp(λy − ω cosh y)`` integrated numerically in log
-    space: passes iff ``min p > 1e-3/m`` (P3 §3.5 with the review's multiplicity rule M9)."""
+    space: passes iff ``min p > 1e-3/m`` (P3 §3.5 with D-60's family-wise rule, E124)."""
     m = len(GRID)
     assert m == 180
     p = ks_family_pvalues(grid_draws[0])
@@ -263,11 +263,18 @@ def log_gamma_cdf(x: np.ndarray, a: float) -> np.ndarray:
     return np.where(tiny, np.exp(a * np.where(tiny, x, 0.0) - sc.gammaln(a + 1.0)), direct)
 
 
-@pytest.mark.parametrize("lam", [1e-3, 0.5, 3.0, 50.0])
-def test_gamma_limit(lam):
+# The limits at the extremes (P3 §3.5's Tier U list): |λ| from the grid's 1e-8 to its ½ − 600/2
+# (299.5), at a moderate scale and at log ψ (log χ) = ∓800, each case one KS test (m = 1, D-60).
+LIMIT_LAMBDA = (1e-8, 1e-3, 0.5, 3.0, 50.0, 299.5)
+LIMIT_EXTREME = [(lam, s) for lam in (1e-8, 0.5, 299.5) for s in (-800.0, 800.0)]
+
+
+@pytest.mark.parametrize(
+    "lam,log_psi", [(lam, 1.3) for lam in LIMIT_LAMBDA] + LIMIT_EXTREME
+)  # fmt: skip
+def test_gamma_limit(lam, log_psi):
     """``log χ = −∞``, ``λ > 0``: ``log X = LG(λ) − log(ψ/2)`` exactly (KS ``α = 1e-3`` of
     ``log X + log(ψ/2)`` against ``log Gamma(λ, 1)``; no rejection attempts)."""
-    log_psi = 1.3
     keys = jr.split(key(10), N_DRAWS)
     full = (jnp.full((N_DRAWS,), v) for v in (lam, log_psi, -jnp.inf))
     lx, ok, att = _MANY(keys, *full)
@@ -277,10 +284,11 @@ def test_gamma_limit(lam):
     assert p > KS_ALPHA, p  # m = 1 KS test per test function
 
 
-@pytest.mark.parametrize("lam", [-1e-3, -0.5, -3.0, -50.0])
-def test_inverse_gamma_limit(lam):
+@pytest.mark.parametrize(
+    "lam,log_chi", [(-lam, -0.7) for lam in LIMIT_LAMBDA] + [(-lam, s) for lam, s in LIMIT_EXTREME]
+)  # fmt: skip
+def test_inverse_gamma_limit(lam, log_chi):
     """``log ψ = −∞``, ``λ < 0``: ``log X = log(χ/2) − LG(−λ)`` exactly (KS ``α = 1e-3``)."""
-    log_chi = -0.7
     keys = jr.split(key(11), N_DRAWS)
     full = (jnp.full((N_DRAWS,), v) for v in (lam, -jnp.inf, log_chi))
     lx, ok, att = _MANY(keys, *full)
