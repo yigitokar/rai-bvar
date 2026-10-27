@@ -180,7 +180,7 @@ Our standardised-$t$ SV sampler is checked against an exact importance-sampling 
 four-observation problem (largest $|z|$ 1.83), an oracle that needs no second sampler. % [V] tests/parity/test_stochvol.py::test_sv_t_matches_the_exact_importance_sampling_posterior
 % Policy: no statement here or in any caption about any other package's t sampler or the status of its fixture (OUTLINE §8.9; TODO 13).
 The planned reduced-form reference, \pkg{bayesianVARs} \citep{gruber2026bayesianvars}, could not
-be built in our test environment and was not run; against a substitute R sampler that draws the
+be built or run before the release (\cref{app:parity}); against a substitute R sampler that draws the
 reduced-form coefficients jointly from their exact system-wide conditional, the largest $|z|$ are
 2.76, 3.45 and 3.56 on three fixtures (bounds 4.05--4.51), % [R] tests/parity/SV_PARAMETRIZATION.md §4, §6 (n3p2 const, n3p2 SV, n7p4 SV); tests/parity/test_bayesianvars.py
 so the reduced-form criterion is met against this substitute, not against \pkg{bayesianVARs}. There is no external VAR-level oracle for structural Mode~I $\times$ SV, the

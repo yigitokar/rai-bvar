@@ -147,7 +147,7 @@ They dry-run on another report only with `--allow-non-acceptance --outdir DIR`.
 
 ## Tables
 
-`make tables` runs the 14 generators `figures/tab_*.py` (main repository environment, as for the
+`make tables` runs the 15 generators `figures/tab_*.py` (main repository environment, as for the
 figures); each writes the body of one appendix float to `figures/tables/<stem>.tex`, which
 `sections/appendix.tex` reads with `\input`. A generated file holds only the `tabular` and its
 notes; the float, caption, label and evidence tags stay in the appendix. Cells that wait for data
@@ -157,7 +157,9 @@ a `\draftmarksfalse` build like `\acc` and `\todo`. The release records are read
 `benchmarks/reports/validation/7f880e1_apple-m5-max/` of this repository (`tab_common.RELEASE_DIR`):
 the JSON records in `record/`, the JUnit XML per test directory and `meta.json`; the per-PR tier on
 the release commit from the committed CI log excerpt
-`figures/data/provenance/ci_run_40061724239_fast_suite.txt`. No `[REL]` cell is left. The other
+`figures/data/provenance/ci_run_40061724239_fast_suite.txt`. After the release, `tab_dgp.py` (the
+size and power of the verdict rule, App. D) reads `benchmarks/reports/dgp_study.json` of the main
+repository at commit 75e0c2a (PR #15). No `[REL]` cell is left. The other
 tables (Tab1, Tab7, Tab13 in the main text; Tab2, Tab5 and Tab12, moved to Appendices C, D and F;
 TabA1, TabC1, TabF2, TabF3, TabG1 and TabH1) are typed into the sources; the generators that OUTLINE
 section 14 planned for them were not written.

@@ -21,11 +21,10 @@ sample, has no mixed-frequency support, and ships no real-time vintages; it only
 for them. % [R] SPEC.md §1.3, §5.5, §5.7; dossier 01 §7, unsupported item 3
 
 \paragraph{The verdict engine.}
-The verdict rule is implemented and unit-tested, but its statistical properties are not
-established. The size and power study on simulated data-generating processes that the
-specification calls for has not been implemented, so we claim no false-positive rate for
-``better''. % [V] no tests/dgp/ directory (dossier 01 §8.2); SPEC.md §10.5
-What exists are tests of the Diebold--Mariano size and power, of MCS behaviour and of the verdict
+The verdict rule is implemented and unit-tested. After the release, one pre-registered simulation
+gave at most 0.030 false ``better'' at the nominal 0.10 and power 0.675 at $h = 1$
+(\cref{app:dgp}); outside its design we claim no false-positive rate for ``better''. % [V] no tests/dgp/ directory at the release (dossier 01 §8.2); SPEC.md §10.5; after the release: PR #15 (benchmarks/reports/dgp_study.md, dgp_study_preregistration.md at 75e0c2a; records at 58ab09f, src = 4ac7969 plus validation/dgp.py), app:dgp; [R] dgp_study.json summary[1] (0.030), summary[4] (0.675), nominal 0.1
+The release has tests of the Diebold--Mariano size and power, of MCS behaviour and of the verdict
 logic. % [V] tests/unit/test_significance.py::test_dm_size_under_null, ::test_dm_power_and_direction, ::test_mcs_eliminates_clearly_worse_models_first, ::test_mcs_keeps_equivalent_models; tests/integration/test_compare.py
 The MCSE of a total $\Delta$LPD adds the two models' per-origin MCSEs in quadrature,
 although both models' forecasts at an origin draw on random streams derived from the same backtest
@@ -37,7 +36,7 @@ block length does not grow with $h$, and a pair's verdict depends on the other m
 Verdicts are per horizon, with no rule that combines horizons, and the DM long-run variance
 (\cref{sec:eval-tests}) is not the Newey--West variance \citep{newey1987simple} that the
 specification states. % [V] src/rai_bvar/evaluation/significance.py l.35-53; [R] SPEC.md §9.3 l.447; dossier 02 §15 D1
-% TODO 10 settled: the DGP size and power study stays future work (no tests/dgp/ at 4ac7969), as the first sentence of this paragraph says
+% TODO 10 settled: the DGP size and power study was not part of the release (no tests/dgp/ at 4ac7969); it was run after the release (PR #15, app:dgp)
 
 \paragraph{The convergence gate.}
 SV fits routinely miss the $\hat R < 1.01$ and bulk ESS $> 400$ targets. The prototype pilot
@@ -117,7 +116,7 @@ The suite is checked only against 18 curated mutants, which says little about it
 unknown bugs. Whether the 10-component mixture
 approximation is visible to G-full with unknown SV parameters is undetermined. The reduced-form
 parity check against bayesianVARs was replaced by an in-house oracle because the package could not
-be built in the test environment, and all third-party parity holds for pinned versions (stochvol
+be built at the release, and all third-party parity holds for pinned versions (stochvol
 3.2.1, BVAR 1.0.5, BoE bvar 0.3.5). % [R] dossier 04 §15 Q8 (OCSN-10 at G-full); DESIGN Stage 4 amendment (2); tests/parity/SV_PARAMETRIZATION.md "Versions"; dossier 04 §10, §15 Q4
 
 \paragraph{Numerics, performance and platforms.}

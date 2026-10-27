@@ -239,6 +239,26 @@ re-derived before it goes into the paper).
     `figures/data/provenance/ci_runs_40106532730_40140397848_weekly_x86.txt`; DESIGN §9.10 at
     2c71fb2. Status: verified (CI logs; the validation-record artifacts were not downloaded).
 
+## H. After release 0.2.0: the verdict-engine DGP study and bayesianVARs
+
+20. **The verdict rule on simulated data (SPEC §10.5).** Pre-registered (58ab09f), 200 replications
+    per row, n = 3, T = 200, VAR(2), the release's compare()/verdict() at their defaults and the D-35
+    budgets. False "better" at most 0.030 (nominal 0.10; Wilson upper bound 0.064), power 0.675 at
+    h = 1 and 0.510 at h = 4, SV(outliers) never "worse" than SV. On SV-with-outliers data the gate
+    decides: both arms pass it in 41% of replications at h = 1, SV(outliers) fits converge at 92% of
+    origins (σ most often named worst), gate off 199/200 "better" at h = 1 (102/200 at h = 4). The PR #15
+    body reads this as a finding about the D-35 budget for outlier models (the report has no such
+    reading).
+    Evidence: main repo `benchmarks/reports/dgp_study.{md,json,jsonl}` and
+    `dgp_study_preregistration.md` (commit 75e0c2a, PR #15). Status: recorded (one run, M5 Max).
+21. **bayesianVARs' predict() at h >= 2 under SV (black box).** After the release (PR #21, binaries
+    on Linux CI) its parameter posteriors and h = 1 predictive agree with the exact SWA oracle, but
+    on n3p2_sv its predict() differs from SWA at h >= 2 (h4:y1 q75 z +4.52, q25 -4.17) where
+    rai-bvar agrees (3.1–3.5 over seeds, DESIGN E173); n7p4_sv shows no difference (2.27), the
+    constant pair agrees (2.94); a path recursion from its own draws agrees with SWA (2.13). Phase 3
+    compares h >= 2 against that path (Q42, E173). No cause is claimed. Status: recorded (fixtures
+    recomputed; rai-bvar vs bayesianVARs only in a local run).
+
 ## Before submission
 
 - Re-run every "recorded" / "to check" item on the release commit and cite the commit hash.

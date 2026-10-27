@@ -223,9 +223,9 @@ $\lambda_i$-scaled one of \citealp{chan2022asymmetric}), which against \code{Con
 would not.
 % [V] src/rai_bvar/priors/structural.py::contemp_arrays (shared by both forms, D-11): scaling "none" for Mode I, SV and Constant("ig"), prec0 = iota psi_j/(kappa_a psi_i); scaling "lambda" for Constant("iw") and Constant("iw_equivalent"), a_ij | lambda_i ~ N(0, lambda_i kappa_a/psi_j) (macro referee major 2(c))
 Each ingredient is standard and their combination is the package's; the rule's size and power
-have not been studied, and the quadrature MCSE treats the two models' errors as independent
+were studied only after the release (\cref{app:dgp}), and the quadrature MCSE treats the two models' errors as independent
 although both use the same per-origin forecast seed (\cref{sec:limitations}).
-% dossier 02 §15 D4 and Q4; no tests/dgp/ (SPEC §10.5); TODO 10
+% dossier 02 §15 D4 and Q4; no tests/dgp/ at 4ac7969 (SPEC §10.5); TODO 10; after the release: PR #15 (benchmarks/reports/dgp_study.md, dgp_study_preregistration.md at 75e0c2a; records at 58ab09f, src = 4ac7969 plus validation/dgp.py), app:dgp
 
 % Fig3 (the verdict flow) moved to App. C (app:scores-tests) in the integration pass: the boxed
 % rule eq:verdict carries its content here.

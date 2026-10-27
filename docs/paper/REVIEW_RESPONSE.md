@@ -32,6 +32,17 @@ with this section, this section holds (the entries concerned carry an "Update" l
   and 37 mutation tests and the slow tests of tests/unit. Sections 8, 9 and 12 say so in a clause,
   App. D gives the runs, App. G the tests/unit point and App. J the provenance; only the logs'
   pass or fail outcomes are used, and the tables stay those of the M5 Max record.
+- **After the release (2026-10-27): the size and power of the verdict rule, and bayesianVARs.**
+  The pre-registered DGP study (PR #15; records at 58ab09f, whose src/ is the release's plus the new
+  `validation/dgp.py`) is App. D.11 with TabDdgp: false "better" at most 0.030 at the nominal 0.10,
+  power 0.675 (h = 1) and 0.510 (h = 4), SV(outliers) never "worse" than SV, and the convergence
+  gate deciding most outlier-row verdicts at h = 1 (118 of 200; 63 at h = 4; 41% of replications pass
+  it at h = 1). Sections 1, 6.6,
+  12 and 13 say so in place of "unstudied" (same length; the main text still ends on p. 35).
+  bayesianVARs 0.1.8, run as a black box from binaries after the release (PR #21), is in App. D.7:
+  its parameter posteriors and one-step predictive agree; on the n = 3 SV fixture its `predict()`
+  differs from the oracle at h >= 2 while a path recursion from its own draws agrees; no cause is
+  claimed. Sections 2, 8 and 12 keep the release-time fact and point there.
 - **Performance.** TabE2, Section 10 and App. E add the x86-64 BENCH-P2 report of the CI bench job
   (reported, not gated). The text now says that no idle-machine run exists, and none on the release
   commit.
@@ -54,11 +65,13 @@ with this section, this section holds (the entries concerned carry an "Update" l
   with no replacement: App. J makes no claim either way.
 - **Submission build.** `\draftmarksfalse` is set. `STRICT=1 ./build.sh --check` reports 0 undefined
   citations, 0 undefined references, 0 multiply-defined labels, 0 missing characters and 0 overfull
-  boxes. The PDF has 107 pages: the main text runs to page 35, the appendices from page 36 to 98,
+  boxes. The PDF has 109 pages: the main text runs to page 35, the appendices from page 36 to 100,
   then the references. `build.sh` no longer fails when no `\todo` is left.
 - **AUTHOR_TODO.md** lists only the items left to the author after submission: his own reading
-  statement and approval of App. J; the release steps (public repository, push of `paper-draft`,
-  tag, PyPI, Zenodo); and the third-party observations with their maintainers. The drafting-stage lists are in
+  statement and approval of App. J; PyPI and Zenodo (the public repository, the push of
+  `paper-draft` and the tag are done); the third-party observations, the `bayesianVARs` one
+  stated without notifying its maintainers first (the author's decision); and keeping PR #15's
+  commits reachable (merge with a merge commit). The drafting-stage lists are in
   `git show 83f2b56:docs/paper/AUTHOR_TODO.md`. The "Author N" numbers below refer to that file.
 - **Still open before upload.** arXiv compiles with pdfLaTeX, and the pdfTeX branch of `main.tex`
   has not been tested here (Author 23). The paper does not depend on the main-repository notes, so

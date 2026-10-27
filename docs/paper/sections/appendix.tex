@@ -1316,8 +1316,8 @@ MCMC fits of compositions that are not order-invariant warn from $n = 4$ variabl
 % -------------------------------------------------------------------------------------
 
 This appendix gives the configurations, statistics and run records behind
-\cref{sec:validation}.
-Its tables and figures are generated from the release validation record: the weekly tiers run at
+\cref{sec:validation} and, in \cref{app:dgp}, the size and power study of the verdict rule run after
+the release. Its other tables and figures are generated from the release validation record: the weekly tiers run at
 commit 7f880e1, the code of release 0.2.0, on an Apple M5 Max on 24 October 2026, with the JSON
 records that the Geweke, SBC and mutation tests write when \code{RAI_BVAR_VALIDATION_RECORD} points
 to a directory and, for the tiers without such a hook, pytest's JUnit XML (\cref{app:repro}).
@@ -1342,7 +1342,7 @@ the release's code (\code{src} unchanged from 4ac7969) with the F1 replay replac
 PR~\#11 (\cref{app:float64-tests}): once in one job on an AMD EPYC 9V45 with 4~vCPU, and once
 split into six parallel jobs (PR~\#12, merged as 2c71fb2) on AMD EPYC 7763s with 4~vCPU, in 72 to
 120 minutes each and 121 minutes end to end. In both, the 483 tests of the tier
-gave 481 passes, one skip (the bayesianVARs parity test, whose fixture does not exist) and one
+gave 481 passes, one skip (the bayesianVARs parity test, whose fixture did not yet exist) and one
 expected failure (the \code{stochvol} Student-$t$ case): among them the 43 slow Geweke tests, the 23
 SBC tests, the 46 composition-level Tier~B tests, the 37 mutation checks and the slow tests of
 \code{tests/unit} (\cref{app:repro}).
@@ -1350,7 +1350,7 @@ The single job took 274 minutes, within the 330-minute limit that the earlier ru
 EPYC 7763, reached half-way.
 Both runs uploaded their validation records; the paper uses only the pass or fail outcomes in
 their logs, and its tables stay those of the Apple M5 Max record.
-% [V] weekly CI runs 40106532730 (workflow_dispatch on the PR #11 branch at 8f2c969, job nightly 120909267923, 15:20:38-19:54:43Z, "481 passed, 1 skipped, 4774 deselected, 1 xfailed ... in 16410.93s (4:33:30)", runner "AMD EPYC 9V45 96-Core Processor, 4 vCPU") and 40140397848 (workflow_dispatch on the PR #12 branch at b1e3801; job nightly-plan: shards geweke-structural 22, geweke-other 21, sbc-structural 29, sbc-other 43, unit 61, rest 307, tier 483 (tests/sbc 72 = tests/sbc/test_block_tier.py 46, composition-level Tier B, + test_sbc 23 + test_truth_and_forecast_core_are_the_same_map 3, pytest --collect-only at 2c71fb2); shard jobs 72.2-119.7 min, run created 22:52:31Z, record job done 00:53:18Z; shard summaries 22 + 21 + 29 + 43 + 61 + 305 passed, rest also 1 skipped and 1 xfailed; every shard on "AMD EPYC 7763 64-Core Processor, 4 vCPU"); skip: tests/parity/test_bayesianvars.py:440 "no bayesianVARs parity fixture"; xfail: tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_v_t5]; excerpt docs/paper/figures/data/provenance/ci_runs_40106532730_40140397848_weekly_x86.txt; git diff --quiet 4ac7969 8f2c969 -- src and 4ac7969 b1e3801 -- src; tests/{unit,mutation,sbc,parity,analytic,contract} identical to 4ac7969 at both; [R] DESIGN section 9.10 at 2c71fb2 (the sharded weekly tier); the validation-record artifacts of both runs were not downloaded
+% [V] weekly CI runs 40106532730 (workflow_dispatch on the PR #11 branch at 8f2c969, job nightly 120909267923, 15:20:38-19:54:43Z, "481 passed, 1 skipped, 4774 deselected, 1 xfailed ... in 16410.93s (4:33:30)", runner "AMD EPYC 9V45 96-Core Processor, 4 vCPU") and 40140397848 (workflow_dispatch on the PR #12 branch at b1e3801; job nightly-plan: shards geweke-structural 22, geweke-other 21, sbc-structural 29, sbc-other 43, unit 61, rest 307, tier 483 (tests/sbc 72 = tests/sbc/test_block_tier.py 46, composition-level Tier B, + test_sbc 23 + test_truth_and_forecast_core_are_the_same_map 3, pytest --collect-only at 2c71fb2); shard jobs 72.2-119.7 min, run created 22:52:31Z, record job done 00:53:18Z; shard summaries 22 + 21 + 29 + 43 + 61 + 305 passed, rest also 1 skipped and 1 xfailed; every shard on "AMD EPYC 7763 64-Core Processor, 4 vCPU"); skip: tests/parity/test_bayesianvars.py:440 "no bayesianVARs parity fixture" (no bvars_bayesianvars_*.nc at 8f2c969 or b1e3801; first added in 61630cc, 2026-10-25T22:55Z, after both runs); xfail: tests/parity/test_stochvol.py::test_stochvol_parity_long[stochvol_v_t5]; excerpt docs/paper/figures/data/provenance/ci_runs_40106532730_40140397848_weekly_x86.txt; git diff --quiet 4ac7969 8f2c969 -- src and 4ac7969 b1e3801 -- src; tests/{unit,mutation,sbc,parity,analytic,contract} identical to 4ac7969 at both; [R] DESIGN section 9.10 at 2c71fb2 (the sharded weekly tier); the validation-record artifacts of both runs were not downloaded
 Where a number below was reproduced on an earlier commit, the commit and the machine are stated.
 
 % (Tab5 and its paragraph moved from §8 in the page-budget pass; §8 cites app:validation)
@@ -1710,14 +1710,32 @@ obtained by self-normalised importance sampling on a four-observation problem, a
 maximum $|z|$ is 1.83. A small problem with an exact posterior is an oracle that does not depend on
 any other implementation.
 % [V] tests/parity/test_stochvol.py::test_sv_t_matches_the_exact_importance_sampling_posterior
-% TODO 13: no statement about another package's sampler is made (the third-party Student-t and sign-fold observations are not re-tested on current releases and the maintainers are not contacted; AUTHOR_TODO.md)
-\item \emph{Reduced form.} \pkg{bayesianVARs} \citep{gruber2026bayesianvars} could not be built in the
-test environment (no Fortran compiler), so no finding about it is stated. The exit criterion was met
+% TODO 13: no statement about another package's sampler is made (the third-party Student-t and sign-fold observations are not re-tested on current releases and the maintainers are not contacted; AUTHOR_TODO.md); after the release, the bayesianVARs observation below is stated as a neutral black-box observation, without notifying the maintainers first (owner's decision, AUTHOR_TODO.md item 3)
+\item \emph{Reduced form.} \pkg{bayesianVARs} \citep{gruber2026bayesianvars} could not be installed in the
+test environment before the release (no CRAN macOS binary for R 4.1 and no Fortran compiler for a
+source build). The exit criterion was met
 against a substitute: an exact system-wide Gibbs sampler written in R in \pkg{rai-bvar}'s own
 conventions ($\operatorname{vec}\Pi \mid A, \Lambda$ jointly, $A$ rows by regression, SV by one sweep
 of \pkg{stochvol}'s sampler at offset 0, or $\lambda_i \mid e$ inverse gamma), which gives maximum
 $|z|$ 2.76, 3.45 and 3.56 against bounds of 4.05--4.51.
-% [R] tests/parity/SV_PARAMETRIZATION.md sections 4 and 6; tests/parity/test_bayesianvars.py committed
+% [R] tests/parity/SV_PARAMETRIZATION.md sections 4 and 6 (section 4 at 4ac7969: no CRAN macOS binary for R 4.1; a source build needs gfortran, not installed); fixtures/probe_bayesianvars.nc at 4ac7969 (bayesianvars_available 0); tests/parity/test_bayesianvars.py committed
+After the release, the Phase~3 work ran \pkg{bayesianVARs} 0.1.8 as a black box, from binary
+packages under R 4.5.3 on x86-64 Linux in continuous integration (Posit Package Manager snapshot of
+20 October 2026; no package source was compiled), on the data of the three fixtures. Its parameter
+posteriors agree with the system-wide oracle's (largest $|z|$ 2.56, 2.85 and 3.41 over the
+coefficient, contemporaneous, volatility and log-variance blocks) and, in a local run recorded in
+the design document, with \pkg{rai-bvar}'s (3.00, 2.76 and 3.62 over the same blocks; 3.34, 2.76 and 3.62 over all
+compared quantiles, the predictive included, against the bounds above); its one-step predictive agrees with the oracle's too. Under SV at $h \geq 2$, the
+predictive that its \code{predict()} returns differs from the oracle's on the $n = 3$ fixture (2 of
+45 quantiles beyond $|z| = 4$, the largest $+4.52$ and $-4.17$ at $h = 4$), on which \pkg{rai-bvar}'s
+predictive agrees with the oracle's (the whole comparison passes, largest $|z|$ 3.1--3.5 over all
+compared quantiles, four seeds and $4 \times 50{,}000$ draws); on the $n = 7$ fixture
+no difference is detected (2.27), and under constant volatility the two agree (2.94). A predictive
+computed by the path recursion from \pkg{bayesianVARs}' own posterior draws agrees with the oracle's
+at $h \geq 2$ (largest $|z|$ 2.13 on the $n = 3$ fixture), and under the Phase~3 rule it is the
+predictive compared at $h \geq 2$. In that run we used the package only as a black box and claim no cause for the
+difference.
+% [R] PR #21 (merged dfcaf12): CI job r-fixtures, runs 40243289623 (R2 n3p2_const) and 40351238342 (the SV fixtures; log: "installing *binary* package 'bayesianVARs'", "bayesianVARs 0.1.8 (Built: R 4.5.0; x86_64-pc-linux-gnu ...)", R 4.5.3, snapshot 2026-10-20); fixture attrs repos/ppm_snapshot/os; binary installs: PR #21 body "Snapshot and versions" ("Every package was installed as a binary; no GPL source was compiled") and the job's install step failing on any source package; the GPL rule: origin/main docs/phase3/DESIGN.md l.56-64 ("run only as black-box oracles"; no reading claim is made in the text); [V] bayesianVARs against SWA, recomputed from the committed fixtures tests/parity/fixtures/bvars_bayesianvars_<f>.nc and bvars_swa_<f>.nc at main b5a00fd (z over the combined plain MCSE, as test_bayesianvars.py does): parameter blocks n3p2_const Pi 2.559, A 1.950, lambda 1.464; n3p2_sv Pi 2.845, A 1.702, sv 1.830, h 2.352; n7p4_sv Pi 3.409, A 2.573, sv 1.733, h 2.457; h = 1 2.263 / 1.715 / 1.526; predict() (forecast_predict_q) at h >= 2: n3p2_sv h4:y1 q75 +4.523, q25 -4.168 (2 of the 45 cells at h = 2-4 over 4.00; the 15 h = 1 cells of forecast_predict_q equal forecast_q), n7p4_sv 2.268; path (forecast_q) at h >= 2: n3p2_sv 2.130, n7p4_sv 2.040; const pair 2.941; the bvars_swa_* fixtures are the Phase 2 ones (R 4.1.2, macOS, 2026-10-22); [R] rai-bvar against bayesianVARs: local run in the PR #21 body (3 passed; max over all compared quantiles 3.34, 2.76, 3.62, bounds 4.05, 4.15, 4.51; per block n3p2_const Pi 3.00, A 1.41, forecast 3.34, lambda 0.91; n3p2_sv Pi 2.76, A 1.46, forecast 2.56, sv 1.78, h 2.08; n7p4_sv Pi 3.62, A 3.24, forecast 2.10, sv 2.74, h 3.12) and DESIGN E172 (the same run), not yet run in CI; rai-bvar against SWA on n3p2_sv: the test's max over all compared quantiles (no per-block or h >= 2 figure is recorded), over four seeds and at 4 x 50,000: DESIGN E173 only; the compared block at h >= 2 is the path (E173 part 3; SV_PARAMETRIZATION.md section 7); the comparison of record is WP38's, not yet run; the decision: Q42 (owner, 2026-10-26) and E173 (origin/main docs/phase3/DESIGN.md l.321, l.1751); E173: "a black-box inference, not confirmed" (no cause is claimed here); the maintainers were not notified first, the owner's decision (AUTHOR_TODO.md item 3)
 \end{itemize}
 Parity does not establish everything: there is no external VAR-level oracle for structural Mode~I
 $\times$ SV, and exact mode has no external oracle beyond the reweighted \pkg{stochvol} rows.
@@ -1904,6 +1922,75 @@ Earlier, at commit 62d15f6, on the same kind of machine with a cold compilation 
 running (load average 3.5--18), G-small for all per-PR compositions took 94.6\,s and 99.7\,s in two
 runs, and the mutation suite 181.9\,s and 177.4\,s, with identical statistics.
 % [V] reproduced at 62d15f6 (dossier 04 sections 0 and 3.3, with its fact-check)
+
+\subsection{Size and power of the verdict rule, after the release}\label{app:dgp}
+
+After the release, the size and power study that the specification calls for, and that release
+0.2.0 did not include (\cref{sec:limitations}), was run on simulated data, pre-registered before any
+replication was scored. Its code under test is release 0.2.0's: at commit 58ab09f, where every
+record was made, \code{src/} differs from 4ac7969 only by the new module
+\code{rai_bvar.validation.dgp} (the simulators, the rows and the summaries) and one docstring, so
+\code{compare()}, \code{verdict()}, the priors, the samplers, their settings and the convergence gate
+are the release's, at their defaults.
+% [V] git diff --stat 4ac7969 58ab09f -- src: src/rai_bvar/validation/dgp.py (new, 757 lines) and src/rai_bvar/validation/__init__.py (docstring, +4/-1); compare.py, settings.py and the components identical; [R] benchmarks/reports/dgp_study_preregistration.md, committed in 58ab09f (2026-10-25) with the harness, before the pilot (7002939) and the full run (1959834)
+
+\emph{Design.} Three VAR(2) data-generating processes in three variables, in the model's recursive
+structural form (\cref{sec:framework:structural}), share the intercept, both lag matrices and the
+contemporaneous matrix (companion spectral radius 0.82) and differ only in the volatility: constant
+log-variances $(\log 1, \log 0.5, \log 0.25)$; AR(1) log-variances around them with $\phi = 0.95$ and
+$\sigma = 0.2$; and the same with the outlier mechanism of \code{SV(outliers=True)}, a shock scale of
+1 with probability 15/16 and otherwise uniform on $\{2, \ldots, 20\}$. Each replication keeps
+$T = 200$ quarterly observations after 100 burn-in periods. The arms are \code{BVAR(vol=..., lags=2)}
+with every other setting at the default (\code{Constant("ig")} keeps the constant-volatility arm on
+the MCMC engine, so each pair differs along the volatility axis only), with the release's default budgets
+(\cref{sec:arch-settings}):
+$4 \times 2{,}000$ kept draws for \code{Constant}, $4 \times 10{,}000$ for \code{SV} and
+\code{SV(outliers)}, burn-in 1,000. \code{compare()} refits on a rolling 120-period window at every
+origin from 1980Q1 to 1999Q4 (80 origins at $h = 1$, 77 at $h = 4$) with 1,000 forecast draws and the
+path-conditioned log score, and \code{verdict()} keeps its defaults (\cref{sec:eval-verdict}). Each
+row has 200 replications from fixed seeds. The scored rate is that of a false ``better'' under
+homoskedasticity (size), of ``better'' under SV (power) and of ``worse'' for \code{SV(outliers)}
+against \code{SV} under SV with outliers; a size or ``worse'' rate counts as above nominal only if its
+Wilson 95\% interval lies above 0.10, the rule's Diebold--Mariano level, and power is descriptive.
+% [R] dgp_study_preregistration.md sections "Data-generating processes", "Rows, arms and expected verdicts", "The pipeline per replication", "Seeds", "Replications", "Readings" (l.44-174 at 58ab09f; design key 81f067e0cefaaea5; spec hashes 8aebe5adec44e966, b3daa828453542ed, 7f0aeb733eb2d07e); [V] the release defaults: 4ac7969:src/rai_bvar/evaluation/compare.py l.207-210 (test_level 0.10, mcs_alpha 0.25, mc_multiple 3.0, min_converged 0.95), settings.py l.82-95, l.154, l.158
+
+\begin{table}[!htbp]
+\centering\footnotesize
+\caption{Size and power of the verdict rule on simulated data, after the release
+(\cref{app:dgp}): the rate of the scored verdict over 200 replications per row, and the verdict
+counts with the convergence gate on (the engine's verdict) and off.}
+\label{tab:TabDdgp}
+% [R] generated by docs/paper/figures/tab_dgp.py from the report (asserts the numbers quoted in the text)
+\input{figures/tables/tab_dgp.tex}
+\end{table}
+
+\emph{Readings} (\cref{tab:TabDdgp}). By the pre-registered rule, no size or ``worse'' rate is
+above nominal: the false-``better'' rate is 0 at $h = 1$ for both richer arms and at most 0.030 at
+$h = 4$, the homoskedastic row's family-wise rate being 0.030 too, and \code{SV(outliers)} is called
+worse than \code{SV} in none of the 200 replications at either horizon. Under SV the rule says
+``better'' in 67.5\% of the replications at $h = 1$ and 51.0\% at $h = 4$. Under homoskedasticity the
+richer arm is often called ``worse'' at $h = 1$: \code{SV} in 47.5\% of the replications and
+\code{SV(outliers)} in 95\%. On the outlier row the convergence gate decides most verdicts at $h = 1$: both
+arms converged at 95\% or more of the origins in only 41\% of the replications at $h = 1$ (35\% at
+$h = 4$), the \code{SV(outliers)} fits converged at 92\% of the origins on average, $\sigma$ being
+the quantity most often named worst by a failed check, and with the gate off the rule would have said ``better'' in
+199 of the 200 replications at $h = 1$ (0.995; 0.51 at $h = 4$). We read this as a finding about the
+release's default budget for outlier models on this design, not as a reason to change the gate; the
+study raises no budget.
+% [R] dgp_study.json summary[0..7] (rates, MC s.e., Wilson intervals, readings, gate_on/gate_off counts, classes: gate 118 at h = 1 and 63 at h = 4 on the outlier row), family[1] (0.030), convergence[12] (SV(outliers) on the outlier DGP: converged_mean 0.916, gate_pass 0.47, worst sigma[y2] 469, sigma[y1] 431, sigma[y3] 422); [V] every figure recomputed from the 600 records of dgp_study.jsonl at 75e0c2a (all git_commit 58ab09f, git_dirty false) with the Wilson formula of 58ab09f:src/rai_bvar/validation/dgp.py; [R] the reading about the D-35 budget is the PR #15 body's ("a finding about the default budget (D-35) for outlier models") and SPEC section 10.5 at 1959834 ("the gate, not the dLPD, decided most verdicts of this row")
+
+The study covers one design cell ($n = 3$, $T = 200$, two lags), the path-conditioned score at
+$h = 4$ and the default budgets, and the pre-registration names these limits and the gate's
+dominance as risks; rows that need later phases (BART, threshold and time-varying-parameter DGPs) are
+pending. It ran on an Apple M5 Max with 12 worker processes from one clean commit, with the
+registered design and spec hashes in all 600 records: a 72-replication pilot (24 per row), then the
+full run, which was paused on 25 October at 92 of the 600 replications on the author's decision,
+resumed the next day with the same command and settings, and finished on 27 October. The
+pre-registration allowed a local full run only if the pilot extrapolated to at most four hours; the
+author waived that limit on 25 October, before the pilot finished (the pilot then extrapolated to 28
+more hours). The waiver is recorded in the report and in a dated addendum to the pre-registration,
+and every study setting is as registered.
+% [R] dgp_study.md "Setup" notes and meta (machine, 12 workers, wall 24.53 h for 508 replications, 92 from earlier records), dgp_study_pilot.md (4.21 h for 72 replications; estimate remaining 28.2 h), dgp_study_preregistration.md l.204-206 (the four-hour rule) and its addendum l.223-227 (75e0c2a, 2026-10-27, after the run; l.225: waived 2026-10-25, after the pre-pilot estimate of about 10 h and before the pilot finished), dgp_study.json meta.notes[0] (the same timing), PR #15 body (finish 2026-10-27 09:57 EDT; commit 1959834 at 09:58 EDT); the reports at commit 75e0c2a (PR #15), the report files unchanged since 1959834; pending rows: dgp_study.json "pending"
 
 % -------------------------------------------------------------------------------------
 \section{Numerical robustness and performance detail}\label{app:numerics}
@@ -2950,15 +3037,16 @@ FRED-QD 2026-09 & \texttt{a144b1547ddbad5c68fc934c90c0c0f9837a5139571ba8e64afcc2
 
 \emph{Regeneration.}
 The \code{Makefile} in \code{docs/paper} regenerates the figures and the generated table bodies
-from committed code and data, \code{make tables} the 14 generated tables and \code{make figures}
+from committed code and data, \code{make tables} the 15 generated tables and \code{make figures}
 the figures (20\,s and 39\,s on the Apple M5 Max), and \code{make pdf} builds the paper; each
-script names its data source in its header, and \cref{tab:TabG2} gives the command for each float.
+script names its data source in its header, and \cref{tab:TabG2} gives the command for each planned float
+(\cref{tab:TabDdgp}, added after the release, comes from \code{figures/tab_dgp.py}).
 The remaining tables, among them 11 of the floats that the plan lists in \cref{tab:TabG2}, are typed
 into the sources, with the source of each entry in its evidence tags.
 The acceptance tables and figures need \code{benchmarks/reports/clark_ravazzolo_acceptance.json},
 and \cref{fig:FigF1,fig:FigF3} the per-origin export of the acceptance run, which the paper branch
 holds with its export script.
-% [V] make tables (real 19.81 s) and make figures (real 38.51 s), run 2026-10-24 at paper-draft fd8a3f7 + this stage's edits with the main repository at 4ac7969; every figure PDF other than FigD1 and FigD2 came out byte-identical (git status); figures/tables/tab_environment.tex lower panel: 27 of 38 planned floats have a generator, 11 typed; per-origin export: docs/paper/figures/data/cr_acceptance/ and docs/paper/figures/make_data_cr_per_origin.py
+% [V] make tables (real 19.81 s) and make figures (real 38.51 s), run 2026-10-24 at paper-draft fd8a3f7 + this stage's edits with the main repository at 4ac7969; that make tables run had 14 generators (before tab_dgp.py); tab_dgp.py alone takes 0.047 s real (2026-10-27, Apple M5 Max), so 20 s holds for the 15 (the Makefile's TABLES filters out tab_common); every figure PDF other than FigD1 and FigD2 came out byte-identical (git status); figures/tables/tab_environment.tex lower panel: 27 of 38 planned floats have a generator, 11 typed; per-origin export: docs/paper/figures/data/cr_acceptance/ and docs/paper/figures/make_data_cr_per_origin.py
 
 \emph{What reproduces how.}
 \cref{tab:TabG1} states each guarantee with its scope.
@@ -3407,10 +3495,10 @@ Q14 was resolved as an agent recommended, at the author's instruction of 2026-10
 \S12.2 records that the recommendations for the earlier open questions were ``accepted as stated''
 on 2026-10-22, without saying by whom.
 % [R] session record of 2026-10-24 ("Q14 önerine göre yap"); DESIGN D-35
-Merging was reserved for him (``merging is the user's decision'', issue~\#3), and all ten pull
-requests (the nine of the commit record and \#11, merged after the release) were merged from his
-GitHub account.
-% [V] gh pr list --state all --json mergedBy: yigitokar for #1, #2 and #4-#11 (checked again 2026-10-24 after the merge of #11; #1, #2 and #4-#10 are the nine GitHub merges of the commit record, the last, #10, being 4ac7969; #11 = 3644c4b, merged 2026-10-24T16:17:23Z); issue #3 last comment ("PR #4 merged into phase-1-conjugate by the user")
+Merging was reserved for him (``merging is the user's decision'', issue~\#3): the ten pull requests
+merged by 24 October 2026 (the nine of the commit record and \#11, merged after the release) were
+merged from his GitHub account, and so was every pull request merged after them up to 27 October.
+% [V] gh pr list --state all --json mergedBy: yigitokar for #1, #2 and #4-#11 (checked again 2026-10-24 after the merge of #11; #1, #2 and #4-#10 are the nine GitHub merges of the commit record, the last, #10, being 4ac7969; #11 = 3644c4b, merged 2026-10-24T16:17:23Z); checked again 2026-10-27 (gh pr list --state all --json number,state,mergedBy,mergedAt): mergedBy yigitokar for all 27 merged pull requests, #1, #2, #4-#13 and #16-#30, the last merged 2026-10-27T02:27:27Z (#28); #14, #15 and #31-#34 open; issue #3 last comment ("PR #4 merged into phase-1-conjugate by the user")
 Pull requests \#1 and \#4--\#11 were merged by an agent session at the author's explicit
 instruction in that session (\#8--\#10 under his instruction to finish the paper and prepare its
 arXiv package, \#11 under his instruction to merge it and update the paper); who merged \#2 is not on record beyond the account.

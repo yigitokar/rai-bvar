@@ -26,11 +26,10 @@ from texmarks import find_marks  # noqa: E402
 OUT = HERE / "AUTHOR_TODO.md"
 
 AFTER_SUBMISSION = r"""
-These are the only open items for the author. The paper claims no reading statement, tag, PyPI
-release, DOI or third-party finding, so its text is correct without them; each item says what to
-change in the paper if it is done. The repository URL and the pointers to the branch `paper-draft`
-need the two release steps at the top of item 2. `ARXIV_SUBMISSION.md` has the arXiv metadata, the
-file to upload (tested with pdfLaTeX) and the submission steps; these two release steps block it.
+These are the only open items for the author. The paper claims no reading statement, PyPI
+release or DOI, so its text is correct without them; each item says what to change in the paper if
+it is done. `ARXIV_SUBMISSION.md` has the arXiv metadata, the file to upload (tested with pdfLaTeX)
+and the submission steps.
 
 1. **Your own statement for App. J (optional).** The paper makes no claim about how far you read the
    code, the derivations, the pull requests or the paper: the earlier `author:` marks and the
@@ -44,34 +43,36 @@ file to upload (tested with pdfLaTeX) and the submission steps; these two releas
    App. J and the authorship statement against arXiv's policy and the target venue's, and any
    acknowledgements.
 
-2. **Release: public repository, paper branch, tag, PyPI, Zenodo.** No tag exists on origin (checked
-   2026-10-24 07:32Z, 08:27Z and 09:28Z: `git ls-remote --tags origin`, `gh api .../tags` and
-   `.../releases` empty), so the paper names release 0.2.0 by its commit and pins the full hash in
-   the install line of App. G:
-   `pip install git+https://github.com/yigitokar/rai-bvar@4ac796997df80157d086c568714168fc2387f093`.
-   - Make the repository public; the paper gives its URL (Section 1, Section 13, App. G).
-   - Push the branch `paper-draft` to origin (the submitted sources are local commits ahead of
-     origin/paper-draft, which is at 945e43c): App. F (the convergence diagnostic), App. G (the
-     paper's sources, figure and table scripts) and the caption of Fig. F.1 (the per-origin export)
-     point to that branch.
-   - Optionally create and push the tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093 (and a
-     GitHub release); the install line can then read `@v0.2.0` (App. G, `sections/appendix.tex`,
-     "Code and data availability"). Both forms were checked offline on 2026-10-24 from a scratch
-     clone (`uv pip install --offline --no-deps "git+file://<clone>@<hash>"`, and `@v0.2.0` after
-     tagging 4ac7969 in that clone only): each installs rai-bvar 0.2.0. Keep the hash line until the
-     tag is on origin.
+2. **Release: PyPI and Zenodo (optional).** Done on 2026-10-24: the repository is public, the tag
+   `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093 and its GitHub release exist, and the branch
+   `paper-draft` is pushed (App. F, App. G and the caption of Fig. F.1 point to it). The install line
+   of App. G reads `pip install git+https://github.com/yigitokar/rai-bvar@v0.2.0`; at 09:41Z it
+   installed rai-bvar 0.2.0 from the network into a fresh Python 3.12 environment.
    - A PyPI release and Zenodo DOIs (the release, and the replication outputs) do not exist and the
      paper claims none ("there is no PyPI release and no archived DOI", App. G; "it is not on PyPI",
      Section 12, "Release state"). If you create them, update those two places and the install line.
 
-3. **Third-party observations (OUTLINE TODO 13), only if you want to report them.** The paper states
-   no finding about another package's sampler (App. D, "Parity with independent implementations";
-   the notes for other implementations in Section 9 name no package).
-   Before any such statement: re-test the `stochvol` sign-fold (D-7) and Student-$t$ observations on
-   the current `stochvol` release (`tests/parity/SV_PARAMETRIZATION.md` section 3.2), and the R
-   `BVAR` 1.0.5 and Bank of England `bvar` 0.3.5 items on current versions; then contact the
-   maintainers of `stochvol`/`factorstochvol`, R `BVAR`, the Bank of England `bvar` and
-   `bayesianVARs`, using the maintainer fields on CRAN and PyPI.
+3. **Third-party observations (OUTLINE TODO 13).** After the release the paper states one
+   observation about another package, as a neutral black-box observation and, by your decision,
+   without notifying its maintainers first ("Haber vermeden yaz"): on one fixture the SV predictive
+   that `bayesianVARs` 0.1.8's `predict()` returns at h >= 2 differs from the exact oracle's, while a
+   path recursion from its own posterior draws agrees; no cause is claimed (App. D, "Parity with
+   independent implementations"). Contacting the `bayesianVARs` maintainers later stays your choice.
+   The paper states no finding about the other packages' samplers (the notes for other
+   implementations in Section 9 name no package). Before any such statement: re-test the `stochvol`
+   sign-fold (D-7) and Student-$t$ observations on the current `stochvol` release
+   (`tests/parity/SV_PARAMETRIZATION.md` section 3.2), and the R `BVAR` 1.0.5 and Bank of England
+   `bvar` 0.3.5 items on current versions; then contact the maintainers of
+   `stochvol`/`factorstochvol`, R `BVAR` and the Bank of England `bvar`, using the maintainer fields
+   on CRAN and PyPI.
+
+4. **PR #15 (the DGP study, App. D.11).** App. D.11, TabDdgp (`figures/tab_dgp.py`) and the
+   evidence comments of Sections 1, 6 and 12 cite commits 58ab09f (where all 600 records were made;
+   each record's `git_commit`) and 75e0c2a (the reports), which are on the open draft PR #15
+   (branch `claude/compassionate-bose-ed1c0b`), not yet on `main`. Keep that branch, and merge PR #15
+   with a merge commit (not squash or rebase), so that both commits stay reachable and `make tables`
+   keeps working. `RUN_COMMIT` in `tab_dgp.py` must stay 58ab09f, because the records name it; after
+   a merge, the paper may add "merged into main as <commit>" next to "commit 75e0c2a (PR #15)".
 """
 
 
