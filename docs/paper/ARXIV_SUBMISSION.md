@@ -1,22 +1,24 @@
 # arXiv submission of the rai-bvar paper
 
 What to paste into the arXiv form, which file to upload, and how that file was tested with arXiv's
-engine (pdfLaTeX). State of 2026-10-25, from the sources of the latest commit that changes this
+engine (pdfLaTeX). State of 2026-10-27, from the sources of the latest commit that changes this
 file on branch `paper-draft` (first written on 2026-10-24 in 8511b6c; Sections 0, 1 and 4 updated
 after the final adversarial check of that day; Sections 0, 1, 2, 4, 5 and 6 updated after the
 post-release F1 edits of cd8d605; Sections 0, 1 and 4 updated on 2026-10-25 after the weekly-tier
-edits of fae94d7). Every number below comes from a build or a command run on 2026-10-24 or
-2026-10-25; the commands are given so that they can be repeated.
+edits of fae94d7, and Sections 0, 1, 2, 4, 5 and 6 on 2026-10-27 after the DGP-study and
+bayesianVARs edits of c39ab47). Every number below comes from a build or a command run between
+2026-10-24 and 2026-10-27; the commands are given so that they can be repeated.
 
 ## 0. Before you submit
 
-Done on 2026-10-24 and 2026-10-25:
+Done on 2026-10-24 to 2026-10-27:
 - **Repository public:** https://github.com/yigitokar/rai-bvar (`gh repo view --json visibility` returns `PUBLIC`).
 - **Tag and release:** tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093, with a GitHub release (https://github.com/yigitokar/rai-bvar/releases/tag/v0.2.0). The install line in App. G uses `@v0.2.0`.
 - **Branch pushed:** `paper-draft`, which holds the paper's sources, figure and table scripts and data that App. F, App. G and Fig. F.1 point to.
 - **Date:** the title-page date is fixed to "October 2026" (`main.tex`, submission build), so arXiv's compile date does not appear.
 - **After the release:** PR #11 (merge 3644c4b) replaced the non-portable F1 replay test; Sections 9 and 12 and Apps. D, E and J describe it (cd8d605), and the paper still describes release 0.2.0.
 - **Weekly tier on Linux:** after the release it passed in full twice on x86-64 Linux (runs 40106532730 and 40140397848; the second sharded by PR #12, merge 2c71fb2); Sections 8, 9 and 12 and Apps. D, G and J say so.
+- **DGP study and bayesianVARs, after the release:** App. D.11 and Table D.6 give the pre-registered size and power study of the verdict rule (commit 75e0c2a, PR #15; records at 58ab09f); App. D.7 the black-box run of bayesianVARs (PR #21). Sections 1, 2, 6.6, 8, 12 and 13 point there; the main text still ends on p. 35.
 
 Still yours, both optional:
 - Your own statement for App. J (AUTHOR_TODO.md, item 1). The paper makes no claim about how far you read the code or the paper, nor about whether you reviewed the acceptance run's pre-registered settings before its launch.
@@ -24,21 +26,21 @@ Still yours, both optional:
 
 ## 1. The file to upload
 
-`docs/paper/arxiv.tar.gz`: 48 files, 508,418 bytes, SHA-256
-`0b15764d87e37a08d601d1ba8384c4638ae0a324238dcec014287bf2a48391c2` (the tarball tested below,
-built 2026-10-25 13:30Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1` from the sources of
+`docs/paper/arxiv.tar.gz`: 49 files, 511,550 bytes, SHA-256
+`dc656718f787545ee9b516952954d18983c5f03679e700922955e52f923468e3` (the tarball tested below,
+built 2026-10-27 15:16Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1` from the sources of
 the commit that records this checksum).
 
-arXiv publishes the source files of a submission, so `make_arxiv.sh` ships its 31 `.tex` files
+arXiv publishes the source files of a submission, so `make_arxiv.sh` ships its 32 `.tex` files
 (`main.tex`, `sections/*.tex`, `figures/tables/*.tex`, `acceptance_values.tex`) stripped of
 comment text by `strip_comments.py`; the annotated sources, with their evidence notes and TODO
 tags, stay on the branch `paper-draft`. Checked on 2026-10-24:
-- stripping the committed `.tex` files reproduces the 31 shipped copies byte for byte, and the
+- stripping the committed `.tex` files reproduces the 32 shipped copies byte for byte, and the
   other 17 files are byte-identical to the sources (`main.bbl` is generated from `refs.bib` and
   gitignored; the test's TeX Live 2026 BibTeX regenerates it byte for byte);
 - the stripped tarball typesets to the same PDF as an unstripped one: the pdfLaTeX builds of both
-  have 107 pages with byte-identical page content streams (compared with pypdf; re-checked for the
-  tarball above, the unstripped files taken from fae94d7);
+  have 109 pages with byte-identical page content streams (compared with pypdf; re-checked for the
+  tarball above, the unstripped files taken from c39ab47);
 - the shipped `.tex` files hold no comment text; the only local path left in the tarball is in the
   header comments of `code/ex_a.py` and `code/ex_b.py`, lines the listings do not print.
 
@@ -58,7 +60,7 @@ Contents (`make_arxiv.sh` collects them from what the sources read):
 - `main.tex`, `main.bbl` (arXiv does not run BibTeX; it reads this file), `refs.bib`,
   `acceptance_values.tex` (the filled acceptance numbers; the build needs it);
 - `sections/*.tex` (15 files: the abstract, Sections 1 to 13, the appendices);
-- `figures/tables/*.tex` (14 generated table bodies);
+- `figures/tables/*.tex` (15 generated table bodies);
 - `figures/*.pdf` (the 11 figure PDFs that the sources include);
 - `code/ex_a.py`, `code/ex_b.py`, `code/out/ex_a.txt`, `code/out/ex_b.txt`: the inputs of
   `\lstinputlisting` for Listings 1, 2 and G.1 to G.4. The paper prints them, so the build needs
@@ -77,20 +79,22 @@ unpacks the tarball twice, each time into a fresh temporary directory, and compi
 
 | Build | Runs | Exit codes | TeX errors | Undefined citations / references | Rerun requests | Missing characters | Overfull boxes | Pages |
 |---|---|---|---|---|---|---|---|---|
-| (a) as arXiv does | pdflatex ×3 on the shipped `main.bbl`, no BibTeX | 0 0 0 | 0 | 0 / 0 | 0 | 0 | 0 | 107 |
-| (b) with BibTeX | pdflatex, bibtex, pdflatex, pdflatex | 0 0 0 0 | 0 | 0 / 0 | 0 | 0 | 0 | 107 |
+| (a) as arXiv does | pdflatex ×3 on the shipped `main.bbl`, no BibTeX | 0 0 0 | 0 | 0 / 0 | 0 | 0 | 0 | 109 |
+| (b) with BibTeX | pdflatex, bibtex, pdflatex, pdflatex | 0 0 0 0 | 0 | 0 / 0 | 0 | 0 | 0 | 109 |
 
 - Missing characters are logged: this LaTeX sets `\tracinglostchars=2` by default (checked with a
   test file), and none were logged.
 - The `.bbl`: build (b)'s BibTeX 0.99e with TeX Live 2026's `plainnat.bst` regenerated a
   `main.bbl` byte-identical to the shipped one, which tectonic's BibTeX 0.99d wrote (natbib,
   `plainnat`, 129 entries, 0 BibTeX warnings). The shipped `.bbl` therefore matches TeX Live 2026.
-- The PDFs of (a) and (b) have identical text on all 107 pages.
+- The PDFs of (a) and (b) have identical text on all 109 pages (re-checked for c39ab47; a fourth
+  pdflatex pass again leaves `main.aux` unchanged).
 - Converged: a fourth pdflatex pass on (a) leaves `main.aux` unchanged. tectonic's own rerun rule
   is not as reliable: from no `main.aux`, the sources of cd8d605 stopped one pass short, at 108
   pages with the main text spilling onto p. 36, and one more pass gave the converged 107. `build.sh`
   and `make_arxiv.sh --test` therefore rerun tectonic while `main.aux` still changes (at most three
-  more times); a fresh and an incremental `build.sh` now give the same text on all 107 pages.
+  more times); a fresh and an incremental `build.sh` now give the same text on all pages (109 at
+  c39ab47).
 - Not counted as problems: 52 underfull-box messages (`build.sh` does not check these either).
   One of them quotes the code name `TracerArrayConversionError`, which is text from the paper,
   not a TeX error.
@@ -132,25 +136,26 @@ references, 0 multiply-defined labels and 0 overfull boxes, on 106 pages.
 
 Compared by text extraction (PyMuPDF) and by the `.aux` label tables of the two builds.
 
-1. **The same document.** Both have 107 pages. In both, the main text runs from p. 1 to p. 35,
-   App. A starts on p. 36, and the appendices end and the references start on p. 98. Both have 11
-   figures, 29 tables, 6 listings, 13 algorithms and 129 references. All 245 labels have the same
-   numbers in both builds. (Re-measured on 2026-10-25 for the tarball of Section 1, the tectonic
-   side being `build.sh`'s converged build of fae94d7.)
-2. **Page drift.** 234 of the 245 labels fall on the same page. Eleven are one page off, all
-   pdfLaTeX one page earlier except one: `sec:walk-mcmc` (p. 19 in tectonic, p. 18 in pdfLaTeX),
+1. **The same document.** Both have 109 pages. In both, the main text runs from p. 1 to p. 35,
+   App. A starts on p. 36, and the appendices end and the references start on p. 100. Both have 11
+   figures, 30 tables, 6 listings, 13 algorithms and 129 references. All 247 labels have the same
+   numbers in both builds. (Re-measured on 2026-10-27 for the tarball of Section 1, the tectonic
+   side being `build.sh`'s converged build of c39ab47.)
+2. **Page drift.** 235 of the 247 labels fall on the same page. Twelve are one page off, all
+   pdfLaTeX one page earlier except two: `sec:walk-mcmc` (p. 19 in tectonic, p. 18 in pdfLaTeX),
    `sec:validation-cost` and `sec:validation-tiers` (20, 19), `sec:robustness-f3` (26, 25),
    `sec:replication-prereg` and `sec:replication-first-run` (29, 28), `sec:replication-caveats`
-   (31, 32, the exception), Fig. 6 (`Fig6`, `fig:Fig6`, `fig:cr-orderings`: 32, 31) and
-   `sec:conclusion` (35, 34). (Earlier versions of this note listed five and then thirteen; measured
-   the same way, the sources of 59573af gave fifteen and those of 4ed7de2 thirteen.)
-   - Pages 1–18, 36–41, 44–90 and 94–107 have the same text, up to the extraction differences of item 4
+   (31, 32, an exception), Fig. 6 (`Fig6`, `fig:Fig6`, `fig:cr-orderings`: 32, 31),
+   `sec:conclusion` (35, 34) and Listing G.4 (`lst:Lst2-out`: 94, 95, the other exception). (Earlier
+   versions of this note listed five, thirteen and eleven; measured the same way, the sources of
+   59573af gave fifteen, those of 4ed7de2 thirteen and those of fae94d7 eleven.)
+   - Pages 1–18, 36–41, 44–92 and 96–109 have the same text, up to the extraction differences of item 4
      (a word-sequence similarity of at least 0.97 per page: PyMuPDF text, whitespace-split words,
      Python's difflib). On pp. 41–42 one line of App. B.5 crosses the page break (pdfLaTeX sets it
      on p. 41), which, with the math of App. B.5 and B.6, puts pp. 42–43 at 0.956 and 0.960; no
      label moves there.
    - The drift starts after Listings 1 and 2 (pp. 18–19) and after Listings G.1–G.4
-     (pp. 88–92). It ends at the page break before the appendices and at p. 94.
+     (pp. 90–94). It ends at the page break before the appendices and at p. 96.
    - The code listings use different typewriter fonts in the two engines: DejaVu Sans Mono under
      XeTeX and Latin Modern Typewriter under pdfTeX (`\lstfontfamily` in `main.tex`).
 3. **Visible glyph differences, in the listings only.** tectonic prints `-` and `*` as a minus
@@ -194,7 +199,7 @@ rai-bvar, an Apache-2.0 Python package, is built on the position that a density-
 **Comments**
 
 ```
-107 pages (main text 35 pages, Appendices A-J, references), 11 figures, 29 tables. Code (Apache-2.0): https://github.com/yigitokar/rai-bvar ; release 0.2.0 (tag v0.2.0) is commit 4ac7969
+109 pages (main text 35 pages, Appendices A-J, references), 11 figures, 30 tables. Code (Apache-2.0): https://github.com/yigitokar/rai-bvar ; release 0.2.0 (tag v0.2.0) is commit 4ac7969
 ```
 
 **Primary category: stat.CO** (Statistics, Computation). The paper is a software paper about
@@ -233,13 +238,13 @@ exclusive transfer of copyright, choose arXiv's non-exclusive distribution licen
    browser window, and that `git ls-remote origin paper-draft` shows the commit that adds this
    file, or a later one.
 2. `cd docs/paper && STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1`. It must end with
-   `pdfLaTeX test OK`, and the tectonic test must report 107 pages.
+   `pdfLaTeX test OK`, and the tectonic test must report 109 pages.
 3. On arxiv.org, choose "Start new submission". Select the license (Section 5) and the primary
    category stat.CO.
 4. Upload `docs/paper/arxiv.tar.gz` as a single file; arXiv unpacks it. If arXiv asks for the
    top-level file, it is `main.tex`. Let arXiv process it.
 5. Check arXiv's PDF:
-   - 107 pages;
+   - 109 pages;
    - the title-page footnote reads "Appendix J states what the agents did ...";
    - Listing 1 on p. 18 and App. A starting on p. 36, as in the TeX Live 2026 test (if arXiv's
      TeX Live differs, a shift of a page is not an error; see Section 4, item 2);
