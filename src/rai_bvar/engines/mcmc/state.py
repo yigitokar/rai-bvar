@@ -846,10 +846,15 @@ def draw_template(static: StaticConfig) -> ParamDraw:
         "outlier_t": lambda: OutlierTDraw(log_p=_f(n), log1m_p=_f(n), nu=_f(n)),
     }[vol.transitory]()
     reduced = static.mean.kind == "linear_reduced"
+    coef: Any = Empty()
+    if static.coef.kind == "ssvs":  # the SSVS indicators ride with the stored draw (P3 E164(c))
+        from rai_bvar.components.coef.global_local import SSVSDraw
+
+        coef = SSVSDraw(incl=np.zeros((n, k), np.int8))
     return ParamDraw(
         glob=GlobDraw(
             mean=CCCMDraw(Pi=_f(k, n)) if reduced else Empty(),
-            coef=Empty(),
+            coef=coef,
             vol=CommonSVDraw(h_T=_f(), rho=_f(), sigma=_f()) if vol.common else Empty(),
             struct=Empty(),
         ),

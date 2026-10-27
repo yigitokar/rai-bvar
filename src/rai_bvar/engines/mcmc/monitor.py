@@ -18,6 +18,15 @@ when ``G ≤ max(2p, n)`` (global, olcl-lagwise, equation-wise groups) and secon
 scales are latent: neither monitored nor stored (§3.7). Under a varying coefficient prior the log
 prior reads the deviations' ``dev_log`` and the scales from the full chain state.
 
+Phase 3 CommonSV (P3 D-52, §5.5): the common ``h`` at the last data row ``common_h_T``, its
+persistence ``common_rho`` and scale ``common_sigma`` are primary scalars (with every ``log λ_i``
+of the Constant cores, as for ``Constant``); ``common_h_0`` and ``common_h_mid`` (data rows ``0``
+and ``⌈T_eff/2⌉ − 1``) are secondary. The log prior adds the step's ``log p(h, ρ, σ_h)``, which
+needs the data mask (``CommonSVStep.log_prior_data``). The sampler's per-chain scalars
+``acc_csv_h``, ``acc_csv_rho``, ``acc_csv_newton`` (E132) go to the table's attrs, never to
+per-equation columns, and the warnings of P3 §8 name a low ``h`` block acceptance and any Newton
+cap hit.
+
 On device, :func:`monitor_values` returns one array per *field* (``"mu"``: one value per
 equation, ``"a"``: the strict lower triangle in row-major order, ``"loglik"``: a scalar); the
 runner stacks them to ``(chains, draws, …)``. On the host a :class:`MonitorSpec` names every scalar
@@ -83,7 +92,13 @@ _FOLD_MAX = 0.01  # NC sign-fold fraction (D-7)
 _NU_BOUND_MASS = 0.5  # ν posterior mass at the grid's upper bound
 _OUTLIER_AT_K_MAX = 0.01  # fraction of rows whose outlier scale sits at K
 _ORDERING_N = 4  # R8 note from this many variables on
-_CHAIN_SCALARS = ("min_pivot",)  # per-chain sampler scalars (Status.min_pivot), not per equation
+_CHAIN_SCALARS = (  # per-chain sampler scalars, not per equation (P3 E132: the CommonSV rates)
+    "min_pivot",
+    "csv_h",
+    "csv_rho",
+    "csv_newton",
+)
+_CSV_H_ACCEPT_MIN = 0.1  # CommonSV h block acceptance below this: "decrease CommonSV(block=…)"
 _AUX_OUTLIER = ("outlier_share", "outlier_at_max")  # auxiliary per-equation monitor fields
 _STATS_CACHE_SIZE = 1 << 14  # memoised (R-hat, bulk ESS) pairs, keyed by content (≈ 3 MB)
 
@@ -141,10 +156,14 @@ def monitor_fields(
     else:
         core = ("sigma", "h_T") if vol.rw else ("mu", "phi", "sigma", "h_T")
         out.extend(MonitorField(name, "equation", True) for name in core)
+    if vol.common:  # CommonSV (P3 D-52): h_T, ρ, σ_h primary
+        out.extend(MonitorField(name, "scalar", True) for name in _CSV_PRIMARY)
     if n >= 2:
         out.append(MonitorField("a", "pair", False))
     if vol.persistent == "sv":
         out.extend(MonitorField(name, "equation", False) for name in ("h_1", "h_mid"))
+    if vol.common:  # secondary: h at the first and the middle data row
+        out.extend(MonitorField(name, "scalar", False) for name in _CSV_SECONDARY)
     if linear and n_det >= 1:  # the constant is the first deterministic column (data/design.py)
         out.append(MonitorField("intercept", "equation", False))
     if vol.has_outliers:
@@ -154,6 +173,10 @@ def monitor_fields(
     out.extend(gl_fields(coef, n, lags))
     out.append(MonitorField("log_prior", "scalar", False))
     return tuple(out)
+
+
+_CSV_PRIMARY = ("common_h_T", "common_rho", "common_sigma")
+_CSV_SECONDARY = ("common_h_0", "common_h_mid")
 
 
 def auxiliary_fields(vol: VolStatic) -> tuple[str, ...]:
@@ -386,8 +409,11 @@ def monitor_values(
     per = program.eq_map(body)(jnp.arange(n, dtype=jnp.int32), st.eq, prior.eq, cache.eq)
     log_prior = jnp.sum(per["log_prior"])
     for step in (*getattr(program, "global_pre", ()), *getattr(program, "global_post", ())):
+        data_fn = getattr(step, "log_prior_data", None)
         state_fn = getattr(step, "log_prior_state", None) if coef_log else None
-        if state_fn is not None:  # P3 §3.7: a varying prior's density needs the full state
+        if data_fn is not None:  # P3 §5.5: the CommonSV h prior needs the data mask
+            log_prior = log_prior + data_fn(glob, prior, data)
+        elif state_fn is not None:  # P3 §3.7: a varying prior's density needs the full state
             log_prior = log_prior + state_fn(st, prior, program.eq_map)
         else:
             log_prior = log_prior + step.log_prior(glob, prior)
@@ -413,6 +439,15 @@ def monitor_values(
     if "a" in names:
         rows, cols = np.tril_indices(n, -1)
         values["a"] = structure.extract(st.eq.struct, glob).a[rows, cols]
+    if "common_h_T" in names:  # CommonSV (P3 D-52): h at data rows T_eff − 1, 0, ⌈T_eff/2⌉ − 1
+        gv = glob.vol
+        T_eff = jnp.asarray(data.T_eff, jnp.int32)
+        values["common_h_T"] = lax.dynamic_index_in_dim(gv.h, T_eff - 1, keepdims=False)
+        values["common_rho"] = gv.rho
+        values["common_sigma"] = jnp.exp(gv.log_sigma)
+        values["common_h_0"] = gv.h[0]
+        mid = (T_eff + 1) // 2 - 1
+        values["common_h_mid"] = lax.dynamic_index_in_dim(gv.h, mid, keepdims=False)
     if "log_p" in names:
         values["log_p"] = trans.log_p
     if "nu" in names:
@@ -590,13 +625,20 @@ def converged(
 
 def is_order_invariant(static: StaticConfig) -> bool:
     """Whether the composition's posterior is invariant to the variable ordering (N08 §B2):
-    in Phase 2 only ``Linear(form="reduced") × Constant(prior="iw_equivalent")`` (with
-    ``κ_a = 1``, Chan 2022 Prop. 1); every triangular SV, outlier or t composition is not."""
+    ``Linear(form="reduced") × Constant(prior="iw_equivalent")`` (with ``κ_a = 1``, Chan 2022
+    Prop. 1) and, in Phase 3, the shared-factor path (the conjugate prior × ``CommonSV``: the NIW
+    prior with a common scalar volatility, exactly invariant; P3 §5.3, E99). Every triangular SV,
+    outlier or t composition is not. Mode II × ``Constant`` at ``cross = contemp = 1`` is
+    invariant too, but those values are data, not static: the resolution step passes
+    ``DiagnosticsInput.order_invariant`` for it (E99, E130)."""
+    if static.mean.const_path == "shared_factor":
+        return True
     return (
         static.mean.kind == "linear_reduced"
         and static.struct.contemp_scaling == "lambda"
         and static.vol.persistent == "constant"
         and static.vol.transitory == "none"
+        and not static.vol.common
     )
 
 
@@ -668,11 +710,13 @@ def _values(x: np.ndarray, mask: np.ndarray, digits: int = 3) -> list[float]:
     return [round(float(v), digits) for v in x[mask]]
 
 
-def sv_budget_message(chains: int, draws: int) -> str:
+def sv_budget_message(chains: int, draws: int, *, common: bool = False) -> str:
     """The D-35 warning of a stochastic-volatility fit below the SV default budget (DESIGN §8.3):
-    the evidence behind the default (DESIGN Q14) and how to raise the draws."""
+    the evidence behind the default (DESIGN Q14) and how to raise the draws. ``common`` names
+    ``CommonSV``, which counts as stochastic volatility for D-35 (P3 D-51, §8)."""
+    kind = "CommonSV stochastic-volatility" if common else "stochastic-volatility"
     return (
-        f"stochastic-volatility fit with {chains} × {draws:,} kept draws, fewer than the SV "
+        f"{kind} fit with {chains} × {draws:,} kept draws, fewer than the SV "
         f"default of {SV_DEFAULT_DRAWS:,} per chain (D-35): the SV parameters mix slowly. In the "
         "Phase 2 evidence (DESIGN Q14) SV fits at 4 × 2,000 missed the R-hat/ESS gate routinely "
         "(the README example at 0 of 11 origins), Clark–Ravazzolo SV(rw) converged at 68% of "
@@ -731,6 +775,28 @@ def _gl_warnings(
     return out
 
 
+def _csv_warnings(acc: Mapping[str, np.ndarray]) -> list[str]:
+    """P3 §8 CommonSV warnings from the per-chain rates (E132): an ``h`` block acceptance below
+    0.1 in some chain, and any Newton iteration cap hit (informational: the draw is exact)."""
+    out: list[str] = []
+    rate = acc.get("csv_h")
+    if rate is not None and np.size(rate):
+        low = float(np.min(rate))
+        if low < _CSV_H_ACCEPT_MIN:
+            out.append(
+                f"CommonSV h block acceptance {low:.3f} is below {_CSV_H_ACCEPT_MIN} (lowest "
+                "chain): the blocks are too long for the data; decrease CommonSV(block=…)"
+            )
+    cap = acc.get("csv_newton")
+    if cap is not None and np.size(cap) and float(np.max(cap)) > 0.0:
+        out.append(
+            f"CommonSV h step: the Newton search for a block's proposal mode hit its iteration "
+            f"cap or stalled ({float(np.max(cap)):.3g} blocks per sweep in the worst chain); "
+            "informational: the draw is exact, only the proposal is less efficient"
+        )
+    return out
+
+
 def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
     """Every warning of the DESIGN §8.3 table that applies, in the table's order.
 
@@ -763,7 +829,7 @@ def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
             eb_converged=inputs.eb_converged,
         )[1]
     if inputs.sv_budget is not None:
-        out.append(sv_budget_message(*inputs.sv_budget))
+        out.append(sv_budget_message(*inputs.sv_budget, common=vol.common))
     if inputs.mon is not None and spec is not None:
         out += _gl_warnings(inputs.mon, spec, static, settings)
     acc = _acc_names(inputs.acc)
@@ -779,6 +845,8 @@ def warning_catalogue(inputs: DiagnosticsInput) -> list[str]:
                 "correction mixes poorly there (N01 §10.2); acceptance alone is not enough, check "
                 "the h diagnostics and consider a longer burn-in"
             )
+    if vol.common:
+        out += _csv_warnings(acc)
     if vol.persistent == "sv" and "fold" in acc:
         fold, bad = _mean_above(acc["fold"], n, _FOLD_MAX)
         if bad.any():

@@ -448,7 +448,7 @@ def _prior_fn(static: Any) -> Any:
     from jax import random
     from jax.scipy.linalg import solve_triangular
 
-    from rai_bvar.validation.reference import effective_log_var
+    from rai_bvar.validation.reference import state_log_var
     from rai_bvar.validation.simulate import prior_sample, unit_lower
 
     n = static.shapes.n
@@ -456,7 +456,7 @@ def _prior_fn(static: Any) -> Any:
     def one(key: Any, prior: Any, T_eff: Any) -> tuple[Any, Any]:
         st = prior_sample(random.fold_in(key, 0), prior, static, T_eff + 1)
         A = unit_lower(st.eq.struct.a)
-        lv = effective_log_var(st.eq.vol, static)  # (n, T_pad)
+        lv = state_log_var(st, static)  # (n, T_pad); under CommonSV it adds glob.vol.h
         lv_T = jnp.take(lv, T_eff - 1, axis=1)
         lv_next = jnp.take(lv, T_eff, axis=1)
         L_T = solve_triangular(A, jnp.diag(jnp.exp(0.5 * lv_T)), lower=True, unit_diagonal=True)
