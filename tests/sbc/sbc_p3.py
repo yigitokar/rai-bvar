@@ -23,7 +23,8 @@ the predictive ``y_{T+1}`` through the production forecast core (exogenous rows 
 
 Sizes ``"full"`` (``n = 3, p = 2, T_eff = 50``) as Phase 2's SBC; the configuration is
 :data:`SBC_CONFIG` (P2 §9.6 with Phase 2's live cap ``t_max = 200``, P2 §9.6 erratum of
-2026-10-23); ``RAI_BVAR_SBC_N`` overrides ``N`` for local smoke runs.
+2026-10-23; ``t_max = 400`` for rows 304, 306, 308, 311, 315, 325, 326 and 327 by Q44, E179:
+:data:`SBC_OVERRIDES`); ``RAI_BVAR_SBC_N`` overrides ``N`` for local smoke runs.
 """
 
 from __future__ import annotations
@@ -59,25 +60,33 @@ _F64 = jnp.float64
 SEED = 20261026  # the Phase 2 SBC seed (tests/sbc); the keys fold the CRC-32 of the model's name
 SBC_N = int(os.environ.get("RAI_BVAR_SBC_N", "1000"))
 SBC_CONFIG: dict[str, Any] = {"L": 99, "burn": 300, "pilot": 1000, "t_max": 200, "alpha": 1e-2}
+#: Per-row deviations from :data:`SBC_CONFIG`, keyed by row, as Phase 2's ``SBC_OVERRIDES`` gives
+#: row 18 its cap (``tests/sbc/test_sbc_compositions.py``). P3 Q44, E179 (owner, 2026-10-26: "Bu 8
+#: satırda t_max = 400"): in run 40414682400 these eight rows failed only the per-replication ESS
+#: rule at ``t_max = 200`` (the γ test clean on all 30 rows), so they run at ``t_max = 400``, fixed
+#: before the rerun; ``N``, ``L``, burn, pilot, the seed, the γ test and both ESS gates are
+#: unchanged, every other row keeps 200, and the rerun's result is binding (E179).
+T_MAX_400_ROWS = (304, 306, 308, 311, 315, 325, 326, 327)
+SBC_OVERRIDES: dict[int, dict[str, int]] = {r: {"t_max": 400} for r in T_MAX_400_ROWS}
 #: P3 §9.11: ``sbc-p3a`` the structural rows, ``sbc-p3b`` the reduced and CommonSV rows (the
-#: Geweke split, by file), split further so that every shard stays within 200 min on a 2-vCPU EPYC
-#: 7763 ("split further if not"): one file per group, ``test_sbc_p3_<group>.py``. The groups are
-#: balanced on a pre-dispatch estimate of each row's SBC time (``SBC_ESTIMATE_MIN``,
-#: below), at most about 87 min each.
+#: Geweke split, by file), split further ("split further if not"): one file per group,
+#: ``test_sbc_p3_<group>.py``. First balanced on the pre-dispatch estimates (``SBC_ESTIMATE_MIN``,
+#: below); re-balanced after Q44 (E179) on the times of run 40414682400 on 4-vCPU runners, with the
+#: eight ``t_max = 400`` rows at twice their measured time (``tools/weekly_shards.py``): the three
+#: heaviest of them (306, 308, 325) and 315 (whose γ stage-1 value 0.072 could trigger a Gandy–Scott
+#: stage 2 at four times the replications) run alone.
 SBC_ROWS: dict[str, tuple[int, ...]] = {
     "a1": (317, 303),
-    "a2": (308, 302),
-    "a3": (306, 304, 305),
-    "a4": (326, 319, 318, 309),
-    "a5": (301, 307, 330, 310),
-    "b1": (315, 314),
-    "b2": (313, 316, 327),
-    "b3": (311, 312, 329),
+    "a2": (308,),
+    "a3": (306,),
+    "a4": (304, 326, 302),
+    "a5": (301, 305, 307, 309, 310, 318, 319, 330),
+    "b1": (315,),
+    "b2": (313, 316),
+    "b3": (311, 327, 329),
     "b4": (325,),
-    "b5": (324,),
-    "b6": (320, 321),
-    "b7": (322, 323),
-    "b8": (328,),
+    "b5": (324, 328, 314),
+    "b6": (320, 321, 322, 323, 312),
 }
 #: The pre-dispatch estimate of each row's SBC time in minutes on an Apple M5 Max under a load
 #: average of 140–170 (about half as fast as the 4-vCPU EPYC 7763 runner; see
@@ -182,8 +191,10 @@ __all__ = [
     "SBC_CONFIG",
     "SBC_ESTIMATE_MIN",
     "SBC_N",
+    "SBC_OVERRIDES",
     "SBC_ROWS",
     "SEED",
+    "T_MAX_400_ROWS",
     "CommonSVPredictiveJoint",
     "iat_summary",
     "mask_common_h",

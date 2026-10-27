@@ -2,7 +2,7 @@
 
 The SBC runs themselves are weekly, one shard file per row group (P3 §9.11: ``sbc-p3a`` the
 structural rows, ``sbc-p3b`` the reduced and CommonSV rows, each split further:
-``test_sbc_p3_a1.py`` … ``…_a5.py``, ``…_b1.py`` … ``…_b8.py``; ``sbc_p3.SBC_ROWS``); the joint
+``test_sbc_p3_a1.py`` … ``…_a5.py``, ``…_b1.py`` … ``…_b6.py``; ``sbc_p3.SBC_ROWS``); the joint
 models are ``sbc_p3.py``'s. Here:
 
 * ``test_quantity_selection_p3`` (PR): every row has a joint model of the right kind (exogenous:
@@ -25,6 +25,8 @@ from jax import random
 from sbc_models import PredictiveJoint, program_for, reference_next
 from sbc_p3 import (
     BY_ID,
+    SBC_CONFIG,
+    SBC_OVERRIDES,
     SBC_ROWS,
     CommonSVPredictiveJoint,
     reference_next_common,
@@ -41,6 +43,9 @@ def test_quantity_selection_p3():
     """Joint-model kinds, quantities and shard coverage (module docstring)."""
     rows = [r for shard in SBC_ROWS.values() for r in shard]
     assert sorted(rows) == list(range(301, 331))  # every row in exactly one shard file
+    # Q44, E179: t_max = 400 for exactly these eight rows, nothing else changed; 200 elsewhere
+    assert SBC_CONFIG["t_max"] == 200
+    assert SBC_OVERRIDES == {r: {"t_max": 400} for r in (304, 306, 308, 311, 315, 325, 326, 327)}
     lagged = {r for r, nm in BY_ID.items() if nm in LAGGED_P3}
     assert lagged == {316, 319, 320, 321, 322, 323, 325, 329, 330}
     kinds = {}

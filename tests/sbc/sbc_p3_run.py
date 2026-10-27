@@ -1,8 +1,9 @@
 """The SBC run of one Phase 3 row (docs/phase3/DESIGN.md §9.5; WP35), shared by the shard files
-``test_sbc_p3_a.py`` and ``test_sbc_p3_b.py``: ``sbc_sequential`` on :func:`sbc_p3.sbc_model` at
-:data:`sbc_p3.SBC_CONFIG` (``N = 1000, L = 99``, burn 300, pilot 1000, ``t_max = 200``, γ test with
-Bonferroni at ``α = 1e-2``, both ESS gates, Gandy–Scott), and its record (``sbc.jsonl``, the JUnit
-property and the session's "Phase 3 validation records")."""
+``test_sbc_p3_<group>.py``: ``sbc_sequential`` on :func:`sbc_p3.sbc_model` at
+:data:`sbc_p3.SBC_CONFIG` (``N = 1000, L = 99``, burn 300, pilot 1000, ``t_max = 200``, and 400 for
+the eight rows of :data:`sbc_p3.SBC_OVERRIDES` by Q44, E179; γ test with Bonferroni at
+``α = 1e-2``, both ESS gates, Gandy–Scott), and its record (``sbc.jsonl``, the JUnit property and
+the session's "Phase 3 validation records")."""
 
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import time
 from typing import Any
 
 import numpy as np
-from sbc_p3 import SBC_CONFIG, SBC_N, SEED, iat_summary, nanmin, sbc_model
+from sbc_p3 import SBC_CONFIG, SBC_N, SBC_OVERRIDES, SEED, iat_summary, nanmin, sbc_model
 
 from rai_bvar.validation.joint import composition_id
 from rai_bvar.validation.sbc import SBCConfig, sbc_sequential
@@ -29,7 +30,8 @@ def record(payload: dict) -> None:
 def run_sbc(name: str, record_property: Any) -> tuple[bool, dict[str, Any], Any]:
     """SBC of row ``name``: ``(passed, record, last stage)``."""
     model, quantities, names = sbc_model(name, "full")
-    cfg = SBCConfig(N=SBC_N, seed=SEED, **SBC_CONFIG)
+    sizes = {**SBC_CONFIG, **SBC_OVERRIDES.get(composition_id(name), {})}  # Q44, E179
+    cfg = SBCConfig(N=SBC_N, seed=SEED, **sizes)
     t0 = time.perf_counter()
     seq, results = sbc_sequential(model, quantities, names, cfg)
     last = results[-1]

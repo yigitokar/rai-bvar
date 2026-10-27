@@ -38,32 +38,45 @@ row adds up to an hour there (the reruns depend on the CPU's rounding).
 structural`` would otherwise collect rows such as ``structural_constant_hs``); ``rest`` ignores the
 Phase 3 mutation file, which runs as its own shard. §9.11 names ``geweke-p3a``/``geweke-p3b`` (the
 structural rows; the reduced and CommonSV rows) and ``sbc-p3a``/``sbc-p3b`` (the same split, by
-file), "each shard ≤ 200 min on a 2-vCPU EPYC 7763, split further if not". Each is split further
-before the first dispatch, on estimates measured on an Apple M5 Max under a load average of
-140–170, about half as fast as the 4-vCPU EPYC 7763 runner (Phase 2's G-full of row 2: 2813 s for
-three Gandy–Scott stages, 9 stage-1 units, so 313 s per stage-1 unit against 156 s on the runner of
-run 40140397848), i.e. about as fast as a 2-vCPU one: G-full 10–11 min for the heaviest rows (302,
-311, 320), and an SBC time per row from a pilot of 200 replications (``tests/sbc/sbc_p3.py``,
-``SBC_ESTIMATE_MIN``: 4–76 min, 930 min in all). Each Phase 3 shard is estimated at most about 87
-min there, Gandy–Scott reruns not counted; the heaviest SBC rows (317, 324, 325) run alone or with a
-light row, so a stage-2 rerun (four times the replications) still fits the 240-min step on a 4-vCPU
-runner:
+file), "each shard ≤ 200 min on a 2-vCPU EPYC 7763, split further if not". Each is split further.
+The first split (19 Phase 3 shards) rested on estimates measured on an Apple M5 Max under a load
+average of 140–170, about half as fast as the 4-vCPU EPYC 7763 runner (Phase 2's G-full of row 2:
+2813 s for three Gandy–Scott stages, 9 stage-1 units, so 313 s per stage-1 unit against 156 s on
+the runner of run 40140397848). Run 40414682400 (4-vCPU runners, ``t_max = 200``) then took 8–105
+min per Phase 3 shard. After Q44 (E179: ``t_max = 400`` for SBC rows 304, 306, 308, 311, 315, 325,
+326 and 327) the SBC shards are re-balanced on those measured times, with the eight rows at twice
+theirs; the three heaviest of them (306, 308, 325) and 315 (whose stage-1 γ value 0.072 could
+trigger a Gandy–Scott stage 2, four times the replications: about 150 min) run alone. Expected
+minutes on a 4-vCPU EPYC 7763 (``sbc-p3a1`` and ``sbc-p3b2`` include the stage-2 reruns of 317 and
+313 seen in run 40414682400):
 
 =====================  ============================================================================
-shard                  contents (estimate, min)
+shard                  contents (expected, min)
 =====================  ============================================================================
-``geweke-p3a1``        G-full of the structural rows 301–308 (≈ 75)
-``geweke-p3a2``        G-full of 309, 310, 317–319, 326, 330; G-small of 401–408 (≈ 80)
-``geweke-p3b1``        G-full of the reduced rows 311–316, 327 (≈ 75)
-``geweke-p3b2``        G-full of the CommonSV rows 320–325, 328, 329 (≈ 85)
-``sbc-p3a1``–``a5``    SBC of the structural rows, 2–4 rows each (51–86)
-``sbc-p3b1``–``b8``    SBC of the reduced and CommonSV rows, 1–3 rows each (36–78);
-                       ``b8`` also the predictive-map checks
-``mutation-p3``        M19–M36: U checks and G-small mutant/control pairs (≈ 40)
+``geweke-p3a1``        G-full of the structural rows 301–308 (55)
+``geweke-p3a2``        G-full of 309, 310, 317–319, 326, 330; G-small of 401–408 (22)
+``geweke-p3b1``        G-full of the reduced rows 311–316, 327 (24)
+``geweke-p3b2``        G-full of the CommonSV rows 320–325, 328, 329 (49)
+``sbc-p3a1``           317, 303 (105)
+``sbc-p3a2``           308 (≈ 50)
+``sbc-p3a3``           306 (≈ 52)
+``sbc-p3a4``           304, 326, 302 (≈ 70)
+``sbc-p3a5``           301, 305, 307, 309, 310, 318, 319, 330 (≈ 55)
+``sbc-p3b1``           315 (≈ 30; ≈ 150 with a stage-2 rerun)
+``sbc-p3b2``           313, 316 (≈ 71)
+``sbc-p3b3``           311, 327, 329 (≈ 39)
+``sbc-p3b4``           325 (≈ 57)
+``sbc-p3b5``           324, 328, 314 (≈ 58)
+``sbc-p3b6``           320, 321, 322, 323, 312; the predictive-map checks (≈ 48)
+``mutation-p3``        M19–M36: U checks and G-small mutant/control pairs (8)
 =====================  ============================================================================
 
-The weekly contract tests and the ordering-invariance test of conjugate × ``CommonSV`` (row 27)
-stay in ``rest`` (local: 13 min for the 18 weekly contract compositions).
+The 240-min step leaves headroom on every shard at these times. A Gandy–Scott stage 2 of 306, 308
+or 325 at ``t_max = 400`` (about five times its stage 1, up to about 285 min for 325) would not
+fit; their stage-1 γ values in run 40414682400 (0.47, 0.48, 1.0) were far from the band that
+triggers one (0.0033–0.153). The weekly contract tests and the ordering-invariance test of
+conjugate × ``CommonSV`` (row 27) stay in ``rest`` (local: 13 min for the 18 weekly contract
+compositions).
 """
 
 from __future__ import annotations
@@ -88,11 +101,8 @@ P3_SHARDS: dict[str, list[str]] = {
     "geweke-p3b1": ["tests/geweke/test_geweke_p3_full_b1.py", "tests/geweke/test_geweke_p3.py"],
     "geweke-p3b2": ["tests/geweke/test_geweke_p3_full_b2.py"],
     **{f"sbc-p3{g}": [f"tests/sbc/test_sbc_p3_{g}.py"] for g in ("a1", "a2", "a3", "a4", "a5")},
-    **{
-        f"sbc-p3{g}": [f"tests/sbc/test_sbc_p3_{g}.py"]
-        for g in ("b1", "b2", "b3", "b4", "b5", "b6", "b7")
-    },
-    "sbc-p3b8": ["tests/sbc/test_sbc_p3_b8.py", "tests/sbc/test_sbc_p3.py"],
+    **{f"sbc-p3{g}": [f"tests/sbc/test_sbc_p3_{g}.py"] for g in ("b1", "b2", "b3", "b4", "b5")},
+    "sbc-p3b6": ["tests/sbc/test_sbc_p3_b6.py", "tests/sbc/test_sbc_p3.py"],
     "mutation-p3": ["tests/mutation/test_mutants_p3.py"],
 }
 P3_FILES = tuple(f for args in P3_SHARDS.values() for f in args)
