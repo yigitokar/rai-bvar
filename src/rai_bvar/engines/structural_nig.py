@@ -832,6 +832,7 @@ class StructuralNIGFit(_LinearDraws):
             # the twin's mode is the EB mode; its optimisation messages are this fit's
             dropped = set(twin.problem.notes) | set(self.warnings)
             for message in twin.warnings:
+                message = message.replace(_LP_ADVICE, _LP_ADVICE_NIG)  # as this fit's own notes
                 if message not in dropped:
                     self._warn(message, stacklevel=5)
             self.optimization = twin.optimization

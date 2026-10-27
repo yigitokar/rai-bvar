@@ -133,17 +133,30 @@ def test_bvar_fit_is_a_structural_nig_fit(data):
     assert fit.log_ml() == sum(p.log_ml for p in posts)
 
 
-def test_2020_warning_does_not_advise_lenza_primiceri():
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        dict(hierarchy="fixed"),
+        dict(),  # EB over the "auto" set (lambda, cross)
+        dict(cross=1.0, hyper=("lambda", "psi")),  # EB through the twin's mode (its messages)
+        dict(cross=1.0, hyper=("lambda", "psi"), hierarchy="mh",
+             mh=rb.MHSettings(draws=20, burn=10, chains=2)),
+    ],
+    ids=["fixed", "eb", "eb-psi", "mh-psi"],
+)  # fmt: skip
+def test_2020_warning_does_not_advise_lenza_primiceri(kwargs):
     """Phase 1's 2020 advice (``outliers='lenza-primiceri'``) is refused by AsymmetricConjugate at
-    construction (E-8), so its fit advises what the model accepts (the R6 review of PR #22)."""
+    construction (E-8), so its fit advises what the model accepts, exactly once on every path,
+    including the twin's messages on the psi-free EB path (the R6 review of PR #22)."""
     rng = np.random.default_rng(7)
     index = pd.period_range("2005Q1", periods=72, freq="Q")
     frame = pd.DataFrame(rng.standard_normal((72, 3)), index=index, columns=["v0", "v1", "v2"])
     with pytest.warns(UserWarning) as record:
-        ac(hierarchy="fixed").fit(rb.VARData.from_frame(frame, tcodes=1))
+        ac(**kwargs).fit(rb.VARData.from_frame(frame, tcodes=1))
     notes = [str(w.message) for w in record if "covers 2020" in str(w.message)]
-    assert notes and all("consider outliers='lenza-primiceri'" not in m for m in notes)
-    assert all("not available with AsymmetricConjugate" in m for m in notes)
+    assert len(notes) == 1, notes
+    assert "consider outliers='lenza-primiceri'" not in notes[0]
+    assert "not available with AsymmetricConjugate" in notes[0]
 
 
 def test_fixed_hierarchy_uses_the_prior_values(data):
