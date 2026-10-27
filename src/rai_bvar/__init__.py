@@ -2,8 +2,9 @@
 
 ``import rai_bvar`` imports no JAX (DESIGN §1.1, D-31): specs, settings and the analytic engine
 are NumPy-only, and the MCMC engine is imported when an MCMC composition is fitted. The device
-helpers ``set_cpu_devices`` / ``enable_compilation_cache`` and ``ordering_sensitivity`` are
-resolved lazily on first access, so ``rb.set_cpu_devices(k)`` can still run before JAX starts. A
+helpers ``set_cpu_devices`` / ``enable_compilation_cache``, ``ordering_sensitivity`` and
+``conditional_forecast`` (P3 §1.1; its module is NumPy-only) are resolved lazily on first access,
+so ``rb.set_cpu_devices(k)`` can still run before JAX starts. A
 lazy name whose module is not part of the build is neither in ``__all__`` nor an attribute, so
 ``from rai_bvar import *`` and ``hasattr`` keep working.
 """
@@ -56,6 +57,7 @@ _LAZY = {
     "set_cpu_devices": "rai_bvar._devices",
     "enable_compilation_cache": "rai_bvar._devices",
     "ordering_sensitivity": "rai_bvar.structural.ordering",  # WP22
+    "conditional_forecast": "rai_bvar.forecast.conditional",  # P3 WP34 (§1.1, E57)
 }
 
 

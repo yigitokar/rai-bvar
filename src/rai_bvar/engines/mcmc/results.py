@@ -468,6 +468,17 @@ class MCMCFit:
             raise TypeError(f"lag_coefs must be a bool, got {lag_coefs!r}")
         return _forecast_fn("forecast")(self, horizon, draws, seed)
 
+    def conditional_forecast(
+        self, horizon: int, conditions: Any, draws: int = 1000, seed: SeedLike = None
+    ) -> Any:
+        """Hard-condition scenarios (P3 DESIGN §6, D-50; WP34): each ``(chain, draw)`` slice of
+        ``forecast(horizon, draws, seed)`` conditioned exactly given its parameter draw and its
+        drawn volatility path (SV, CommonSV). Returns a ``ConditionalForecastResult``;
+        ``rai_bvar.forecast.conditional`` (NumPy-only, P3 §1.1)."""
+        from rai_bvar.forecast.conditional import conditional_forecast
+
+        return conditional_forecast(self, horizon, conditions, draws=draws, seed=seed)
+
     def irf(
         self,
         horizon: int = 20,
