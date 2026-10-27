@@ -26,7 +26,7 @@
 
 **v2.3, amended 2026-10-25 (DESIGN P3 Amendment 2).** §10.4's `bvars` bullet, §13's Phase 3 exit line and D2 name the exact independent `CommonSV` oracle, with `bvars` as evidence (DESIGN P3 Q35, Q40, E168); WP41's v2.4 note carries them.
 
-**v2.3, amended 2026-10-25 (DGP tests of the verdict engine).** §10.1 and §10.5 record the DGP tests of the verdict engine: the harness (`rai_bvar.validation.dgp`, `benchmarks/dgp_study.py`), the pre-registration of the study (`benchmarks/reports/dgp_study_preregistration.md`) and its pilot (`benchmarks/reports/dgp_study_pilot.md`); §13 notes the Phase 3 and Phase 4 exit criteria it serves. The verdict rule, the priors, the sampler settings and the convergence gate are unchanged.
+**v2.3, amended 2026-10-25 (DGP tests of the verdict engine).** §10.1 and §10.5 record the DGP tests of the verdict engine: the harness (`rai_bvar.validation.dgp`, `benchmarks/dgp_study.py`), the pre-registration of the study (`benchmarks/reports/dgp_study_preregistration.md`), its pilot (`benchmarks/reports/dgp_study_pilot.md`) and the full study (`benchmarks/reports/dgp_study.md`); §13 notes the Phase 3 and Phase 4 exit criteria it serves. The verdict rule, the priors, the sampler settings and the convergence gate are unchanged.
 
 ---
 
@@ -500,7 +500,7 @@ Output per comparison: `better` / `worse` / `inconclusive`, with the reasons. Fo
 | Geweke | Joint-distribution tests for every block and composition | every PR (small config), weekly (full) |
 | SBC | Rank uniformity for parameters and test quantities | weekly |
 | Parity | Against committed R fixtures (§10.4) | every PR (R `BVAR`, BoE `bvar`; short runs against the `stochvol` and system-wide Gibbs fixtures); weekly (long runs) |
-| DGP | Recovery and verdict-engine size/power (§10.5) | size/power: by hand (`benchmarks/dgp_study.py`, pre-registered; pilot run, full study pending); recovery: *not implemented*; at the Phase 3 exit (§13) |
+| DGP | Recovery and verdict-engine size/power (§10.5) | size/power: by hand (`benchmarks/dgp_study.py`, pre-registered; full study run 2026-10-27, §10.5); recovery: *not implemented*; at the Phase 3 exit (§13) |
 | Benchmarks | Speed and memory against targets (§13) | pre-release (manual CI job) |
 
 *As run in CI* (`.github/workflows/ci.yml`): the fast suite (`-m "not slow and not network and not bench"`, Python 3.12–3.14 on Linux) on every pull request and every push to `main`; the slow and network tiers (`-m "(slow or network) and not bench"`) plus the macOS fast suite weekly, on Sundays at 03:17 UTC (the CI job keeps the name `nightly` and runs as parallel shards that partition the tier; DESIGN §9.10); the bench tier only when dispatched by hand. The mutation suite (DESIGN §9.7) runs in the weekly tier.
@@ -554,11 +554,17 @@ Size (false `better` rate on null DGPs) and power are reported in the documentat
   - backtest: `Rolling(120)`, 80 origins, h = 1 and 4;
   - replications: 200 per row;
   - reading: a size is above nominal only when its Wilson 95% interval lies above 0.10; power is descriptive.
-- **Pilot** (`benchmarks/reports/dgp_study_pilot.md`): 24 replications per row, so its rates are indicative only (MC s.e. up to 0.10).
-  - **Homoskedastic DGP.** No false `better` for `SV` against `Constant` at h = 1 (0/24; 1/24 at h = 4), and none for `SV(outliers)`. `worse` was frequent at h = 1: 14/24 for `SV` and 23/24 for `SV(outliers)`. On homoskedastic data the extra flexibility costs log score: the mean ΔLPD over 80 origins was −1.0 for `SV` and −4.5 for `SV(outliers)`.
-  - **SV DGP.** The power of `SV` against `Constant` was 0.58 ± 0.10 at h = 1 and 0.42 ± 0.10 at h = 4.
-  - **SV + outliers DGP.** `SV(outliers)` was never `worse` than `SV`. It was `better` in 12/24 at h = 1, against 24/24 with the convergence gate off. Its fits converged at 93% of origins on average (σ most often the worst quantity), so the 95% gate made the other 12 inconclusive.
-- **Full study.** Pending; its report will be `benchmarks/reports/dgp_study.md`.
+- **Full study** (`benchmarks/reports/dgp_study.md`): the pre-registered run, 200 replications per row at `58ab09f`, 2026-10-25 to 27. Its first 24 replications per row are the pilot (`benchmarks/reports/dgp_study_pilot.md`). Rates are given ± their binomial MC s.e. [Wilson 95%].
+  - **Size (homoskedastic DGP).**
+    - `SV` against `Constant`: a false `better` in 0/200 replications [0, 0.019] at h = 1, and 0.030 ± 0.012 [0.014, 0.064] at h = 4.
+    - `SV(outliers)` against `Constant`: 0/200 at h = 1 and 0.005 ± 0.005 at h = 4.
+    - No cell is above the nominal 0.10 (family-wise at h = 4: 0.030).
+    - The flexible arms were often `worse` at h = 1: `SV` in 0.475, `SV(outliers)` in 0.950. Their mean ΔLPD over 80 origins was −1.0 and −4.4.
+  - **Power (SV DGP).** `SV` beat `Constant` in 0.675 ± 0.033 [0.607, 0.736] at h = 1 and in 0.510 ± 0.035 at h = 4, and was `worse` in 0.010 and 0.035. The convergence gate cost little here: 0.710 and 0.540 with it off.
+  - **SV + outliers DGP.**
+    - `SV(outliers)` was never `worse` than `SV` (0/200 [0, 0.019] at both horizons).
+    - It was `better` in 0.405 ± 0.035 at h = 1 and 0.195 ± 0.028 at h = 4. With the gate off it was `better` in 0.995 and 0.510.
+    - Its fits passed the convergence check at 92% of origins on average, with σ most often the worst quantity. Only 41% of replications (h = 1) had both arms converged at ≥ 95% of origins, so the gate, not ΔLPD, decided most verdicts of this row.
 
 ### 10.6 Runtime convergence diagnostics
 
@@ -728,7 +734,7 @@ CI: the fast suite is green on the merged Phase 2 commits (`3802295`, `08e1eda`,
 - `CommonSV` (Carriero, Clark & Marcellino 2016): a conjugate-speed SV screen for large `n` (decision D2).
 - Conditional forecasts. (The Model Confidence Set landed in Phase 0.)
 
-**Exit:** `bayesianVARs` parity for the global-local priors × SV and for the reduced-form sampler (moved from the Phase 2 exit on 2026-10-23), after its convention probes P1–P5 are settled (DESIGN §9.9); `CommonSV` parity with an exact independent oracle (amended 2026-10-25: first written "`bvars` parity for `CommonSV`"; bvars's CommonSV prior has no exact mapping onto ours, so its forecast distributions are compared as evidence; DESIGN P3 §9.8, Q35, Q40); DGP verdict-engine tests on linear DGPs (harness, pre-registration and pilot delivered; the full study is pending: §10.5).
+**Exit:** `bayesianVARs` parity for the global-local priors × SV and for the reduced-form sampler (moved from the Phase 2 exit on 2026-10-23), after its convention probes P1–P5 are settled (DESIGN §9.9); `CommonSV` parity with an exact independent oracle (amended 2026-10-25: first written "`bvars` parity for `CommonSV`"; bvars's CommonSV prior has no exact mapping onto ours, so its forecast distributions are compared as evidence; DESIGN P3 §9.8, Q35, Q40); DGP verdict-engine tests on linear DGPs (harness, pre-registration and the full study delivered: §10.5).
 
 ### Phase 4: Nonlinear mean
 
