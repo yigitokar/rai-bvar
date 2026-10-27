@@ -219,3 +219,9 @@ pending:
 - TVP × SV vs Linear × SV on a TVP-SV DGP (`better`).
 
 Their DGPs (threshold, TVP) and readings are to be pre-registered before their first run.
+
+## Addendum (2026-10-27, after the full run; no setting changed)
+
+- **The 4-hour limit.** The 4-hour limit for a local full run (under "Wall time" above) was waived by the owner on 2026-10-25, after the pre-pilot estimate and before the pilot finished. The pilot then extrapolated 28 h remaining.
+- **How the run went.** It ran from a clean detached checkout of this file's commit, `58ab09f`, with the settings above. It was paused once on the owner's decision (2026-10-25 18:11 EDT, at 92 of 600 replications) and resumed on the owner's word (2026-10-26 09:25 EDT).
+- **Where it is recorded.** These events are the run's notes in `benchmarks/reports/dgp_study.md`. That report is labelled the pre-registered full run.
