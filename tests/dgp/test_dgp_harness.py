@@ -222,6 +222,9 @@ def test_a_row_this_build_can_run_stays_pending_until_it_is_preregistered(monkey
     assert dgp.row_status(row) == "pending (Phase 4): needs a pre-registration"
     registered = dataclasses.replace(row, preregistration="benchmarks/reports/some_row.md")
     assert dgp.row_status(registered) is None
+    for path in ("", "  "):  # a path or None; an empty one would pass for a pre-registration
+        with pytest.raises(ValueError, match="preregistration must be None or a repository path"):
+            dataclasses.replace(row, preregistration=path)
 
 
 @pytest.mark.parametrize("row", dgp.ROWS, ids=lambda r: r.name)

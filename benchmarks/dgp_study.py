@@ -38,11 +38,18 @@ horizon, the rate of the scored verdict (size or power) with its binomial Monte 
 error and Wilson 95% interval, the rates of all three verdicts with the gate on and off, why the
 inconclusive verdicts were inconclusive, the convergence of every arm and the measured time per
 replication, with the wall-time estimate of the full study. The report is labelled the
-pre-registered run only when every record comes from one commit with a clean working tree and
-that commit contains the pre-registration of every reported row, the design and the arms' specs
-are the registered ones, every row of that pre-registration this build can run is in the report
-with all the config's replications, and no replication is recorded twice. The report names the records'
-commit, which a report regenerated later with ``--report-only`` keeps.
+pre-registered run only when every record comes from one commit with a clean working tree, the
+reported rows share one pre-registration and that commit contains it, the design and the arms'
+specs are the registered ones, every row of that pre-registration this build can run is in the
+report with all the config's replications, and no replication is recorded twice. A registered
+report is one pre-registration's study: rows of two pre-registrations named together with
+``--rows`` are reported, never labelled. The report names the records' commit, which a report
+regenerated later with ``--report-only`` keeps.
+
+Under ``--config pilot`` or ``full`` (the registered design and seed) the script refuses, before
+it scores anything, a row without a pre-registration, a row whose pre-registration is not in the
+checked-out commit (``HEAD``), and replications to run on a working tree whose tracked files
+differ from ``HEAD``.
 
 ``--config smoke`` only checks that the script runs (2 chains × 100 draws, every 8th origin, two
 replications, a seed of its own so no registered replication is scored); its numbers mean nothing.
@@ -136,7 +143,10 @@ def git_state() -> dict[str, Any]:
 
 
 def in_commit(commit: str, path: str) -> bool:
-    """Whether ``path`` exists in ``commit`` (``git cat-file -e``)."""
+    """Whether ``path`` exists in ``commit`` (``git cat-file -e``; an empty ``commit`` would read
+    the index, so it is no commit)."""
+    if not commit:
+        return False
     try:
         subprocess.run(
             ["git", "-C", str(REPO), "cat-file", "-e", f"{commit}:{path}"],
@@ -234,7 +244,7 @@ def records_commit(records: list[dict[str, Any]]) -> str | None:
     more than one commit or when they name none."""
     commits = {r.get("git_commit") for r in records}
     commit = commits.pop() if len(commits) == 1 else None
-    return commit if isinstance(commit, str) else None
+    return commit if isinstance(commit, str) and commit else None
 
 
 def load_records(path: Path, design: dgp.Design) -> list[dict[str, Any]]:
@@ -293,9 +303,10 @@ def label(
 ) -> tuple[bool, list[str]]:
     """Whether the records are the pre-registered run of ``cfg``, and why not.
 
-    The pre-registrations are looked up in the records' commit, not in the commit that writes the
-    report. ``rows`` are the reported rows; every row this build can run under the same
-    pre-registration must be among them (rows registered by another file are another study).
+    The pre-registration is looked up in the records' commit, not in the commit that writes the
+    report. ``rows`` are the reported rows; they must share one pre-registration, and every row
+    this build can run under it must be among them (rows registered by another file are another
+    study, and a report of two studies is not either's registered run).
     """
     reasons = []
     if cfg.name not in REGISTERED_CONFIGS or cfg.design != REGISTERED:
@@ -306,10 +317,16 @@ def label(
     elif records_commit(records) is None:
         reasons.append("the records name no commit")
     for row in rows:
-        if row.preregistration is None:
+        if not row.preregistration:
             reasons.append(f"row {row.name} is not pre-registered")
-    for path in sorted({row.preregistration for row in rows if row.preregistration}):
-        for commit in sorted(c for c in commits if isinstance(c, str)):
+    paths = sorted({row.preregistration for row in rows if row.preregistration})
+    if len(paths) > 1:
+        reasons.append(
+            f"the reported rows come from {len(paths)} pre-registrations ({', '.join(paths)}); "
+            "a registered report is one pre-registration's study"
+        )
+    for path in paths:
+        for commit in sorted(c for c in commits if isinstance(c, str) and c):
             if not in_commit(commit, path):
                 reasons.append(f"{path} is not in commit {commit[:12]}")
     if any(r.get("git_dirty") for r in records):
@@ -489,12 +506,16 @@ def markdown(rep: dict[str, Any]) -> str:
     lines.append(
         f"- This invocation: started {m.get('started_at')}, finished {m.get('finished_at')} (UTC)."
     )
-    if m.get("report_only"):
+    if not m.get("ran"):
+        why = (
+            "regenerated with `--report-only`"
+            if m.get("report_only")
+            else "every replication was already recorded"
+        )
         lines.append(
-            "- Regenerated with `--report-only`: this invocation ran no replication, so the "
-            "machine, worker count and load above, the notes below and the wall-time estimate "
-            "(the recorded seconds divided by this invocation's worker count) are this "
-            "invocation's, not the run's."
+            f"- This invocation ran no replication ({why}), so the machine, worker count and load "
+            "above, the notes below and the wall-time estimate (the recorded seconds divided by "
+            "this invocation's worker count) are this invocation's, not the run's."
         )
     if m.get("wall_seconds") is not None:
         lines.append(
@@ -666,14 +687,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         # without a pre-registration only under a config that is not registered, below)
         runs = status is None or (bool(args.rows) and not dgp.row_missing(row))
         (rows.append(row) if runs else pending.append((row, status)))
-    unregistered = [row.name for row in rows if row.preregistration is None]
-    if unregistered and cfg.name in REGISTERED_CONFIGS:
+    registered = cfg.name in REGISTERED_CONFIGS
+    unregistered = [row.name for row in rows if not row.preregistration]
+    if unregistered and registered:
         p.error(
             f"no pre-registration for row {', '.join(unregistered)}: under --config {cfg.name} "
             f"it would score samples of the registered design and seed ({cfg.design.seed}). "
             "Pre-register its settings and reading and set its Row.preregistration "
             "(rai_bvar.validation.dgp) before its first run; --config smoke runs it on a seed "
             "of its own."
+        )
+    paths = {row.preregistration for row in rows} if registered else set()
+    uncommitted = sorted(path for path in paths if not in_commit("HEAD", path))
+    if uncommitted:
+        p.error(
+            f"{', '.join(uncommitted)} is not in the checked-out commit (HEAD): under --config "
+            f"{cfg.name} commit the pre-registration before the rows it registers run (or check "
+            "the row's Row.preregistration path)."
         )
     start, stop = 0, cfg.reps
     if args.reps:
@@ -714,10 +744,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"commit {git['git_commit'][:12]}{' (dirty)' if git['git_dirty'] else ''}; "
         f"{args.workers} workers; cache {args.cache}"
     )
+    if registered and tasks and not args.report_only and git["git_dirty"]:
+        p.error(
+            f"tracked files differ from HEAD: under --config {cfg.name} the records would not be "
+            "the registered run. Commit the changes, or run from a clean checkout."
+        )
     for row, status in pending:
         log(f"row {row.name}: {status}")
     for row in rows:
-        if row.preregistration is None:
+        if not row.preregistration:
             log(f"row {row.name}: not pre-registered; run because it is named, never labelled")
 
     if not os.environ.get("JAX_COMPILATION_CACHE_DIR"):
