@@ -36,13 +36,15 @@ served from the score cache and earlier rows' verdicts do not move.
 
 **Plug-in point for Phases 4–5.** The rows of SPEC §10.5 that need models the library does not have
 yet are declared below with ``requires`` (the ``rai_bvar`` attributes their arms need) and, for
-the DGPs not written yet, ``DGPS[name] = None``. :func:`row_status` reports them as pending, and
-the study script skips them. To activate one: add the model (e.g. ``rai_bvar.BART``), add its arm
-factory to :data:`ARMS` if its constructor differs from the sketch there, write the DGP simulator
-(a class with ``simulate(T, rng) -> VARData``, like :class:`LinearVARDGP`) and register it in
-:data:`DGPS`, then pre-register the row's settings and its reading (a power threshold, if any)
-before its first run, as ``benchmarks/reports/dgp_study_preregistration.md`` did for the Phase 2
-rows.
+the DGPs not written yet, ``DGPS[name] = None``; they have no ``preregistration``.
+:func:`row_status` reports them as pending, and the study script skips them unless they are named.
+To activate one: add the model (e.g. ``rai_bvar.BART``), add its arm factory to :data:`ARMS` if its
+constructor differs from the sketch there, write the DGP simulator (a class with
+``simulate(T, rng) -> VARData``, like :class:`LinearVARDGP`) and register it in :data:`DGPS`, then
+pre-register the row's settings and its reading (a power threshold, if any) before its first run,
+as :data:`PREREGISTRATION_P2` did for the Phase 2 rows, and set the row's ``preregistration`` to
+that file. A row the build can run but that has no pre-registration runs only when named, and its
+report is never labelled the pre-registered run.
 
 Importing this module imports no JAX (DESIGN D-31); fitting an MCMC arm does.
 """
@@ -59,6 +61,7 @@ import time
 import zlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import numpy as np
@@ -84,6 +87,8 @@ VERDICT_DEFAULTS: dict[str, float] = {
     if p.kind is inspect.Parameter.KEYWORD_ONLY
 }
 NOMINAL = float(VERDICT_DEFAULTS["test_level"])  # the one-sided DM level of the rule (0.10)
+# the pre-registration of the Phase 2 rows (a repository path; committed before their first run)
+PREREGISTRATION_P2 = "benchmarks/reports/dgp_study_preregistration.md"
 
 
 # --------------------------------------------------------------------------- DGPs
@@ -285,6 +290,9 @@ class Row:
     spec: str  # the SPEC §10.5 line this row tests
     requires: tuple[str, ...] = ()  # rai_bvar attributes the arms need
     phase: int = 2
+    # the pre-registration of the row's settings and reading (a repository path); None: not
+    # pre-registered, so the study runs it only when it is named and never labels it registered
+    preregistration: str | None = None
 
 
 _C, _SV, _SVO = "Linear × Constant", "Linear × SV", "Linear × SV(outliers)"
@@ -297,6 +305,7 @@ ROWS: tuple[Row, ...] = (
         _C,
         (Pair(_SV, _C, "vol", "not_better"), Pair(_SVO, _C, "vol", "not_better")),
         "Linear, homoskedastic: nothing beats Linear × Constant",
+        preregistration=PREREGISTRATION_P2,
     ),
     Row(
         "linear-sv",
@@ -305,6 +314,7 @@ ROWS: tuple[Row, ...] = (
         _C,
         (Pair(_SV, _C, "vol", "better"),),
         "Linear, SV: SV beats Constant",
+        preregistration=PREREGISTRATION_P2,
     ),
     Row(
         "linear-sv-outliers",
@@ -313,6 +323,7 @@ ROWS: tuple[Row, ...] = (
         _SV,
         (Pair(_SVO, _SV, "vol", "not_worse"),),
         "Linear, SV + outliers: SV(outliers=True) ≥ SV",
+        preregistration=PREREGISTRATION_P2,
     ),
     # ---- pending (Phases 4–5): the plug-in point of the module docstring
     Row(
@@ -365,11 +376,20 @@ def get_row(name: str) -> Row:
     raise KeyError(f"no DGP row {name!r}; rows: {[r.name for r in ROWS]}")
 
 
-def row_status(row: Row) -> str | None:
-    """``None`` when the row can run in this build, else why it is pending."""
+def row_missing(row: Row) -> list[str]:
+    """What this build lacks to run the row: its arms' ``rai_bvar`` components, its simulator."""
     missing = [r for r in row.requires if not hasattr(rai_bvar, r)]
     if DGPS.get(row.dgp) is None:
         missing.append(f"the {row.dgp!r} DGP simulator")
+    return missing
+
+
+def row_status(row: Row) -> str | None:
+    """``None`` when the row runs by default (this build can run it and it is pre-registered),
+    else why it is pending."""
+    missing = row_missing(row)
+    if row.preregistration is None:
+        missing.append("a pre-registration")
     if missing:
         return f"pending (Phase {row.phase}): needs {', '.join(missing)}"
     return None
@@ -433,14 +453,19 @@ def run_replication(
     """Simulate replication ``rep`` of ``row``, run ``compare()`` and return its record.
 
     The record holds, per pair and horizon, the verdict (``verdict``), the verdict with the
-    convergence gate off (``verdict_gate_off``, secondary) and the quantities the rule used, and
-    per arm and horizon the converged fraction of origins.
+    convergence gate off (``verdict_gate_off``, secondary) and the quantities the rule used, per
+    arm and horizon the converged fraction of origins, and when the replication started and
+    finished (UTC). A row without a pre-registration runs too; the study script decides which
+    rows to run and how to label them.
     """
-    status = row_status(row)
-    if status is not None:
-        raise NotImplementedError(f"row {row.name!r} is {status}")
+    missing = row_missing(row)
+    if missing:
+        raise NotImplementedError(
+            f"row {row.name!r} is pending (Phase {row.phase}): needs {', '.join(missing)}"
+        )
     dgp = DGPS[row.dgp]
     assert dgp is not None
+    started_at = utc_now()
     data = dgp.simulate(design.T, data_rng(design, row.dgp, rep))
     seed = compare_seed(design, row.dgp, rep)
     arms = models(row, design)
@@ -472,6 +497,8 @@ def run_replication(
         "data_fingerprint": data.fingerprint(),
         "compare_seed": seed,
         "seconds": seconds,
+        "started_at": started_at,
+        "finished_at": utc_now(),
         "arms": {
             name: {
                 "spec_hash": spec_hash(arms[name]),
@@ -487,6 +514,11 @@ def run_replication(
         },
         "pairs": pairs,
     }
+
+
+def utc_now() -> str:
+    """The current time in UTC, ISO 8601 to the second."""
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 _WORST = re.compile(r"worst: ([^ ]+) R-hat")
@@ -575,7 +607,10 @@ def classify(pair: Mapping[str, Any]) -> str:
     condition 3 held. For ``inconclusive``: ``gate`` (the convergence gate alone, since the gate-off
     verdict is decisive), ``imprecise`` (|ΔLPD| ≤ 3 MCSE) or ``no_route`` (precise, but neither the
     DM test nor the MCS separates the pair in the direction of ΔLPD). Raises if the derivation
-    disagrees with the engine's gate-off verdict, so a harness that misreads the rule fails loudly.
+    disagrees with the engine's gate-off verdict, or if the gate-on verdict is not the gate-off one
+    when both arms converged at ``min_converged`` or more of the origins and ``inconclusive``
+    otherwise (from the recorded converged shares: the arms of a row share their origins), so a
+    harness that misreads the rule fails loudly.
     """
     level, mult = VERDICT_DEFAULTS["test_level"], VERDICT_DEFAULTS["mc_multiple"]
     dlpd, mcse = pair["dlpd"], pair["dlpd_mcse"]
@@ -590,6 +625,15 @@ def classify(pair: Mapping[str, Any]) -> str:
     if derived != pair["verdict_gate_off"]:
         raise RuntimeError(
             f"derived gate-off verdict {derived!r} != engine's {pair['verdict_gate_off']!r}: {pair}"
+        )
+    passed = (
+        min(pair["converged_model"], pair["converged_reference"])
+        >= VERDICT_DEFAULTS["min_converged"]
+    )
+    gated = derived if passed else "inconclusive"
+    if gated != pair["verdict"]:
+        raise RuntimeError(
+            f"derived gate-on verdict {gated!r} != engine's {pair['verdict']!r}: {pair}"
         )
     if pair["verdict"] != "inconclusive":
         route = "both" if test and mcs else "test" if test else "mcs"

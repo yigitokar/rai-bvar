@@ -1,13 +1,14 @@
 """The DGP-test harness of SPEC §10.5 (``rai_bvar.validation.dgp``), without MCMC fits.
 
 The simulators (validity checks, reproducibility, the sample is the simulated ``y``, the volatility
-and outlier processes have their stated moments, constant-volatility errors have the implied
-covariance), the row registry (arms, baselines and pairs consistent; pairs differ along one axis;
-the arms use the library defaults; Phase 4–5 rows pending in this build), the seeds (rows on one
-DGP share data), and the summaries (Monte Carlo errors, Wilson intervals, the verdict classes and
-their consistency check, the family-wise rate). One end-to-end replication runs the real
-``compare()`` pipeline on two analytic arms, so the record layout and :func:`dgp.classify` see the
-engine's own verdict frames.
+and outlier processes have their stated moments and reach the errors, constant-volatility errors
+have the implied covariance), the row registry (arms, baselines and pairs consistent; pairs differ
+along one axis; the arms use the library defaults; Phase 4–5 rows pending in this build, and not
+pre-registered), the seeds (rows on one DGP share data), and the summaries (Monte Carlo errors,
+Wilson intervals, the verdict classes and their consistency checks against the gate-off and
+gate-on verdicts, the family-wise rate). One end-to-end replication runs the real ``compare()``
+pipeline on two analytic arms, so the record layout and :func:`dgp.classify` see the engine's own
+verdict frames.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import sys
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -145,6 +147,38 @@ def test_sv_paths_have_the_ar1_moments():
     np.testing.assert_allclose(eta.std(axis=0), d.sigma, rtol=0.02)
 
 
+def _kurtosis(x: np.ndarray) -> np.ndarray:
+    x = x - x.mean(axis=0)
+    return (x**4).mean(axis=0) / (x**2).mean(axis=0) ** 2
+
+
+@pytest.mark.parametrize("name", ["linear-homoskedastic", "linear-sv", "linear-sv-outliers"])
+def test_the_volatility_and_the_outliers_reach_the_errors(name):
+    """The structural errors are ``e = o · exp(h/2) · ε`` with the returned ``h`` and ``o``.
+
+    ``ε`` is the first draw of the documented draw order, so it is recovered from the seed, and
+    ``A u`` must equal ``o exp(h/2) ε`` exactly. Unstandardised, the errors have the tails the
+    mechanism implies: kurtosis 3 under constant volatility, 3 exp(σ²/(1 − φ²)) ≈ 4.5 under SV,
+    far more with outliers.
+    """
+    d = dgp.DGPS[name]
+    T = 50_000
+    out = d.simulate_arrays(T, np.random.default_rng(3))
+    eps = np.random.default_rng(3).standard_normal((d.burn + T, d.n))[d.burn :]
+    e = out["u"] @ np.asarray(d.contemp).T
+    np.testing.assert_allclose(e, out["o"] * np.exp(0.5 * out["h"]) * eps, rtol=0, atol=1e-12)
+    z = e / (out["o"] * np.exp(0.5 * out["h"]))  # standardised: N(0, 1)
+    np.testing.assert_allclose(z.var(axis=0), 1.0, atol=0.03)
+    np.testing.assert_allclose(_kurtosis(z), 3.0, atol=0.15)
+    kurt = _kurtosis(e)
+    if d.outlier_prob:
+        assert np.all(kurt > 20), kurt
+    elif d.vol == "sv":
+        assert np.all((kurt > 3.8) & (kurt < 6)), kurt
+    else:
+        np.testing.assert_allclose(kurt, 3.0, atol=0.15)
+
+
 def test_outliers_have_the_stated_rate_and_scales():
     d = dgp.DGPS["linear-sv-outliers"]
     o = d.simulate_arrays(50_000, np.random.default_rng(2))["o"]
@@ -161,6 +195,8 @@ def test_outliers_have_the_stated_rate_and_scales():
 
 def test_phase2_rows_are_runnable_and_later_rows_pending():
     assert [r.name for r in RUNNABLE] == ["linear-homoskedastic", "linear-sv", "linear-sv-outliers"]
+    assert {r.preregistration for r in RUNNABLE} == {dgp.PREREGISTRATION_P2}
+    assert all(r.preregistration is None for r in dgp.ROWS if r not in RUNNABLE)
     pending = {r.name: dgp.row_status(r) for r in dgp.ROWS if dgp.row_status(r)}
     assert set(pending) == {
         "linear-sv-bart",
@@ -171,10 +207,21 @@ def test_phase2_rows_are_runnable_and_later_rows_pending():
     assert "BART" in pending["linear-sv-bart"] and "Phase 4" in pending["linear-sv-bart"]
     assert "threshold-sv" in pending["threshold-sv-bart"]  # no simulator yet
     assert "Phase 5" in pending["tvp-sv"] and "TVP" in pending["tvp-sv"]
+    assert all(s.endswith("a pre-registration") for s in pending.values())
     with pytest.raises(NotImplementedError, match="pending"):
         dgp.run_replication(dgp.get_row("linear-sv-bart"), 0, DESIGN)
     with pytest.raises(KeyError):
         dgp.get_row("no-such-row")
+
+
+def test_a_row_this_build_can_run_stays_pending_until_it_is_preregistered(monkeypatch):
+    row = dgp.get_row("linear-sv-bart")  # its DGP exists; it needs BART and a pre-registration
+    assert dgp.row_missing(row) == ["BART"]
+    monkeypatch.setattr(rb, "BART", object, raising=False)  # a stand-in for a Phase 4 build
+    assert dgp.row_missing(row) == []
+    assert dgp.row_status(row) == "pending (Phase 4): needs a pre-registration"
+    registered = dataclasses.replace(row, preregistration="benchmarks/reports/some_row.md")
+    assert dgp.row_status(registered) is None
 
 
 @pytest.mark.parametrize("row", dgp.ROWS, ids=lambda r: r.name)
@@ -383,6 +430,18 @@ def test_classify(kw, cls):
 def test_classify_rejects_a_misread_rule():
     with pytest.raises(RuntimeError, match="derived gate-off verdict"):
         dgp.classify(_pair(dlpd=5.0, verdict_gate_off="better"))  # no route held
+    better = {"dlpd": 5.0, "dm_pvalue_better": 0.05, "verdict_gate_off": "better"}
+    with pytest.raises(RuntimeError, match="derived gate-on verdict"):
+        dgp.classify(_pair(**better, verdict="better", converged_model=0.5))  # the gate binds
+    with pytest.raises(RuntimeError, match="derived gate-on verdict"):
+        dgp.classify(_pair(**better, verdict="worse"))  # gate passed: the gate-off verdict
+    with pytest.raises(RuntimeError, match="derived gate-on verdict"):
+        dgp.classify(_pair(**better))  # gate passed, yet inconclusive
+    # the gate is "at least": a share exactly at min_converged passes
+    gate = dgp.VERDICT_DEFAULTS["min_converged"]
+    assert dgp.classify(_pair(**better, verdict="better", converged_reference=gate)) == (
+        "better:test"
+    )
 
 
 def _record(row, rep, pairs, conv=1.0, seconds=10.0):
@@ -486,8 +545,12 @@ def test_one_replication_runs_the_real_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(dgp, "ARMS", arms)
     # a seed of its own: no sample of the registered study is fitted by the tests
     design = dataclasses.replace(DESIGN, seed=7, origin_step=4, draws=200)
+    before = datetime.now(UTC).replace(microsecond=0)
     rec = dgp.run_replication(row, 0, design, cache=tmp_path)
     assert (rec["row"], rec["rep"], rec["design"]) == ("test-lags", 0, design.key())
+    started, finished = (datetime.fromisoformat(rec[k]) for k in ("started_at", "finished_at"))
+    assert started.utcoffset().total_seconds() == 0  # UTC
+    assert before <= started <= finished <= datetime.now(UTC)
     assert set(rec["arms"]) == {"p1", "p2"}
     assert all(a["origins"] == 20 and a["cached"] == 0 for a in rec["arms"].values())
     assert rec["arms"]["p2"]["spec_hash"] == spec_hash(BVAR(lags=2))
