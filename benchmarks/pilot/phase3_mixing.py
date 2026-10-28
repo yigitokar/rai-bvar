@@ -64,6 +64,7 @@ def run_one(config: str, size: str, seed: int, draws: int, burn: int, out: Path)
         "gate": ladder,
         "ess": table_full,
         "ess_at": tables,
+        "chain_block_means": pc.chain_block_means(run),
         "acceptance": {k: v.tolist() for k, v in run.acceptance.items()},
         "timing": run.timing,
         "load_before": before,

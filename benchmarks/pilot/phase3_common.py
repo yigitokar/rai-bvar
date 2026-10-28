@@ -585,3 +585,25 @@ def ess_table(run: ChainRun, D: int | None = None) -> dict[str, dict[str, float]
             "sd": float(np.std(z)),
         }
     return out
+
+
+def chain_block_means(run: ChainRun, blocks: int = 5) -> dict[str, list[list[float]]]:
+    """Per chain, the means of ``blocks`` consecutive blocks of the kept draws, for every primary,
+    extra, hyperprior-index and log-prior quantity: a stuck chain shows as chains whose block
+    means stay apart (between-chain disagreement that a longer run does not remove)."""
+    labels = [
+        lab for lab in run.spec.primary + run.spec.secondary
+        if lab in set(run.spec.primary) or lab.startswith(("gl_a_idx", "log_prior", "gl_log_tau"))
+    ]  # fmt: skip
+    x = np.asarray(run.spec.stack(run.mon, labels))  # (C, D, Q)
+    C, D = x.shape[:2]
+    cut = (D // blocks) * blocks
+    out: dict[str, list[list[float]]] = {}
+    for j, lab in enumerate(labels):
+        out[lab] = x[:, :cut, j].reshape(C, blocks, -1).mean(axis=2).tolist()
+    for k, v in run.extra.items():
+        v = np.asarray(v, dtype=np.float64)[:, :cut].reshape(C, cut, -1)
+        for g in range(v.shape[2]):
+            name = k if v.shape[2] == 1 and np.asarray(run.extra[k]).ndim == 2 else f"{k}[{g}]"
+            out[name] = v[:, :, g].reshape(C, blocks, -1).mean(axis=2).tolist()
+    return out
