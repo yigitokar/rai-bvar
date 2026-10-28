@@ -220,8 +220,49 @@ pending:
 
 Their DGPs (threshold, TVP) and readings are to be pre-registered before their first run.
 
-## Addendum (2026-10-27, after the full run; no setting changed)
+## Addendum (2026-10-27, revised 2026-10-28 after review; no setting changed)
 
-- **The 4-hour limit.** The 4-hour limit for a local full run (under "Wall time" above) was waived by the owner on 2026-10-25, after the pre-pilot estimate and before the pilot finished. The pilot then extrapolated 28 h remaining.
-- **How the run went.** It ran from a clean detached checkout of this file's commit, `58ab09f`, with the settings above. It was paused once on the owner's decision (2026-10-25 18:11 EDT, at 92 of 600 replications) and resumed on the owner's word (2026-10-26 09:25 EDT).
-- **Where it is recorded.** These events are the run's notes in `benchmarks/reports/dgp_study.md`. That report is labelled the pre-registered full run.
+The revision quotes the owner's decisions word for word and adds their times; on 2026-10-27
+they were only paraphrased. The records carry no wall-clock timestamps, so the times below come
+from git, GitHub's event log, the file times of the run's cache, log and records, and the
+orchestrating session's chat with the owner. The owner's words are quoted as that session relayed
+them to this work; the English in parentheses is a translation.
+
+- **The 4-hour limit.** The limit for a local full run (under "Wall time" above) was waived by the
+  owner's go-ahead for the full run, given after the pre-pilot estimate of about 10 h and before
+  the pilot finished: "evet 10 saatlik tam DGP koşusunu başlat" ("yes, start the 10-hour full DGP
+  run"; 2026-10-25 19:12:44Z, 15:12 EDT). The instruction relayed with it was to let the pilot
+  finish and then start the full study with exactly the settings registered here. The pilot then
+  extrapolated 28 h remaining.
+- **Running past about 10 h.** After the pilot's extrapolation the orchestrating session asked the
+  owner: "DGP tam çalışması 10 değil yaklaşık 28 saat sürecek; bu sürede Mac dolu kalacak ve
+  Phase 3 testleri de yavaşlayacak. Ne yapalım?" ("The full DGP study will take about 28 hours,
+  not 10; meanwhile the Mac stays busy and the Phase 3 tests slow down too. What shall we do?").
+  The owner answered: "Duraklat, sonra sürdür" ("pause, resume later"; 2026-10-25 22:09:56Z,
+  18:09 EDT). That answer is the go-ahead for a run longer than the approved 10 h. The pause
+  followed.
+- **The resume.** The owner: "dgp yi surdur bakalim" ("let's resume the DGP"; 2026-10-26
+  13:24:41Z, 09:24 EDT). The resume followed.
+- **How the run went.** It ran from a clean detached checkout of this file's commit, `58ab09f`,
+  with the settings above, and was paused once, at 92 of 600 replications. It was resumed with the
+  same command; the settings, the worker count (12) and the replication count did not change.
+- **Timeline** (UTC; EDT is UTC − 4 h):
+
+  | Time (UTC) | Event | Source |
+  | :-- | :-- | :-- |
+  | 2026-10-25 16:22:00 | this file committed (`58ab09f`) | git |
+  | 2026-10-25 16:22:01 | `58ab09f` pushed (the branch created) | GitHub event log |
+  | 2026-10-25 16:22:29 | score cache `~/.cache/rai-bvar-dgp-58ab09f` created (the pilot's first score file: 16:22:50) | file times |
+  | 2026-10-25 19:12:44 | owner: "evet 10 saatlik tam DGP koşusunu başlat" | owner's chat |
+  | 2026-10-25 20:35:56 | the finished pilot's 72 records (4.21 h) copied into the full run's records | file times |
+  | 2026-10-25 20:36:06 | full run started: 528 to run, 72 recorded | `run.log` created |
+  | 2026-10-25 20:37:10 | pilot report committed (`7002939`) | git |
+  | 2026-10-25 22:09:56 | owner: "Duraklat, sonra sürdür" | owner's chat |
+  | 2026-10-25 22:11 | paused at 92 of 600 records | `run.log` |
+  | 2026-10-26 13:24:41 | owner: "dgp yi surdur bakalim" | owner's chat |
+  | 2026-10-26 13:25 | resumed: 508 to run, 92 recorded | `run.log` |
+  | 2026-10-27 13:56:47 | finished: 600 of 600 records | last write of the records |
+
+- **Where it is recorded.** The run notes in `benchmarks/reports/dgp_study.md` were written at run
+  time and paraphrase these decisions; this addendum is the record of the owner's words. That
+  report is labelled the pre-registered full run.
