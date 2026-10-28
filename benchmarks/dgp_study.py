@@ -35,8 +35,8 @@ inconclusive verdicts were inconclusive, the convergence of every arm and the me
 replication, with the wall-time estimate of the full study. The report is labelled the
 pre-registered run only when every record comes from one commit with a clean working tree and
 that commit contains the pre-registration of every reported row, the design and the arms' specs
-are the registered ones, every pre-registered row this build can run is in the report with all
-the config's replications, and no replication is recorded twice. The report names the records'
+are the registered ones, every row of that pre-registration this build can run is in the report
+with all the config's replications, and no replication is recorded twice. The report names the records'
 commit, which a report regenerated later with ``--report-only`` keeps.
 
 ``--config smoke`` only checks that the script runs (2 chains × 100 draws, every 8th origin, two
@@ -287,8 +287,8 @@ def label(
     """Whether the records are the pre-registered run of ``cfg``, and why not.
 
     The pre-registrations are looked up in the records' commit, not in the commit that writes the
-    report. ``rows`` are the reported rows; every pre-registered row this build can run must be
-    among them.
+    report. ``rows`` are the reported rows; every row this build can run under the same
+    pre-registration must be among them (rows registered by another file are another study).
     """
     reasons = []
     if cfg.name not in REGISTERED_CONFIGS or cfg.design != REGISTERED:
@@ -322,8 +322,10 @@ def label(
         more = f" and {len(twice) - 5} more" if len(twice) > 5 else ""
         reasons.append(f"{len(twice)} replications recorded more than once ({shown}{more})")
     reported = {row.name for row in rows}
+    registrations = {row.preregistration for row in rows if row.preregistration}
     for row in dgp.ROWS:
-        if dgp.row_status(row) is None and row.name not in reported:
+        same = row.preregistration in registrations
+        if same and dgp.row_status(row) is None and row.name not in reported:
             reasons.append(f"row {row.name} is not in the report")
     for row in rows:
         have = {r["rep"] for r in records if r["row"] == row.name}

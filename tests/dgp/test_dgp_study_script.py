@@ -7,7 +7,8 @@ replications), the smoke config has a seed of its own, records are appended and 
 and the report is labelled the pre-registered run only for a registered config whose records all
 come from one clean commit that contains the pre-registration (looked up in the records' commit,
 which the report names), with every pre-registered row present, every replication present and none
-recorded twice. A row without a pre-registration runs only when named. ``git_state`` and
+recorded twice (rows of another pre-registration are another study). A row without a
+pre-registration runs only when named. ``git_state`` and
 ``in_commit`` are stand-ins unless a test says otherwise. The ``slow`` test runs the real smoke
 config for one replication of one row (tiny chains).
 """
@@ -258,6 +259,24 @@ def test_label_needs_every_preregistered_row(run_main):
         "row linear-homoskedastic is not in the report",
         "row linear-sv-outliers is not in the report",
     ]
+
+
+def test_a_row_of_another_preregistration_does_not_make_the_report_incomplete(
+    run_main, monkeypatch
+):
+    """A later row with a pre-registration of its own (a Phase 4 row, say) is another study: the
+    Phase 2 report, regenerated at that commit, stays the pre-registered run."""
+    monkeypatch.setattr(rb, "BART", object, raising=False)  # a stand-in for a Phase 4 build
+    row = dgp.get_row("linear-sv-bart")
+    other = dataclasses.replace(row, preregistration="benchmarks/reports/another_study.md")
+    monkeypatch.setattr(dgp, "ROWS", tuple(other if r is row else r for r in dgp.ROWS))
+    assert dgp.row_status(other) is None
+    phase2 = ["linear-homoskedastic", "linear-sv", "linear-sv-outliers"]
+    _, rep = run_main("--config", "pilot", "--rows", *phase2)
+    assert rep["registered"], rep["not_registered_because"]
+    _, rep = run_main("--config", "pilot", "--rows", "linear-sv", "--report-only")
+    assert "row linear-homoskedastic is not in the report" in rep["not_registered_because"]
+    assert all("linear-sv-bart" not in r for r in rep["not_registered_because"])
 
 
 def test_a_replication_recorded_twice_counts_once_and_is_not_registered(run_main):
