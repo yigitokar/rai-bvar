@@ -263,6 +263,9 @@ def size_data(size: str) -> Any:
 # --------------------------------------------------------------------------- models
 
 FAMILIES = ("hs", "ng", "r2d2", "dl", "ssvs", "ssvs_beta")
+#: R18 isolation: ``ngfix`` = ``NormalGamma(a=0.1)``, ``dlfix`` = ``DirichletLaplace(a=0.5)``
+#: (``bayesianVARs``' fixed defaults, P3 §3.2) instead of GK's grid on ``a``.
+FIXED_A = {"ngfix": 0.1, "dlfix": 0.5}
 #: Row 325's CommonSV priors (P3 §9.4 test values: ``(ρ+1)/2 ~ Beta(10, 2)``, ``σ_h² ~ 0.1·χ²₁``).
 ROW325 = {"rho_a": 10.0, "rho_b": 2.0, "B": 0.1}
 
@@ -294,10 +297,13 @@ def coef_prior(family: str, *, reduced: bool = False, gk: bool = False) -> Any:
         return rb.Minnesota(form="conjugate", hierarchy="fixed")
     cls = {
         "hs": rb.Horseshoe, "ng": rb.NormalGamma, "r2d2": rb.R2D2, "dl": rb.DirichletLaplace,
-        "ssvs": rb.SSVS, "ssvs_beta": rb.SSVS,
+        "ssvs": rb.SSVS, "ssvs_beta": rb.SSVS, "ngfix": rb.NormalGamma,
+        "dlfix": rb.DirichletLaplace,
     }[base]  # fmt: skip
     if base == "ssvs_beta":
         kw["p"] = Beta(1.0, 1.0)
+    if base in FIXED_A:  # R18's isolation runs: the grid replaced by bayesianVARs' fixed a
+        kw["a"] = FIXED_A[base]
     return cls(**kw)
 
 

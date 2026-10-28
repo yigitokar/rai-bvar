@@ -26,6 +26,9 @@ from pathlib import Path
 from typing import Any
 
 LADDER = (2_000, 5_000, 10_000, 20_000, 50_000)
+#: The smallest window an arm can fit: semiautomatic SSVS in the reduced form needs
+#: ``T_eff > k + n + 1 = 107`` at ``n = 21, p = 4`` (D-44), so GK's first 31 origins have no fit.
+MIN_T = {"red_ssvs_beta_sv": 108}
 FIELD_RE = re.compile(r"^([A-Za-z_.0-9]+?)(\[.*\])?$")
 
 
@@ -157,6 +160,34 @@ def mixing_markdown(summary: dict[str, Any], size: str) -> str:
     return "\n".join(rows)
 
 
+GL_COLS = ("loglik", "B_own1", "log_lam", "mu", "phi", "sigma", "h_T", "group scale",
+           "gl_a_idx", "gl.mean_log_v", "log_prior")  # fmt: skip
+CSV_COLS = ("loglik", "B_own1", "log_lam", "common_h_T", "common_rho", "common_sigma",
+            "csv.mean_h", "log_prior")  # fmt: skip
+
+
+def _cell(v: float | None) -> str:
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return "—"
+    return f"{v:.0f}" if v >= 100 else (f"{v:.1f}" if v >= 1 else f"{v:.2f}")
+
+
+def fields_markdown(summary: dict[str, Any], size: str, csv: bool = False) -> str:
+    """ESS per 1,000 sweeps (median over seeds of the slowest quantity of each field) at the
+    longest run; ``group scale`` is HS ``gl_log_zeta``, NG/R2D2 ``gl_log_xi`` or SSVS ``gl_p``."""
+    cols = CSV_COLS if csv else GL_COLS
+    head = "| configuration | " + " | ".join(f"`{c}`" if c != "group scale" else c for c in cols)
+    rows = [head + " |", "| :--- |" + " ---: |" * len(cols)]
+    for s in summary.values():
+        if s["size"] != size or s["config"].startswith("csv_") != csv:
+            continue
+        f = {**s["ess_per_1k_fields"], **s["ess_per_1k_extras"]}
+        grp = next((f[k] for k in ("gl_log_zeta", "gl_log_xi", "gl_p") if k in f), None)
+        cells = [_cell(grp) if c == "group scale" else _cell(f.get(c)) for c in cols]
+        rows.append(f"| `{s['config']}` | " + " | ".join(cells) + " |")
+    return "\n".join(rows)
+
+
 # --------------------------------------------------------------------------- costs
 
 
@@ -190,7 +221,8 @@ def q26(gk_sweeps: list[dict[str, Any]], gk_origins: list[dict[str, Any]],
     sweeps: dict[str, list[tuple[int, float]]] = defaultdict(list)
     for doc in gk_sweeps:
         for r in doc["sweeps"]:
-            sweeps[r["arm"]].append((r["T_eff"], r["ms_per_sweep_min"]))
+            if "error" not in r:
+                sweeps[r["arm"]].append((r["T_eff"], r["ms_per_sweep_min"]))
 
     def ms(arm: str, T: int) -> float:
         pts = sorted(sweeps[arm])
@@ -224,11 +256,13 @@ def q26(gk_sweeps: list[dict[str, Any]], gk_origins: list[dict[str, Any]],
         per_arm = {}
         for arm in sorted(sweeps):
             secs = 0.0
-            for j, T in enumerate(origins):
+            feasible = [T for T in origins if T >= MIN_T.get(arm, 0)]
+            for j, T in enumerate(feasible):
                 nb = burn if j == 0 else warm_burn
                 secs += (nb + D) * ms(arm, T) / 1000.0 + a + b * D
             per_arm[arm] = secs / 3600.0
         table[str(D)] = {"per_arm_h": per_arm, "total_h": sum(per_arm.values())}
+    table["feasible_origins"] = {a: sum(T >= MIN_T.get(a, 0) for T in origins) for a in sweeps}
     return {
         "origins": len(origins),
         "overhead_s": {"a": a, "b_per_draw": b, "points": ov_pts},
@@ -251,9 +285,12 @@ def main(argv: list[str] | None = None) -> int:
     if gks:
         result["q26"] = q26(gks, gko)
     md = []
-    for size in ("qd7", "bp2", "sim20x120"):
+    for size in ("qd7", "bp2", "sim20x120", "md7", "qd21", "sim21x236"):
         if any(s["size"] == size for s in mix.values()):
-            md.append(f"### {size}\n\n" + mixing_markdown(mix, size) + "\n")
+            md.append(f"### {size}: gate ladder\n\n" + mixing_markdown(mix, size) + "\n")
+            md.append(f"### {size}: ESS per 1,000 sweeps (GL)\n\n" + fields_markdown(mix, size))
+            md.append(f"\n### {size}: ESS per 1,000 sweeps (CommonSV)\n\n"
+                      + fields_markdown(mix, size, csv=True) + "\n")  # fmt: skip
     text = "\n".join(md)
     if args.md:
         args.md.write_text(text)

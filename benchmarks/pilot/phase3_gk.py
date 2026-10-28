@@ -83,9 +83,16 @@ def sweeps(args: argparse.Namespace) -> dict:
             model = pc.build_model(arm, draws=1000, burn=args.warm, seed=3)
             gate = pc.wait_idle(args.gate, args.wait) if args.gate > 0 else {"gate_open": None}
             before = pc.load_snapshot()
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    res = resolve(model, data, rb.Runtime())
+            except ValueError as err:  # e.g. semiautomatic SSVS on a short window (D-44)
+                rows.append({"arm": arm, "T_eff": T_eff, "error": str(err)})
+                print(f"{arm} T={T_eff}: {err}", flush=True)
+                continue
             with _jax.x64(), _blas.single_thread(), warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                res = resolve(model, data, rb.Runtime())
                 fns = make_runner(res.static)
                 d = jax.tree.map(jnp.asarray, res.data)
                 p = jax.tree.map(jnp.asarray, res.prior)

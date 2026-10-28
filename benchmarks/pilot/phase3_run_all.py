@@ -42,6 +42,8 @@ R22 = ("md7", ("csv_conj", "csv_struct"), (0, 1, 2), 20_000)
 #: (``phase3_common.fredqd_21``, ``T_eff = 208``), seed 0, 4 × 20,000: does the structural-form
 #: evidence transfer to the GK run (§9.10)?
 GK21 = ("qd21", ("red_mn_sv", "red_hs_sv", "red_ng_sv"), (0,), 20_000)
+#: R18 isolation (the grid on ``a``): NG and DL with ``bayesianVARs``' fixed ``a`` at ``qd7``.
+R18 = ("qd7", ("ngfix_const", "dlfix_const"), (0, 1, 2, 3, 4))
 #: Single-threaded XLA for the mixing workers (``--single-thread``): many workers then share
 #: the machine without oversubscribing its cores (ESS and R-hat do not depend on threading).
 XLA_SINGLE = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
@@ -81,6 +83,9 @@ def mixing_jobs(draws: int, bp2_seeds: tuple[int, ...] = SEEDS["bp2"],
     for c in GK21[1]:
         for s in GK21[2]:
             job(GK21[0], c, s, GK21[3])
+    for s in R18[2]:
+        for c in R18[1]:
+            job(R18[0], c, s, draws)
     for s in bp2_seeds[1:]:
         for c in CONFIGS:
             job("bp2", c, s, bp2_late_draws or draws)
@@ -114,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--single-thread", action="store_true", help=f"XLA_FLAGS={XLA_SINGLE!r}")
     ap.add_argument("--skip-started", action="store_true", help="skip jobs that have a log")
     ap.add_argument("--sizes", default="", help="only these sizes (comma-separated)")
+    ap.add_argument("--configs", default="", help="only these configurations (comma-separated)")
     ap.add_argument("--bp2-seeds", default="0,1,2")
     ap.add_argument("--bp2-late-draws", type=int, default=0)
     args = ap.parse_args(argv)
@@ -124,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
         jobs = mixing_jobs(args.draws, bp2, args.bp2_late_draws or None)
         if args.sizes:
             jobs = [j for j in jobs if j[1] in set(args.sizes.split(","))]
+        if args.configs:
+            jobs = [j for j in jobs if j[3] in set(args.configs.split(","))]
         env = None
         if args.single_thread:
             env = {**os.environ, "XLA_FLAGS": XLA_SINGLE}
