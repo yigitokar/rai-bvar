@@ -1,24 +1,25 @@
 # arXiv submission of the rai-bvar paper
 
 What to paste into the arXiv form, which file to upload, and how that file was tested with arXiv's
-engine (pdfLaTeX). State of 2026-10-27, from the sources of the latest commit that changes this
+engine (pdfLaTeX). State of 2026-10-28, from the sources of the latest commit that changes this
 file on branch `paper-draft` (first written on 2026-10-24 in 8511b6c; Sections 0, 1 and 4 updated
 after the final adversarial check of that day; Sections 0, 1, 2, 4, 5 and 6 updated after the
 post-release F1 edits of cd8d605; Sections 0, 1 and 4 updated on 2026-10-25 after the weekly-tier
-edits of fae94d7, and Sections 0, 1, 2, 4, 5 and 6 on 2026-10-27 after the DGP-study and
-bayesianVARs edits of c39ab47). Every number below comes from a build or a command run between
-2026-10-24 and 2026-10-27; the commands are given so that they can be repeated.
+edits of fae94d7, Sections 0, 1, 2, 4, 5 and 6 on 2026-10-27 after the DGP-study and
+bayesianVARs edits of c39ab47, and Sections 0, 1, 2 and 4 on 2026-10-28 after the merge of
+PR #15, 52546e2). Every number below comes from a build or a command run between 2026-10-24 and
+2026-10-28; the commands are given so that they can be repeated.
 
 ## 0. Before you submit
 
-Done on 2026-10-24 to 2026-10-27:
+Done on 2026-10-24 to 2026-10-28:
 - **Repository public:** https://github.com/yigitokar/rai-bvar (`gh repo view --json visibility` returns `PUBLIC`).
 - **Tag and release:** tag `v0.2.0` at 4ac796997df80157d086c568714168fc2387f093, with a GitHub release (https://github.com/yigitokar/rai-bvar/releases/tag/v0.2.0). The install line in App. G uses `@v0.2.0`.
 - **Branch pushed:** `paper-draft`, which holds the paper's sources, figure and table scripts and data that App. F, App. G and Fig. F.1 point to.
 - **Date:** the title-page date is fixed to "October 2026" (`main.tex`, submission build), so arXiv's compile date does not appear.
 - **After the release:** PR #11 (merge 3644c4b) replaced the non-portable F1 replay test; Sections 9 and 12 and Apps. D, E and J describe it (cd8d605), and the paper still describes release 0.2.0.
 - **Weekly tier on Linux:** after the release it passed in full twice on x86-64 Linux (runs 40106532730 and 40140397848; the second sharded by PR #12, merge 2c71fb2); Sections 8, 9 and 12 and Apps. D, G and J say so.
-- **DGP study and bayesianVARs, after the release:** App. D.11 and Table D.6 give the pre-registered size and power study of the verdict rule (commit 75e0c2a, PR #15; records at 58ab09f); App. D.7 the black-box run of bayesianVARs (PR #21). Sections 1, 2, 6.6, 8, 12 and 13 point there; the main text still ends on p. 35.
+- **DGP study and bayesianVARs, after the release:** App. D.11 and Table D.6 give the pre-registered size and power study of the verdict rule (commit 75e0c2a, PR #15, merged into `main` as 8b5fce6 on 2026-10-28; records at 58ab09f); App. D.7 the black-box run of bayesianVARs (PR #21). Sections 1, 2, 6.6, 8, 12 and 13 point there; the main text still ends on p. 35.
 
 Still yours, both optional:
 - Your own statement for App. J (AUTHOR_TODO.md, item 1). The paper makes no claim about how far you read the code or the paper, nor about whether you reviewed the acceptance run's pre-registered settings before its launch.
@@ -26,9 +27,9 @@ Still yours, both optional:
 
 ## 1. The file to upload
 
-`docs/paper/arxiv.tar.gz`: 49 files, 511,550 bytes, SHA-256
-`dc656718f787545ee9b516952954d18983c5f03679e700922955e52f923468e3` (the tarball tested below,
-built 2026-10-27 15:16Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1` from the sources of
+`docs/paper/arxiv.tar.gz`: 49 files, 511,577 bytes, SHA-256
+`7f3f28cc89bd08769a72f74d3f3cbaeed1cba30792ad140115241dd0cac52206` (the tarball tested below,
+built 2026-10-28 19:03Z by `STRICT=1 make arxiv ARXIV_TEST=1 ARXIV_PDFLATEX=1` from the sources of
 the commit that records this checksum).
 
 arXiv publishes the source files of a submission, so `make_arxiv.sh` ships its 32 `.tex` files
@@ -40,7 +41,7 @@ tags, stay on the branch `paper-draft`. Checked on 2026-10-24:
   gitignored; the test's TeX Live 2026 BibTeX regenerates it byte for byte);
 - the stripped tarball typesets to the same PDF as an unstripped one: the pdfLaTeX builds of both
   have 109 pages with byte-identical page content streams (compared with pypdf; re-checked for the
-  tarball above, the unstripped files taken from c39ab47);
+  tarball above, the unstripped files taken from 52546e2);
 - the shipped `.tex` files hold no comment text; the only local path left in the tarball is in the
   header comments of `code/ex_a.py` and `code/ex_b.py`, lines the listings do not print.
 
@@ -87,8 +88,8 @@ unpacks the tarball twice, each time into a fresh temporary directory, and compi
 - The `.bbl`: build (b)'s BibTeX 0.99e with TeX Live 2026's `plainnat.bst` regenerated a
   `main.bbl` byte-identical to the shipped one, which tectonic's BibTeX 0.99d wrote (natbib,
   `plainnat`, 129 entries, 0 BibTeX warnings). The shipped `.bbl` therefore matches TeX Live 2026.
-- The PDFs of (a) and (b) have identical text on all 109 pages (re-checked for c39ab47; a fourth
-  pdflatex pass again leaves `main.aux` unchanged).
+- The PDFs of (a) and (b) have identical text on all 109 pages (re-checked for 52546e2; for
+  c39ab47 a fourth pdflatex pass again left `main.aux` unchanged).
 - Converged: a fourth pdflatex pass on (a) leaves `main.aux` unchanged. tectonic's own rerun rule
   is not as reliable: from no `main.aux`, the sources of cd8d605 stopped one pass short, at 108
   pages with the main text spilling onto p. 36, and one more pass gave the converged 107. `build.sh`
@@ -139,8 +140,8 @@ Compared by text extraction (PyMuPDF) and by the `.aux` label tables of the two 
 1. **The same document.** Both have 109 pages. In both, the main text runs from p. 1 to p. 35,
    App. A starts on p. 36, and the appendices end and the references start on p. 100. Both have 11
    figures, 30 tables, 6 listings, 13 algorithms and 129 references. All 247 labels have the same
-   numbers in both builds. (Re-measured on 2026-10-27 for the tarball of Section 1, the tectonic
-   side being `build.sh`'s converged build of c39ab47.)
+   numbers in both builds. (Re-measured on 2026-10-28 for the tarball of Section 1, the tectonic
+   side being `build.sh`'s converged build of 52546e2.)
 2. **Page drift.** 235 of the 247 labels fall on the same page. Twelve are one page off, all
    pdfLaTeX one page earlier except two: `sec:walk-mcmc` (p. 19 in tectonic, p. 18 in pdfLaTeX),
    `sec:validation-cost` and `sec:validation-tiers` (20, 19), `sec:robustness-f3` (26, 25),
