@@ -97,11 +97,16 @@ def mixing_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
         slow_val: list[float] = []
         extras: dict[str, list[float]] = defaultdict(list)
         acf: dict[str, list[float]] = defaultdict(list)
+        common = min(r["draws"] for r in rs)  # ESS tables at the length every seed has
+
+        def table(r: dict[str, Any], _D: int = common) -> dict[str, Any]:
+            return r["ess"] if r["draws"] == _D else r["ess_at"][str(_D)]
+
         for r in rs:
             per_field: dict[str, float] = {}
             per_field_acf: dict[str, float] = {}
             worst = (None, math.inf)
-            for name, row in r["ess"].items():
+            for name, row in table(r).items():
                 f = _field(name)
                 key = f
                 v = row["ess_per_1k"]
@@ -125,7 +130,7 @@ def mixing_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
             "size": size,
             "config": config,
             "seeds": [r["seed"] for r in rs],
-            "draws": min(r["draws"] for r in rs),
+            "draws": common,
             "n_primary": rs[0]["n_primary"],
             "passes": {str(D): passes[D] for D in sorted(passes)},
             "gate_detail": {str(D): detail[D] for D in sorted(detail)},
@@ -142,11 +147,27 @@ def mixing_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
+ORDER = ("mn", "hs", "ng", "ngfix", "r2d2", "dl", "dlfix", "ssvs", "ssvs_beta")
+
+
+def _order(config: str) -> tuple[int, str]:
+    """Reference first, then the GL families (Constant before SV), then CommonSV."""
+    if config.startswith("csv_"):
+        return (100, config)
+    base, _, vol = config.removeprefix("red_").rpartition("_")
+    fam = base.split("@")[0]
+    return (2 * ORDER.index(fam) + (vol == "sv") if fam in ORDER else 99, config)
+
+
+def _sorted(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(summary.values(), key=lambda s: _order(s["config"]))
+
+
 def mixing_markdown(summary: dict[str, Any], size: str) -> str:
     rows = [f"| configuration | primaries | {' | '.join(f'{D:,}' for D in LADDER)} | "
             "recommended | slowest primary (ESS/1k) |",
             "| :--- | ---: | " + " | ".join("---:" for _ in LADDER) + " | ---: | :--- |"]  # fmt: skip
-    for s in summary.values():
+    for s in _sorted(summary):
         if s["size"] != size:
             continue
         cells = []
@@ -154,7 +175,7 @@ def mixing_markdown(summary: dict[str, Any], size: str) -> str:
             flags = s["passes"].get(str(D))
             cells.append("—" if not flags else f"{sum(flags)}/{len(flags)}")
         rec = s["recommended"]
-        rec_s = f"{rec:,}" if rec else "> " + f"{s['draws']:,}"
+        rec_s = f"{rec:,}" if rec else "> " + f"{max(int(D) for D in s['passes']):,}"
         rows.append(f"| `{s['config']}` | {s['n_primary']} | {' | '.join(cells)} | {rec_s} | "
                     f"`{s['slowest_primary']}` ({s['slowest_primary_ess_per_1k']:.1f}) |")  # fmt: skip
     return "\n".join(rows)
@@ -178,7 +199,7 @@ def fields_markdown(summary: dict[str, Any], size: str, csv: bool = False) -> st
     cols = CSV_COLS if csv else GL_COLS
     head = "| configuration | " + " | ".join(f"`{c}`" if c != "group scale" else c for c in cols)
     rows = [head + " |", "| :--- |" + " ---: |" * len(cols)]
-    for s in summary.values():
+    for s in _sorted(summary):
         if s["size"] != size or s["config"].startswith("csv_") != csv:
             continue
         f = {**s["ess_per_1k_fields"], **s["ess_per_1k_extras"]}
