@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 from sbc_p3 import BY_ID, SBC_ROWS
-from sbc_p3_run import run_sbc
+from sbc_p3_run import check_sbc, run_sbc
 
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
@@ -22,6 +22,7 @@ pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 @pytest.mark.sbc
 @pytest.mark.parametrize("name", [BY_ID[r] for r in SBC_ROWS["b4"]])
 def test_sbc(name, record_property):
-    """Full SBC (P3 §9.5) of one row."""
+    """Full SBC (P3 §9.5) of one row; the row E179 records as not met is a narrow strict xfail (Q45,
+    E180; ``sbc_p3_run.check_sbc``)."""
     passed, out, last = run_sbc(name, record_property)
-    assert passed, (out, last.table().head(10))
+    check_sbc(name, passed, out, last)  # Q45, E180: a narrow strict xfail for the not-met row

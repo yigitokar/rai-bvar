@@ -25,6 +25,7 @@ from jax import random
 from sbc_models import PredictiveJoint, program_for, reference_next
 from sbc_p3 import (
     BY_ID,
+    NOT_MET_ROWS,
     SBC_CONFIG,
     SBC_OVERRIDES,
     SBC_ROWS,
@@ -33,7 +34,7 @@ from sbc_p3 import (
     sbc_model,
 )
 
-from rai_bvar.validation.joint import COMPOSITIONS_P3, LAGGED_P3, JointSpecP3
+from rai_bvar.validation.joint import COMPOSITIONS_P3, LAGGED_P3, JointSpecP3, composition_id
 from rai_bvar.validation.reference import effective_log_var, state_log_var
 
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
@@ -122,3 +123,66 @@ def test_truth_and_forecast_core_are_the_same_map_p3(name):
         np.testing.assert_array_equal(np.asarray(q_new[base : base + n]), np.asarray(new.y_next))
         if common:  # the common h of the sampler's state is 0 beyond the T data rows
             assert np.all(np.asarray(new.st.glob.vol.h)[T:] == 0.0)
+
+
+# Q45, E180: the narrow strict xfail of the rows E179 records as not met, checked on the outcomes
+# recorded in run 40430948633 (the reasons verbatim) and on the outcomes that must stay red.
+_POOLED_308 = (
+    "pooled kept-draw ESS below 0.8·L for ['log_prior']: the pilot underestimates the IAT (raise "
+    "pilot, burn or iat_factor)"
+)
+_POOLED_325 = (
+    "pooled kept-draw ESS below 0.8·L for ['log_prior', 'glob.vol.mean_abs_h', 'glob.vol.sigma', "
+    "'glob.vol.log_sigma']: the pilot underestimates the IAT (raise pilot, burn or iat_factor)"
+)
+_GAMMA = "γ test (Bonferroni over 58 at α = 0.01): ('glob.vol.sigma',)"
+_ESS_RULE = "thinned ESS ≥ 0.8·L in only 98.0% of replications (need 99%; raise t_max or pilot)"
+_FAILED = "3 replication(s) failed (non-finite quantities)"
+
+
+def _stage(reasons=(), failing=(), n_failed=0, ess_ok=1.0):
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    failed = np.zeros(1000, bool)
+    failed[:n_failed] = True
+    return SimpleNamespace(reasons=tuple(reasons), failing=tuple(failing), failed=failed,
+                           ess_ok=ess_ok, table=lambda: pd.DataFrame())  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "row, last, outcome",
+    [
+        (308, _stage([_POOLED_308]), "xfail"),  # the recorded outcome of run 40430948633
+        (325, _stage([_POOLED_325]), "xfail"),  # the recorded outcome of run 40430948633
+        (325, _stage([_GAMMA, _POOLED_325], failing=["glob.vol.sigma"]), "fail"),  # γ breaks
+        (308, _stage([_ESS_RULE, _POOLED_308], ess_ok=0.98), "fail"),  # the per-replication rule
+        (325, _stage([_FAILED, _POOLED_325], n_failed=3), "fail"),  # failed replications
+        (308, _stage([_POOLED_308], ess_ok=0.98), "fail"),  # rule not met although unreported
+        (325, _stage(), "unexpected-pass"),  # a pass needs a re-decision
+        (304, _stage(), "pass"),  # every other row is unchanged
+        (304, _stage([_POOLED_308]), "assert"),
+    ],
+)  # fmt: skip
+def test_not_met_rows_are_a_narrow_strict_xfail(row, last, outcome):
+    """P3 Q45, E180: rows 308 and 325 are XFAIL only when they fail on the pooled kept-draw ESS gate
+    alone; any other failure and a pass FAIL; every other row must pass as before."""
+    from sbc_p3_run import check_sbc
+
+    assert NOT_MET_ROWS == (308, 325)
+    name = BY_ID[row]
+    assert composition_id(name) == row
+    passed = not last.reasons
+    out = {"ess_coverage": 0.99}
+    if outcome == "xfail":
+        with pytest.raises(pytest.xfail.Exception, match="E180"):
+            check_sbc(name, passed, out, last)
+    elif outcome in ("fail", "unexpected-pass"):
+        with pytest.raises(pytest.fail.Exception, match="E180"):
+            check_sbc(name, passed, out, last)
+    elif outcome == "pass":
+        check_sbc(name, passed, out, last)
+    else:
+        with pytest.raises(AssertionError):
+            check_sbc(name, passed, out, last)
