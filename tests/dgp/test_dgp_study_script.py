@@ -5,9 +5,13 @@ returns synthetic records, so these tests fit nothing; their rates mean nothing.
 the full study share the registered design (the pilot's records are the full study's first
 replications), the smoke config has a seed of its own, records are appended and a rerun resumes,
 and the report is labelled the pre-registered run only for a registered config whose records all
-come from one clean commit that contains the pre-registration, with every replication present.
-``git_state`` is a stand-in unless a test says otherwise. The ``slow`` test runs the real smoke
-config for one replication of one row (tiny chains).
+come from one clean commit that contains the reported rows' pre-registration (looked up in the
+records' commit, which the report names), with every row of that pre-registration present, every
+replication present and none recorded twice. Without ``--rows`` the script runs one
+pre-registration's rows (``--preregistration``, by default the Phase 2 file), so rows of another
+pre-registration are another study. A row without a pre-registration runs only when named and only
+under the smoke config. ``git_state`` and ``in_commit`` are stand-ins unless a test says otherwise.
+The ``slow`` test runs the real smoke config for one replication of one row (tiny chains).
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+import rai_bvar as rb
 from rai_bvar.settings import MCMCSettings
 from rai_bvar.validation import dgp
 
@@ -89,6 +94,8 @@ def fake_replication(row: dgp.Row, rep: int, design: dgp.Design, *, cache=None) 
         "data_fingerprint": f"{row.dgp}-{rep}",
         "compare_seed": dgp.compare_seed(design, row.dgp, rep),
         "seconds": 100.0 * len(row.arms),
+        "started_at": f"2026-10-28T10:{rep % 60:02d}:00+00:00",
+        "finished_at": f"2026-10-28T11:{rep % 60:02d}:00+00:00",
         "arms": {
             a: {
                 "spec_hash": REGISTERED_HASHES.get(a, "0" * 64),
@@ -108,6 +115,7 @@ def fake_replication(row: dgp.Row, rep: int, design: dgp.Design, *, cache=None) 
 def run_main(study, monkeypatch, tmp_path):
     monkeypatch.setattr(dgp, "run_replication", fake_replication)
     monkeypatch.setattr(study, "git_state", lambda: dict(CLEAN))
+    monkeypatch.setattr(study, "in_commit", lambda commit, path: True)
     monkeypatch.setattr(study, "_init_worker", lambda: None)  # no JAX config in this process
     monkeypatch.setenv("JAX_COMPILATION_CACHE_DIR", str(tmp_path / "xla"))
 
@@ -128,6 +136,8 @@ def test_configs(study):
     assert smoke.mcmc == MCMCSettings(chains=2, draws=100, burn=100)
     assert smoke.key() != study.REGISTERED.key()
     assert study.REGISTERED.mcmc is None  # the library default budgets (D-35)
+    assert study.REGISTERED.key() == "81f067e0cefaaea5"  # the design key of the registered run
+    assert study.PREREGISTRATION == "benchmarks/reports/dgp_study_preregistration.md"
     assert set(study.REGISTERED_CONFIGS) == {"pilot", "full"}
 
 
@@ -141,6 +151,10 @@ def test_pilot_run_records_resumes_and_is_labelled(run_main, study):
     md = out.with_suffix(".md").read_text()
     assert "**The pre-registered pilot run**" in md and "This is the **pilot**" in md
     assert "dgp_study_preregistration.md" in md
+    assert f"every record from commit `{CLEAN['git_commit'][:12]}`" in md
+    assert f"- Code: records from commit `{CLEAN['git_commit']}`; rai-bvar" in md
+    assert "--report-only" not in md
+    assert rep["records_commit"] == CLEAN["git_commit"] and rep["records_twice"] == []
     # the pending rows are listed, not run
     assert {p["name"] for p in rep["pending"]} == {
         "linear-sv-bart",
@@ -189,7 +203,11 @@ def test_labels(run_main, study, monkeypatch):
     out, rep = run_main("--config", "pilot")
     assert not rep["registered"]
     assert any("modified tracked files" in r for r in rep["not_registered_because"])
-    assert "**Not the pre-registered run:**" in out.with_suffix(".md").read_text()
+    md = out.with_suffix(".md").read_text()
+    assert "**Not the pre-registered run:**" in md
+    # the flag is this invocation's: it goes with the reporting commit, even the records' own one
+    c = CLEAN["git_commit"]
+    assert f"records from commit `{c}`; this report written at commit `{c}` (tracked files" in md
 
 
 def test_label_needs_the_registered_arm_specs(run_main, monkeypatch):
@@ -205,11 +223,232 @@ def test_label_needs_the_registered_arm_specs(run_main, monkeypatch):
     assert any("unregistered specs" in r for r in rep["not_registered_because"])
 
 
-def test_label_needs_the_preregistration_in_the_commit(run_main, study, monkeypatch):
-    monkeypatch.setattr(study, "git_state", lambda: CLEAN | {"preregistration_in_commit": False})
-    _, rep = run_main("--config", "pilot")
+def test_label_looks_for_the_preregistration_in_the_records_commit(run_main, study, monkeypatch):
+    """Records made at a commit without the pre-registration are not the registered run when a
+    later commit that has it writes the report; the report names the records' commit."""
+    old, new = "a" * 40, "b" * 40
+    looked_up = []
+
+    def in_commit(commit, path):
+        looked_up.append((commit, path))
+        return commit != old
+
+    monkeypatch.setattr(study, "in_commit", in_commit)
+    monkeypatch.setattr(study, "git_state", lambda: CLEAN | {"git_commit": old})
+    run_main("--config", "pilot")
+    monkeypatch.setattr(study, "git_state", lambda: CLEAN | {"git_commit": new})
+    looked_up.clear()
+    out, rep = run_main("--config", "pilot", "--report-only")
+    assert looked_up == [(old, study.PREREGISTRATION)]
+    assert not rep["registered"] and rep["records_commit"] == old
+    assert rep["not_registered_because"] == [f"{study.PREREGISTRATION} is not in commit {old[:12]}"]
+    md = out.with_suffix(".md").read_text()
+    assert f"records from commit `{old}`; this report written at commit `{new}`" in md
+    assert "- Regenerated with `--report-only`: this invocation ran no replication" in md
+    # with the pre-registration in the records' commit, the label holds and names that commit
+    monkeypatch.setattr(study, "in_commit", lambda commit, path: commit == old)
+    out, rep = run_main("--config", "pilot", "--report-only")
+    assert rep["registered"]
+    assert f"every record from commit `{old[:12]}`" in out.with_suffix(".md").read_text()
+
+
+def test_in_commit_of_this_checkout(study):
+    if study.git_state()["git_commit"] == "unknown":
+        pytest.skip("not a git checkout")
+    assert study.in_commit("HEAD", "benchmarks/dgp_study.py")
+    assert not study.in_commit("HEAD", "benchmarks/no-such-file.md")
+    assert not study.in_commit("0" * 40, study.PREREGISTRATION)
+
+
+def test_label_needs_every_preregistered_row(run_main):
+    _, rep = run_main("--config", "pilot", "--rows", "linear-sv")
     assert not rep["registered"]
-    assert any("is not in the commit" in r for r in rep["not_registered_because"])
+    assert rep["not_registered_because"] == [
+        "row linear-homoskedastic is not in the report",
+        "row linear-sv-outliers is not in the report",
+    ]
+
+
+def test_the_rows_of_another_preregistration_are_another_study(run_main, study, monkeypatch):
+    """A later row with a pre-registration of its own (a Phase 4 row, say) is another study. The
+    pre-registration's commands (no ``--rows``) still run and label the Phase 2 rows only, also
+    with ``--report-only``; ``--preregistration`` selects the other study, whose label looks up its
+    own file, asks for its own rows and names its file."""
+    monkeypatch.setattr(rb, "BART", object, raising=False)  # a stand-in for a Phase 4 build
+    path = "benchmarks/reports/another_study.md"
+    row = dgp.get_row("linear-sv-bart")
+    other = dataclasses.replace(row, preregistration=path)
+    monkeypatch.setattr(dgp, "ROWS", tuple(other if r is row else r for r in dgp.ROWS))
+    hashes = study.REGISTERED_SPEC_HASHES | {"BART × SV": "0" * 16}
+    monkeypatch.setattr(study, "REGISTERED_SPEC_HASHES", hashes)
+    assert dgp.row_status(other) is None
+    looked_up = []
+
+    def in_commit(commit, path):
+        looked_up.append(path)
+        return True
+
+    monkeypatch.setattr(study, "in_commit", in_commit)
+    phase2 = ["linear-homoskedastic", "linear-sv", "linear-sv-outliers"]
+    out, rep = run_main("--config", "pilot")
+    assert rep["registered"], rep["not_registered_because"]
+    assert [r["name"] for r in rep["rows"]] == phase2
+    assert "linear-sv-bart" not in {p["name"] for p in rep["pending"]}
+    lines = out.with_suffix(".jsonl").read_text().splitlines()
+    assert {json.loads(x)["row"] for x in lines} == set(phase2)
+    assert set(looked_up) == {study.PREREGISTRATION}
+    _, again = run_main("--config", "pilot", "--report-only")
+    assert again["registered"] and again["summary"] == rep["summary"]
+    _, rep = run_main("--config", "pilot", "--rows", "linear-sv", "--report-only")
+    assert rep["not_registered_because"] == [
+        "row linear-homoskedastic is not in the report",
+        "row linear-sv-outliers is not in the report",
+    ]
+    # the other study
+    looked_up.clear()
+    out, rep = run_main("--config", "pilot", "--preregistration", path)
+    assert [r["name"] for r in rep["rows"]] == ["linear-sv-bart"]
+    assert rep["registered"], rep["not_registered_because"]
+    assert set(looked_up) == {path} and rep["preregistration"] == path
+    assert f"**The pre-registered pilot run** ({path})" in out.with_suffix(".md").read_text()
+
+
+def test_the_row_selection_is_checked(run_main, capsys):
+    for args, message in (
+        (["--rows", "linear-sv", "linear-sv"], "--rows names linear-sv more than once"),
+        (["--preregistration", "benchmarks/reports/no_such.md"], "no row is pre-registered in"),
+        (["--rows", "linear-sv", "--preregistration", "x.md"], "not allowed with argument"),
+    ):
+        with pytest.raises(SystemExit):
+            run_main("--config", "pilot", *args)
+        assert message in capsys.readouterr().err
+
+
+def test_a_named_row_this_build_cannot_run_is_pending(run_main):
+    row = dgp.get_row("linear-sv-bart")
+    assert dgp.row_missing(row) == ["BART"]
+    out, rep = run_main("--config", "pilot", "--rows", "linear-sv-bart")
+    assert [p["name"] for p in rep["pending"]] == ["linear-sv-bart"]
+    assert rep["rows"] == [] and rep["summary"] == [] and not out.with_suffix(".jsonl").exists()
+    assert rep["records_commit"] is None and not rep["registered"]
+    assert f"- Code: no records; this report written at commit `{CLEAN['git_commit']}`" in (
+        out.with_suffix(".md").read_text()
+    )
+
+
+def test_a_replication_recorded_twice_counts_once_and_is_not_registered(run_main):
+    out, _ = run_main("--config", "pilot")
+    path = out.with_suffix(".jsonl")
+    lines = path.read_text().splitlines()
+    again = [x for x in lines if json.loads(x)["row"] == "linear-sv"][:3]  # reps 0, 1, 2
+    # the second copy of replication 0 has replication 1's (inconclusive) verdicts
+    changed = json.loads(again[0]) | {"pairs": json.loads(again[1])["pairs"]}
+    again[0] = json.dumps(changed)
+    path.write_text("\n".join(lines + again) + "\n")
+    _, rep = run_main("--config", "pilot", "--report-only")
+    assert not rep["registered"]
+    assert rep["not_registered_because"] == [
+        "3 replications recorded more than once (linear-sv 0, linear-sv 1, linear-sv 2)"
+    ]
+    assert rep["records_twice"] == [["linear-sv", 0], ["linear-sv", 1], ["linear-sv", 2]]
+    assert {s["n"] for s in rep["summary"]} == {24}  # each replication counted once
+    s = next(x for x in rep["summary"] if x["row"] == "linear-sv" and x["horizon"] == 1)
+    assert s["gate_on"]["better"]["k"] == 8  # the first copy of replication 0 counts
+
+
+def test_records_of_two_commits_or_of_none(run_main):
+    out, _ = run_main("--config", "pilot")
+    path = out.with_suffix(".jsonl")
+    recs = [json.loads(x) for x in path.read_text().splitlines()]
+    for r in recs[:10]:
+        r["git_commit"] = "d" * 40
+    path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    out, rep = run_main("--config", "pilot", "--report-only")
+    assert rep["records_commit"] is None and rep["records_commits"] == 2
+    assert not rep["registered"]
+    assert any("records come from 2 commits" in r for r in rep["not_registered_because"])
+    assert "- Code: records from more than one commit (see above); this report written at" in (
+        out.with_suffix(".md").read_text()
+    )
+    for r in recs:
+        del r["git_commit"]
+    path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    out, rep = run_main("--config", "pilot", "--report-only")
+    assert rep["records_commit"] is None and rep["records_commits"] == 1
+    assert rep["not_registered_because"] == ["the records name no commit"]
+    assert "- Code: records that name no commit; this report written at" in (
+        out.with_suffix(".md").read_text()
+    )
+
+
+def test_a_row_without_a_preregistration_runs_only_when_named_and_only_in_smoke(
+    run_main, study, monkeypatch, capsys
+):
+    """Under pilot or full an unregistered row would score samples of the registered design and
+    seed (``linear-sv-bart`` is on the ``linear-sv`` DGP) before its pre-registration: refused."""
+    monkeypatch.setattr(rb, "BART", object, raising=False)  # a stand-in for a Phase 4 build
+    row = dgp.get_row("linear-sv-bart")
+    assert dgp.row_missing(row) == [] and row.preregistration is None
+    out, rep = run_main("--config", "pilot", "--reps", "0:2")
+    assert "linear-sv-bart" in {p["name"] for p in rep["pending"]}
+    assert all(s["row"] != "linear-sv-bart" for s in rep["summary"])
+    for config in ("pilot", "full"):
+        with pytest.raises(SystemExit):
+            run_main("--config", config, "--rows", "linear-sv-bart", "--reps", "0:2")
+        err = capsys.readouterr().err
+        assert "no pre-registration for row linear-sv-bart" in err and "seed (20261025)" in err
+    lines = out.with_suffix(".jsonl").read_text().splitlines()
+    assert all(json.loads(x)["row"] != "linear-sv-bart" for x in lines)  # nothing scored
+    _, rep = run_main("--config", "smoke", "--rows", "linear-sv-bart")
+    assert [r["name"] for r in rep["rows"]] == ["linear-sv-bart"]
+    assert {s["row"] for s in rep["summary"]} == {"linear-sv-bart"}
+    assert rep["config"]["design"]["seed"] != study.REGISTERED.seed
+    assert not rep["registered"]
+    assert "row linear-sv-bart is not pre-registered" in rep["not_registered_because"]
+
+
+def test_the_report_gives_when_the_replications_ran(run_main, monkeypatch):
+    calls = []
+    ticks = iter(f"2026-10-28T12:00:{i:02d}+00:00" for i in range(60))
+
+    def now():
+        calls.append("now")
+        return next(ticks)
+
+    def replication(row, rep, design, *, cache=None):
+        calls.append("replication")
+        return fake_replication(row, rep, design)
+
+    monkeypatch.setattr(dgp, "utc_now", now)
+    monkeypatch.setattr(dgp, "run_replication", replication)
+    out, rep = run_main("--config", "pilot")
+    # the invocation's times: one before the first replication, one after the last
+    assert calls == ["now"] + ["replication"] * 72 + ["now"]
+    meta = rep["meta"]
+    assert (meta["started_at"], meta["finished_at"]) == (
+        "2026-10-28T12:00:00+00:00",
+        "2026-10-28T12:00:01+00:00",
+    )
+    assert rep["timestamps"] == {
+        "first_started_at": "2026-10-28T10:00:00+00:00",
+        "last_finished_at": "2026-10-28T11:23:00+00:00",
+        "records_without": 0,
+    }
+    md = out.with_suffix(".md").read_text()
+    assert "- Replications ran from 2026-10-28T10:00:00+00:00 to 2026-10-28T11:23:00+00:00" in md
+    assert (
+        "- This invocation: started 2026-10-28T12:00:00+00:00, finished "
+        "2026-10-28T12:00:01+00:00 (UTC)."
+    ) in md
+    # records written before the times were recorded (the Phase 2 study's) still report
+    path = out.with_suffix(".jsonl")
+    old = [json.loads(x) for x in path.read_text().splitlines()]
+    for r in old:
+        del r["started_at"], r["finished_at"]
+    path.write_text("".join(json.dumps(r) + "\n" for r in old))
+    out, rep = run_main("--config", "pilot", "--report-only")
+    assert rep["registered"] and rep["timestamps"]["records_without"] == 72
+    assert "- The records carry no wall-clock times." in out.with_suffix(".md").read_text()
 
 
 def test_smoke_is_never_registered_and_says_so(run_main):
