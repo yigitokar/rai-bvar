@@ -1226,27 +1226,32 @@ def test_common_sv_only_runs_the_common_step_alone(monkeypatch):
     np.testing.assert_allclose(lv, expect, rtol=1e-15)
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "structural_constant_hs",
-        "structural_commonsv",
-        "conjugate_commonsv_parity",
-        "common_sv_only",
-    ],
-)
-def test_p3_steps_wait_for_the_kernels(name):
-    """Building a P3 spec never composes; stepping composes and, until WP31/WP32 land, reports
-    the missing kernels (the GL kinds through the registry; CommonSV through the program's missing
-    G_COMMON_SV step, which compose itself does not detect). Each row skips on its own once its
-    kernels exist (the step is then the production kernel, validated by WP31/WP32/WP35)."""
-    spec, st, data = a_dataset(name)
-    try:
-        spec.step(random.key(2), jnp.uint32(0), st, data)
-    except NotImplementedError as err:
-        assert "WP31" in str(err) or "WP32" in str(err), err
-    else:  # pragma: no cover - once the kernels exist this is the production sweep
-        pytest.skip("the Phase 3 kernels of this row are available")
+P3_STEP_ROWS = {
+    "structural_constant_hs": {Block.G_COEF_GLOBAL},
+    "structural_commonsv": {Block.G_COMMON_SV},
+    "conjugate_commonsv_parity": {Block.G_COMMON_SV},
+    "common_sv_only": {Block.G_COMMON_SV},
+}
+
+
+@pytest.mark.parametrize("name", list(P3_STEP_ROWS))
+def test_p3_rows_compose_their_phase3_steps(name):
+    """E151, the review R6 of PR #20: the kernels have landed (WP31, WP32), so the production
+    program behind a P3 row's ``step`` holds the row's Phase 3 global step (``G_COEF_GLOBAL`` for
+    a varying coefficient prior, ``G_COMMON_SV`` under CommonSV), both as ``compose`` builds it and
+    through the row's own path (``production_program``, which refuses a program without it).
+    Composes only; no step runs (the steps are validated by WP31, WP32 and WP35)."""
+    from rai_bvar.engines.mcmc.compose import compose
+
+    blocks = P3_STEP_ROWS[name]
+    spec = J.joint_spec(name)
+    static = spec.static
+    need = ((static.coef.varies, Block.G_COEF_GLOBAL), (static.vol.common, Block.G_COMMON_SV))
+    assert {int(b) for needed, b in need if needed} == {int(b) for b in blocks}
+    program = compose(static, overrides=dict(spec.overrides) or None)
+    assert {int(b) for b in blocks} <= {int(g.block) for g in program.global_steps}
+    row_program, _ = J.production_program(static, spec.overrides)
+    assert {int(b) for b in blocks} <= {int(g.block) for g in row_program.global_steps}
 
 
 # --------------------------------------------------------------------------- 7. explosive mass

@@ -949,6 +949,85 @@ def test_resolve_branches_for_global_local_priors():
     assert rm.static.mean.const_path == "cholesky_const" and not rm.static.mean.coef_log
 
 
+class _Compiles:
+    """Backend compilations of the runner's executables (``jax.monitoring`` events), as in the
+    Phase 2 ``tests/mcmc/runner/test_recompile.py``."""
+
+    def __init__(self) -> None:
+        self.names: list[str] = []
+
+    def __call__(self, event: str, duration: float, **kw) -> None:
+        if event.endswith("backend_compile_duration"):
+            self.names.append(str(kw.get("fun_name", "")))
+
+    @property
+    def runner(self) -> list[str]:
+        return [n for n in self.names if "mcmc_" in n]
+
+
+def test_zero_recompiles_across_windows_of_one_bucket(caplog):
+    """P3 §9.2 item 4 (the review R6 of PR #23; D-23): a global-local composition compiles once
+    per ``T_pad`` bucket. Reduced semi-automatic SSVS × SV on two windows of one bucket
+    (``T_eff`` 68 and 78, ``T_pad`` 96) whose GL prior arrays differ (the per-window ``ŝ`` and
+    ``log r``): the same ``StaticConfig`` and array shapes (as WP32's one-bucket check in
+    ``test_common_sv.py``), one runner, and no ``mcmc_*`` executable compiles on the second
+    window (the Phase 2 listener and compile log)."""
+    import logging
+
+    import rai_bvar as rb
+    from rai_bvar.engines.mcmc.resolve import resolve
+    from rai_bvar.engines.mcmc.runner import make_runner, run_chains
+    from rai_bvar.settings import MCMCSettings, Runtime
+
+    rt = Runtime(chunk=5)
+    prior = rb.SSVS(form="reduced")
+    assert prior.semiautomatic
+    model = rb.BVAR(mean=rb.Linear(prior), vol=rb.SV(), lags=2,
+                    mcmc=rb.MCMCSettings(chains=2, draws=8, burn=4))  # fmt: skip
+    r1, r2 = (resolve(model, _sample_data(T=T), rt) for T in (70, 80))
+    static = r1.static
+    assert r2.static == static and static.shapes.T_pad == 96 and static.coef.kind == "ssvs"
+    assert (int(r1.data.T_eff), int(r2.data.T_eff)) == (68, 78)
+    for a_, b_ in ((r1.prior, r2.prior), (r1.data, r2.data)):
+        assert jax.tree.structure(a_) == jax.tree.structure(b_)
+        assert [np.shape(x) for x in jax.tree.leaves(a_)] == [
+            np.shape(x) for x in jax.tree.leaves(b_)
+        ]
+    gl1, gl2 = (jax.tree.leaves(r.prior.eq.coef.gl) for r in (r1, r2))
+    assert any(not np.array_equal(x, y) for x, y in zip(gl1, gl2, strict=True))
+
+    # fresh executables of the production kernels (an uncached runner), so window 1 compiles
+    fns = make_runner(static, overrides={"vol": type(compose(static).vol)})
+    counter = _Compiles()
+    jax.monitoring.register_event_duration_secs_listener(counter)
+    try:
+        run_chains(fns, static, r1.data, r1.prior, MCMCSettings(chains=2, draws=7, burn=4), rt,
+                   seed=1, salt=r1.salt)  # fmt: skip
+        first = set(counter.runner)
+        assert {
+            "jit(mcmc_prepare)",
+            "jit(mcmc_init)",
+            "jit(mcmc_burn)",
+            "jit(mcmc_sample_chunk)",
+        } <= first, first
+        counter.names.clear()
+        jax.config.update("jax_log_compiles", True)
+        with caplog.at_level(logging.WARNING, logger="jax._src.interpreters.pxla"):
+            # window 2 of the bucket: new data and prior arrays, burn, thin, draws and seeds
+            settings = MCMCSettings(chains=2, draws=12, burn=9, thin=3)
+            run_chains(fns, static, r2.data, r2.prior, settings, rt, seed=2, salt=r2.salt)
+    finally:
+        jax.config.update("jax_log_compiles", False)
+        jax.monitoring.unregister_event_duration_listener(counter)
+    assert counter.runner == []
+    logged = [
+        r.getMessage()
+        for r in caplog.records
+        if "Compiling" in r.getMessage() and "mcmc_" in r.getMessage()
+    ]
+    assert logged == []
+
+
 @pytest.mark.parametrize("case,block", [("horseshoe", Block.EQ_MEAN),
                                         ("reduced_sv_hs_global", Block.G_CCCM)])  # fmt: skip
 def test_failure_detail_is_log_aware(case, block):
