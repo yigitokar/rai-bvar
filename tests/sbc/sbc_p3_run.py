@@ -13,10 +13,21 @@ import time
 from typing import Any
 
 import numpy as np
-from sbc_p3 import SBC_CONFIG, SBC_N, SBC_OVERRIDES, SEED, iat_summary, nanmin, sbc_model
+import pytest
+from sbc_p3 import (
+    NOT_MET_ROWS,
+    SBC_CONFIG,
+    SBC_N,
+    SBC_OVERRIDES,
+    SEED,
+    iat_summary,
+    nanmin,
+    sbc_model,
+)
 
 from rai_bvar.validation.joint import composition_id
 from rai_bvar.validation.sbc import SBCConfig, sbc_sequential
+from rai_bvar.validation.sequential import bonferroni, thresholds
 
 
 def record(payload: dict) -> None:
@@ -43,8 +54,72 @@ def run_sbc(name: str, record_property: Any) -> tuple[bool, dict[str, Any], Any]
         "argmin": names[int(np.argmin(last.p))], "ess_ok": last.ess_ok,
         "thin_max": int(np.max(last.thin)) if last.N else 0,
         "ess_pooled_min": nanmin(last.ess_pooled), **iat_summary(last, cfg.min_ess, cfg.L),
-        "seconds": time.perf_counter() - t0,
+        "seconds": time.perf_counter() - t0, "ess_coverage": cfg.ess_coverage,
+        "min_ess": cfg.min_ess, "L": cfg.L, "alpha": cfg.alpha,
     }  # fmt: skip
     record(out)
     record_property("p3_record", json.dumps(out, default=float))
     return seq.passed, out, last
+
+
+#: The opening of the reason ``validation.sbc`` gives when the pooled kept-draw ESS gate fails.
+POOLED_REASON = "pooled kept-draw ESS below"
+
+
+def recorded_not_met(last: Any, out: dict[str, Any]) -> bool:
+    """P3 E180: the run has E179's recorded shape, a failure on the pooled kept-draw ESS gate
+    alone. Every condition below must hold:
+
+    - **the shape:** a stage-1 decision (``out["stage"] == 1``, ``out["q"] == [0.0]``);
+    - **the γ test clean:** no γ rejection (``last.failing`` empty), and the Bonferroni γ value
+      alone above Gandy–Scott's stage-1 pass bound ``γ + β₁``, so no γ result in the continue band
+      can hide behind the ESS failure;
+    - **no failed replication**;
+    - **the per-replication ESS rule met** (at least ``ess_coverage`` of the replications);
+    - **the pooled gate itself below** ``min_ess·L`` for some quantity, and the non-γ checks failed
+      (``not last.checks_ok``);
+    - **every recorded reason the pooled-ESS one**.
+
+    Anything else is not E179's recorded outcome."""
+    reasons = tuple(last.reasons)
+    gamma, betas = thresholds(out["alpha"])
+    pooled = last.ess_pooled
+    pooled_low = pooled is not None and bool(
+        np.any(np.isfinite(pooled) & (np.asarray(pooled) < out["min_ess"] * out["L"]))
+    )
+    return (
+        out["stage"] == 1
+        and list(out["q"]) == [0.0]
+        and bool(reasons)
+        and not last.checks_ok
+        and not last.failing
+        and bonferroni(last.p) > gamma + betas[0]
+        and not np.any(last.failed)
+        and last.ess_ok >= out["ess_coverage"]
+        and pooled_low
+        and all(r.startswith(POOLED_REASON) for r in reasons)
+    )
+
+
+def check_sbc(name: str, passed: bool, out: dict[str, Any], last: Any) -> None:
+    """Row ``name``'s outcome: it must pass, except the rows E179 records as not met
+    (:data:`sbc_p3.NOT_MET_ROWS`; Q45, E180). Such a row is XFAIL when it fails on the pooled
+    kept-draw ESS gate alone (:func:`recorded_not_met`), FAILS on any other failure, and FAILS on a
+    pass (an unexpected pass needs a re-decision)."""
+    row = composition_id(name)
+    if row not in NOT_MET_ROWS:
+        assert passed, (out, last.table().head(10))
+        return
+    if passed:
+        pytest.fail(
+            f"row {row} passed although E179 records it not met: an unexpected pass needs a "
+            "re-decision (Q45, E180)"
+        )
+    if not recorded_not_met(last, out):
+        pytest.fail(
+            f"row {row} failed for a reason E179 does not record (Q45, E180): {list(last.reasons)}"
+        )
+    pytest.xfail(
+        f"not met (E179): row {row} fails on the pooled kept-draw ESS gate alone (Q45, E180): "
+        f"{list(last.reasons)}"
+    )

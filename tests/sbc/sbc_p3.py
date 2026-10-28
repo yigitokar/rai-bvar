@@ -68,6 +68,11 @@ SBC_CONFIG: dict[str, Any] = {"L": 99, "burn": 300, "pilot": 1000, "t_max": 200,
 #: unchanged, every other row keeps 200, and the rerun's result is binding (E179).
 T_MAX_400_ROWS = (304, 306, 308, 311, 315, 325, 326, 327)
 SBC_OVERRIDES: dict[int, dict[str, int]] = {r: {"t_max": 400} for r in T_MAX_400_ROWS}
+#: P3 Q45, E180 (owner, 2026-10-28: "Merge, sonra dar xfail"): rows 308 and 325 are not met by
+#: E179 (at ``t_max = 400`` they fail the pooled kept-draw ESS gate alone). They still run in full;
+#: their test is XFAIL only for that recorded reason and FAILS on any other failure or on a pass
+#: (``sbc_p3_run.check_sbc``). Presentation only: no criterion, threshold or setting changes.
+NOT_MET_ROWS = (308, 325)
 #: P3 §9.11: ``sbc-p3a`` the structural rows, ``sbc-p3b`` the reduced and CommonSV rows (the
 #: Geweke split, by file), split further ("split further if not"): one file per group,
 #: ``test_sbc_p3_<group>.py``. First balanced on the pre-dispatch estimates (``SBC_ESTIMATE_MIN``,
@@ -188,6 +193,7 @@ def iat_summary(res: Any, min_ess: float, L: int) -> dict[str, float | int | Non
 
 __all__ = [
     "BY_ID",
+    "NOT_MET_ROWS",
     "SBC_CONFIG",
     "SBC_ESTIMATE_MIN",
     "SBC_N",

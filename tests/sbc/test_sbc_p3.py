@@ -25,6 +25,7 @@ from jax import random
 from sbc_models import PredictiveJoint, program_for, reference_next
 from sbc_p3 import (
     BY_ID,
+    NOT_MET_ROWS,
     SBC_CONFIG,
     SBC_OVERRIDES,
     SBC_ROWS,
@@ -33,8 +34,9 @@ from sbc_p3 import (
     sbc_model,
 )
 
-from rai_bvar.validation.joint import COMPOSITIONS_P3, LAGGED_P3, JointSpecP3
+from rai_bvar.validation.joint import COMPOSITIONS_P3, LAGGED_P3, JointSpecP3, composition_id
 from rai_bvar.validation.reference import effective_log_var, state_log_var
+from rai_bvar.validation.sbc import SBCResult
 
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
@@ -122,3 +124,119 @@ def test_truth_and_forecast_core_are_the_same_map_p3(name):
         np.testing.assert_array_equal(np.asarray(q_new[base : base + n]), np.asarray(new.y_next))
         if common:  # the common h of the sampler's state is 0 beyond the T data rows
             assert np.all(np.asarray(new.st.glob.vol.h)[T:] == 0.0)
+
+
+# Q45, E180: the narrow strict xfail of the rows E179 records as not met, checked on the outcomes
+# recorded in run 40430948633 (the reasons verbatim) and on the outcomes that must stay red.
+_POOLED_308 = (
+    "pooled kept-draw ESS below 0.8·L for ['log_prior']: the pilot underestimates the IAT (raise "
+    "pilot, burn or iat_factor)"
+)
+_POOLED_325 = (
+    "pooled kept-draw ESS below 0.8·L for ['log_prior', 'glob.vol.mean_abs_h', 'glob.vol.sigma', "
+    "'glob.vol.log_sigma']: the pilot underestimates the IAT (raise pilot, burn or iat_factor)"
+)
+_GAMMA = "γ test (Bonferroni over 58 at α = 0.01): ('glob.vol.sigma',)"
+_ESS_RULE = "thinned ESS ≥ 0.8·L in only 98.0% of replications (need 99%; raise t_max or pilot)"
+_FAILED = "3 replication(s) failed (non-finite quantities)"
+_EMPTY = "no replication survived the data-only filter"
+
+
+def _stage(
+    reasons=(),
+    failing=(),
+    n_failed=0,
+    ess_ok=1.0,
+    row=308,
+    min_p=None,
+    pooled_min=None,
+    checks_ok=None,
+):
+    """A final SBC stage as run 40430948633 recorded it for ``row`` (``Q``, the γ minimum and the
+    pooled-ESS minimum of its record), with the given deviations: a real :class:`SBCResult`, so a
+    renamed field the classifier reads breaks this test."""
+    Q, p_min, low = {308: (90, 0.0403, 70.7), 325: (58, 0.00936, 68.4), 304: (92, 0.0019, 91.3)}[
+        row
+    ]
+    p = np.full(Q, 0.5)
+    p[0] = p_min if min_p is None else min_p
+    pooled = np.full(Q, 95.0)
+    pooled[0] = low if pooled_min is None else pooled_min
+    failed = np.zeros(1000, bool)
+    failed[:n_failed] = True
+    checks_ok = not reasons if checks_ok is None else checks_ok
+    return SBCResult(
+        names=tuple(f"q{k}" for k in range(Q)),
+        ranks=np.zeros((1000 - n_failed, Q), np.int64),
+        L=99,
+        gamma=np.zeros(Q),
+        p=p,
+        alpha=1e-2,
+        passed=checks_ok and not failing,
+        failing=tuple(failing),
+        reasons=tuple(reasons),
+        failed=failed,
+        ess_ok=ess_ok,
+        ess_pooled=pooled,
+        checks_ok=checks_ok,
+    )
+
+
+_STAGE1 = {"stage": 1, "q": [0.0]}
+_STAGE2 = {"stage": 2, "q": [0.05, 0.0]}  # the continue band, then a stage-2 failure: not E179's
+
+
+@pytest.mark.parametrize(
+    "row, last, shape, outcome",
+    [
+        (308, _stage([_POOLED_308]), _STAGE1, "xfail"),  # recorded in run 40430948633
+        (325, _stage([_POOLED_325], row=325), _STAGE1, "xfail"),  # recorded in run 40430948633
+        (325, _stage([_GAMMA, _POOLED_325], ["glob.vol.sigma"], row=325), _STAGE1, "fail"),  # γ
+        (308, _stage([_ESS_RULE, _POOLED_308], ess_ok=0.98), _STAGE1, "fail"),  # the ESS rule
+        (325, _stage([_FAILED, _POOLED_325], n_failed=3, row=325), _STAGE1, "fail"),  # failures
+        (308, _stage([_POOLED_308], ess_ok=0.98), _STAGE1, "fail"),  # rule unmet, unreported
+        (325, _stage([_POOLED_325], row=325), _STAGE2, "fail"),  # a later stage
+        (308, _stage([_POOLED_308], min_p=0.05 / 90), _STAGE1, "fail"),  # γ in the continue band
+        (308, _stage([_POOLED_308], min_p=0.151 / 90), _STAGE1, "fail"),  # γ in (γ, γ + β₁]
+        (308, _stage([_EMPTY]), _STAGE1, "fail"),  # a reason of another kind
+        (308, _stage([_EMPTY, _POOLED_308]), _STAGE1, "fail"),  # another kind beside pooled
+        (325, _stage((), row=325, checks_ok=False), _STAGE1, "fail-empty"),  # failed, no reason
+        (325, _stage([_POOLED_325], n_failed=3, row=325), _STAGE1, "fail"),  # failures, unlisted
+        (325, _stage([_POOLED_325], ["glob.vol.sigma"], row=325), _STAGE1, "fail"),  # γ, unlisted
+        (308, _stage([_POOLED_308], pooled_min=85.0), _STAGE1, "fail"),  # gate not actually low
+        (308, _stage([_POOLED_308], checks_ok=True), _STAGE1, "fail"),  # the checks held
+        (325, _stage((), row=325), _STAGE1, "unexpected-pass"),  # a pass needs a re-decision
+        (304, _stage((), row=304), _STAGE1, "pass"),  # every other row is unchanged
+        (304, _stage([_POOLED_308], row=304), _STAGE1, "assert"),
+        (304, _stage([_POOLED_308], row=304, pooled_min=70.0), _STAGE1, "assert"),  # E179's shape
+    ],
+)  # fmt: skip
+def test_not_met_rows_are_a_narrow_strict_xfail(row, last, shape, outcome):
+    """P3 Q45, E180: rows 308 and 325 are XFAIL only in E179's recorded shape, a stage-1 failure on
+    the pooled kept-draw ESS gate alone (γ clean, no failed replication, the per-replication rule
+    met). Any other failure and a pass FAIL, never XFAIL. Every other row must pass as before, and
+    fails as before, even in E179's shape. Every outcome is caught and its exact type checked:
+    ``pytest.xfail.Exception`` subclasses ``pytest.fail.Exception``, and a skip or xfail (a
+    ``BaseException``) that escaped would become this test's own outcome, not a failure."""
+    from sbc_p3_run import check_sbc
+
+    assert NOT_MET_ROWS == (308, 325)
+    name = BY_ID[row]
+    assert composition_id(name) == row
+    passed = not last.reasons and outcome != "fail-empty"
+    out = {"ess_coverage": 0.99, "min_ess": 0.8, "L": 99, "alpha": 1e-2, **shape}
+    try:  # every outcome is caught, so a skip or xfail cannot become this test's own outcome
+        check_sbc(name, passed, out, last)
+        raised = None
+    except (Exception, pytest.fail.Exception, pytest.skip.Exception) as exc:
+        raised = exc
+    kind = type(raised)
+    if outcome == "xfail":
+        assert kind is pytest.xfail.Exception and "not met (E179)" in str(raised), (kind, raised)
+    elif outcome in ("fail", "fail-empty", "unexpected-pass"):
+        text = "needs a re-decision" if outcome == "unexpected-pass" else "does not record"
+        assert kind is pytest.fail.Exception and text in str(raised), (kind, raised)
+    elif outcome == "pass":
+        assert raised is None, (kind, raised)
+    else:
+        assert kind is AssertionError, (kind, raised)
