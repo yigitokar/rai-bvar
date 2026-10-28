@@ -38,9 +38,10 @@ SEEDS = {"qd7": (0, 1, 2, 3, 4), "bp2": (0, 1, 2)}
 R29 = ("sim20x120", ("csv_conj", "csv_struct"), (0, 1, 2))
 #: R22 (the CommonSV ``h`` acceptance at ``T = 600``): FRED-MD medium, 4 × 20,000.
 R22 = ("md7", ("csv_conj", "csv_struct"), (0, 1, 2), 20_000)
-#: The GK form (reduced, ``scale="none"``, mean 0) × SV at ``n = 21, T = 236`` (the last GK
-#: window's size), seed 0, 4 × 20,000: does the structural-form evidence transfer (§9.10)?
-GK21 = ("sim21x236", ("red_mn_sv", "red_hs_sv", "red_ng_sv"), (0,), 20_000)
+#: The GK form (reduced, ``scale="none"``, mean 0) × SV at ``n = 21`` on real data
+#: (``phase3_common.fredqd_21``, ``T_eff = 208``), seed 0, 4 × 20,000: does the structural-form
+#: evidence transfer to the GK run (§9.10)?
+GK21 = ("qd21", ("red_mn_sv", "red_hs_sv", "red_ng_sv"), (0,), 20_000)
 #: Single-threaded XLA for the mixing workers (``--single-thread``): many workers then share
 #: the machine without oversubscribing its cores (ESS and R-hat do not depend on threading).
 XLA_SINGLE = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"

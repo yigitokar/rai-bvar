@@ -31,3 +31,18 @@ rule only; the measurements follow in later commits.
   `SV()`} as the Phase 2 reference; `Minnesota(form="conjugate", hierarchy="fixed") × CommonSV()` (the shared-factor path),
   `Minnesota(form="structural", hierarchy="fixed") × CommonSV()` (the per-equation program), and both with row 325's
   CommonSV priors (`(ρ+1)/2 ~ Beta(10, 2)`, `σ_h² ~ 0.1·χ²₁`).
+
+## Addendum (2026-10-28, after seed 0 at the BENCH-P2 shape, before seeds 1–2 there)
+
+Seed 0 of every BENCH-P2-shape configuration ran to 4 × 50,000 first. Every GL configuration with a result failed the
+gate at every ladder `D` up to 50,000, most of them far from it (slowest primary bulk ESS 6–93 at 50,000 against 400;
+split R-hat up to 1.8). With seed 0 failing at `D`, the median of three seeds passes at `D` only if seeds 1 and 2 both
+pass there. So seeds 1 and 2 of a configuration whose seed 0 fails at 50,000 with its slowest primary bulk ESS below
+200 run to 4 × 20,000 only: their prefixes give `R = 3` at every `D ≤ 20,000`, and their ESS per 1,000 sweeps of the
+slowest quantities shows whether two passes at 50,000 are plausible. At 50,000 such a configuration then has `R = 1`
+and is reported as "above 50,000 (seed 0; seeds 1–2 run to 20,000)". Every other configuration runs seeds 1–2 to
+50,000 as planned. Also added: the GK form (reduced, `scale="none"`, mean 0) × SV at `n = 21` on real data (FRED-QD
+large set + `UMCSENTx`, 1967Q1–2019Q4, `T_eff = 208`), seed 0 to 4 × 20,000, as a transfer check for §9.10; and
+R22's `T = 600` (FRED-MD medium, 1969M9–2019M12) and R29's `q ≈ T` (`n = 20, T = 120`, BENCH-P2's generator)
+CommonSV runs. The mixing workers started after the first five BENCH-P2 runs use single-threaded XLA
+(`phase3_run_all.py --single-thread`); ESS and R-hat are properties of the chain's law, not of the threading.

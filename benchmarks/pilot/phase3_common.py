@@ -226,9 +226,30 @@ def fredmd_medium(vintage: str = "2026-09") -> Any:
     return w
 
 
+def fredqd_21(vintage: str = "2026-09") -> Any:
+    """A GK-sized real dataset: the FRED-QD large set (20 series, ``tcodes="rai"``: Δlog for real
+    quantities and prices, rates in levels) plus ``UMCSENTx`` (level), 1967Q1–2019Q4 (the common
+    complete span; GK's own 21 series are WP40's), ``T_eff = 208`` at ``p = 4``."""
+    import warnings
+
+    import rai_bvar as rb
+    from rai_bvar.datasets.fred import VARIABLE_SETS
+
+    codes = {**dict(VARIABLE_SETS["fred-qd"]["large"]), "UMCSENTx": 1}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        d = rb.datasets.load("fred-qd", vintage, variables=list(codes), tcodes=codes)
+    w = d.upto(QD7_END)
+    if np.isnan(w.values).any() or w.n_vars != 21:
+        raise RuntimeError("FRED-QD 21-series window has missing values")
+    return w
+
+
 def size_data(size: str) -> Any:
     if size == "qd7":
         return fredqd_medium()
+    if size == "qd21":
+        return fredqd_21()
     if size == "md7":
         return fredmd_medium()
     if size == "bp2":
