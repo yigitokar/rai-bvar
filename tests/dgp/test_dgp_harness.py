@@ -417,6 +417,16 @@ def _pair(**kw):
             },
             "gate",
         ),
+        # the gate binds on the reference arm as well
+        (
+            {
+                "dlpd": 5.0,
+                "dm_pvalue_better": 0.05,
+                "verdict_gate_off": "better",
+                "converged_reference": 0.9,
+            },
+            "gate",
+        ),
         # a precise gain whose DM p-value is in the wrong direction is not a "better"
         ({"dlpd": 5.0, "dm_pvalue_worse": 0.01}, "no_route"),
         # an expanding window: the test route is closed
@@ -433,6 +443,8 @@ def test_classify_rejects_a_misread_rule():
     better = {"dlpd": 5.0, "dm_pvalue_better": 0.05, "verdict_gate_off": "better"}
     with pytest.raises(RuntimeError, match="derived gate-on verdict"):
         dgp.classify(_pair(**better, verdict="better", converged_model=0.5))  # the gate binds
+    with pytest.raises(RuntimeError, match="derived gate-on verdict"):
+        dgp.classify(_pair(**better, verdict="better", converged_reference=0.5))  # on both arms
     with pytest.raises(RuntimeError, match="derived gate-on verdict"):
         dgp.classify(_pair(**better, verdict="worse"))  # gate passed: the gate-off verdict
     with pytest.raises(RuntimeError, match="derived gate-on verdict"):
@@ -545,12 +557,34 @@ def test_one_replication_runs_the_real_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(dgp, "ARMS", arms)
     # a seed of its own: no sample of the registered study is fitted by the tests
     design = dataclasses.replace(DESIGN, seed=7, origin_step=4, draws=200)
-    before = datetime.now(UTC).replace(microsecond=0)
-    rec = dgp.run_replication(row, 0, design, cache=tmp_path)
+    # the start is taken before the sample is simulated, the end after compare()
+    calls = []
+    ticks = iter(f"2026-10-28T12:00:{i:02d}+00:00" for i in range(10))
+    data_rng, compare = dgp.data_rng, dgp.compare
+
+    def now():
+        calls.append("now")
+        return next(ticks)
+
+    def simulating(*args):
+        calls.append("simulate")
+        return data_rng(*args)
+
+    def comparing(*args, **kwargs):
+        calls.append("compare")
+        return compare(*args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(dgp, "utc_now", now)
+        m.setattr(dgp, "data_rng", simulating)
+        m.setattr(dgp, "compare", comparing)
+        rec = dgp.run_replication(row, 0, design, cache=tmp_path)
+    assert calls == ["now", "simulate", "compare", "now"]
+    assert (rec["started_at"], rec["finished_at"]) == (
+        "2026-10-28T12:00:00+00:00",
+        "2026-10-28T12:00:01+00:00",
+    )
     assert (rec["row"], rec["rep"], rec["design"]) == ("test-lags", 0, design.key())
-    started, finished = (datetime.fromisoformat(rec[k]) for k in ("started_at", "finished_at"))
-    assert started.utcoffset().total_seconds() == 0  # UTC
-    assert before <= started <= finished <= datetime.now(UTC)
     assert set(rec["arms"]) == {"p1", "p2"}
     assert all(a["origins"] == 20 and a["cached"] == 0 for a in rec["arms"].values())
     assert rec["arms"]["p2"]["spec_hash"] == spec_hash(BVAR(lags=2))
@@ -561,6 +595,10 @@ def test_one_replication_runs_the_real_pipeline(monkeypatch, tmp_path):
         assert p["tests_valid"] and p["origins"] == 20
         assert p["converged_model"] == p["converged_reference"] == 1.0
         dgp.classify(p)  # consistent with the engine's verdict
+    before = datetime.now(UTC).replace(microsecond=0)
     again = dgp.run_replication(row, 0, design, cache=tmp_path)
+    started, finished = (datetime.fromisoformat(again[k]) for k in ("started_at", "finished_at"))
+    assert started.utcoffset().total_seconds() == 0  # UTC
+    assert before <= started <= finished <= datetime.now(UTC)
     assert all(a["cached"] == 20 for a in again["arms"].values())
     assert again["pairs"] == rec["pairs"] and again["data_fingerprint"] == rec["data_fingerprint"]

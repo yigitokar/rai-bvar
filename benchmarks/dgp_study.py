@@ -12,8 +12,9 @@ the full run reuses the pilot's records and runs the remaining replications only
 
 Usage::
 
-    python benchmarks/dgp_study.py OUT [--config full|pilot|smoke] [--rows ROW ...]
-        [--reps START:STOP] [--workers N] [--cache DIR] [--report-only] [--note TEXT]
+    python benchmarks/dgp_study.py OUT [--config full|pilot|smoke]
+        [--rows ROW ... | --preregistration FILE] [--reps START:STOP] [--workers N]
+        [--cache DIR] [--report-only] [--note TEXT]
 
 writes ``OUT.jsonl`` (one record per replication, appended as each finishes), ``OUT.md`` (the
 report) and ``OUT.json`` (every number in it). Rerunning the same command resumes: replications
@@ -22,8 +23,12 @@ whose record exists for the same design are skipped, and every backtest origin i
 machines; concatenate the ``.jsonl`` files and pass ``--report-only``; a replication recorded
 twice is counted once, and the report is then not labelled the pre-registered run). Results do
 not depend on ``--workers``: a replication runs in one process, from its own seeds. Without
-``--rows`` every pre-registered row this build can run is run; a row without a pre-registration
-runs only when named.
+``--rows`` the rows of one pre-registration that this build can run are run (``--preregistration``,
+by default the Phase 2 file above); rows of another pre-registration are another study and are
+left out, and rows without one are listed as pending. A row without a pre-registration runs only
+when named and only under ``--config smoke`` (a seed of its own): under ``pilot`` and ``full`` it
+would score samples of the registered design and seed before its own pre-registration, so the
+script refuses it.
 
 What it does (``rai_bvar.validation.dgp``): per replication, simulate ``T`` observations from the
 row's DGP, run ``rb.compare()`` over the row's arms (library defaults; rolling window; the
@@ -225,9 +230,11 @@ def unique_records(
 
 
 def records_commit(records: list[dict[str, Any]]) -> str | None:
-    """The one commit every record comes from, else ``None``."""
+    """The one commit every record comes from; ``None`` without records, when they come from
+    more than one commit or when they name none."""
     commits = {r.get("git_commit") for r in records}
-    return str(commits.pop()) if len(commits) == 1 else None
+    commit = commits.pop() if len(commits) == 1 else None
+    return commit if isinstance(commit, str) else None
 
 
 def load_records(path: Path, design: dgp.Design) -> list[dict[str, Any]]:
@@ -296,11 +303,13 @@ def label(
     commits = {r.get("git_commit") for r in records}
     if len(commits) != 1:
         reasons.append(f"records come from {len(commits)} commits: {sorted(map(str, commits))}")
+    elif records_commit(records) is None:
+        reasons.append("the records name no commit")
     for row in rows:
         if row.preregistration is None:
             reasons.append(f"row {row.name} is not pre-registered")
     for path in sorted({row.preregistration for row in rows if row.preregistration}):
-        for commit in sorted(map(str, commits)):
+        for commit in sorted(c for c in commits if isinstance(c, str)):
             if not in_commit(commit, path):
                 reasons.append(f"{path} is not in commit {commit[:12]}")
     if any(r.get("git_dirty") for r in records):
@@ -356,13 +365,16 @@ def build_report(
 ) -> dict[str, Any]:
     registered, reasons = label(records, cfg, rows)
     commit = records_commit(records)
+    commits = len({r.get("git_commit") for r in records})
     records, twice = unique_records(records)
+    paths = sorted({r.preregistration for r in rows if r.preregistration})
     return {
         "title": f"DGP study of the verdict engine: {cfg.name}",
         "registered": registered,
         "not_registered_because": reasons,
-        "preregistration": PREREGISTRATION,
+        "preregistration": ", ".join(paths) or None,  # of the reported rows
         "records_commit": commit,
+        "records_commits": commits,
         "records_twice": [list(k) for k in twice],
         "timestamps": timestamps(records),
         "config": {"name": cfg.name, "reps": cfg.reps, "design": cfg.design.describe()},
@@ -398,6 +410,14 @@ def build_report(
         "estimate": estimate(records, CONFIGS["full"], meta["workers"], meta.get("wall_seconds")),
         "meta": meta,
     }
+
+
+def _records_code(rep: dict[str, Any]) -> str:
+    if rep["records_commit"]:
+        return f"records from commit `{rep['records_commit']}`"
+    if rep["records_commits"] > 1:
+        return "records from more than one commit (see above)"
+    return "no records" if rep["records_commits"] == 0 else "records that name no commit"
 
 
 def write_report(rep: dict[str, Any], out: Path) -> None:
@@ -440,18 +460,13 @@ def markdown(rep: dict[str, Any]) -> str:
         f"- {cfg['reps']} replications per row; `compare()` and `verdict()` with their defaults "
         f"(`{rep['verdict_defaults']}`); nominal level {rep['nominal']:.2f} (the rule's one-sided "
         "DM level).",
-        "- Code: records from "
+        f"- Code: {_records_code(rep)}"
         + (
-            f"commit `{rep['records_commit']}`"
-            if rep["records_commit"]
-            else "more than one commit (see above)"
+            f"; this report written at commit `{m['git'].get('git_commit')}`"
+            + (" (tracked files modified)" if m["git"].get("git_dirty") else "")
+            if m["git"].get("git_commit") != rep["records_commit"] or m["git"].get("git_dirty")
+            else ""
         )
-        + (
-            ""
-            if m["git"].get("git_commit") == rep["records_commit"]
-            else f"; this report written at commit `{m['git'].get('git_commit')}`"
-        )
-        + (" (tracked files modified)" if m["git"].get("git_dirty") else "")
         + f"; rai-bvar {m['versions']['rai_bvar']}, JAX {m['versions']['jax']} (this invocation).",
         f"- Machine: {m['machine'].get('cpu', '?')} ({m['machine'].get('cpus')} CPUs"
         + (
@@ -474,6 +489,13 @@ def markdown(rep: dict[str, Any]) -> str:
     lines.append(
         f"- This invocation: started {m.get('started_at')}, finished {m.get('finished_at')} (UTC)."
     )
+    if m.get("report_only"):
+        lines.append(
+            "- Regenerated with `--report-only`: this invocation ran no replication, so the "
+            "machine, worker count and load above, the notes below and the wall-time estimate "
+            "(the recorded seconds divided by this invocation's worker count) are this "
+            "invocation's, not the run's."
+        )
     if m.get("wall_seconds") is not None:
         lines.append(
             f"- Wall time of this invocation: {m['wall_seconds'] / 3600:.2f} h "
@@ -605,8 +627,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("out", type=Path, help="report path without suffix (.jsonl, .md, .json)")
     p.add_argument("--config", choices=sorted(CONFIGS), default="pilot")
-    p.add_argument(
-        "--rows", nargs="*", default=None, help="row names (default: every runnable row)"
+    select = p.add_mutually_exclusive_group()
+    select.add_argument(
+        "--rows",
+        nargs="*",
+        default=None,
+        help="row names (default: the runnable rows of --preregistration)",
+    )
+    select.add_argument(
+        "--preregistration",
+        default=PREREGISTRATION,
+        help=f"run the rows of this pre-registration (default: {PREREGISTRATION})",
     )
     p.add_argument("--reps", default=None, help="START:STOP, a sub-range of the replications")
     p.add_argument("--workers", type=int, default=1)
@@ -617,14 +648,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     cfg = CONFIGS[args.config]
     if args.workers < 1:
         p.error("--workers must be at least 1")
-    names = args.rows or [r.name for r in dgp.ROWS]
+    if args.rows:
+        names = args.rows
+        twice = sorted({n for n in names if names.count(n) > 1})
+        if twice:
+            p.error(f"--rows names {', '.join(twice)} more than once")
+    else:
+        # one pre-registration's rows, and the rows that have none yet (listed as pending)
+        if not any(r.preregistration == args.preregistration for r in dgp.ROWS):
+            p.error(f"no row is pre-registered in {args.preregistration}")
+        names = [r.name for r in dgp.ROWS if r.preregistration in (None, args.preregistration)]
     rows, pending = [], []
     for name in names:
         row = dgp.get_row(name)
         status = dgp.row_status(row)
-        # a named row runs when this build can run it, pre-registered or not (never labelled)
+        # a named row runs when this build can run it, pre-registered or not (never labelled;
+        # without a pre-registration only under a config that is not registered, below)
         runs = status is None or (bool(args.rows) and not dgp.row_missing(row))
         (rows.append(row) if runs else pending.append((row, status)))
+    unregistered = [row.name for row in rows if row.preregistration is None]
+    if unregistered and cfg.name in REGISTERED_CONFIGS:
+        p.error(
+            f"no pre-registration for row {', '.join(unregistered)}: under --config {cfg.name} "
+            f"it would score samples of the registered design and seed ({cfg.design.seed}). "
+            "Pre-register its settings and reading and set its Row.preregistration "
+            "(rai_bvar.validation.dgp) before its first run; --config smoke runs it on a seed "
+            "of its own."
+        )
     start, stop = 0, cfg.reps
     if args.reps:
         a, b = args.reps.split(":")
@@ -652,6 +702,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "versions": {"rai_bvar": rb.__version__},
         "workers": args.workers,
         "started_at": started_at,
+        "report_only": args.report_only,
         "load_start": _load(),
         "cache": str(args.cache),
         "notes": list(args.note),

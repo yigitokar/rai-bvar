@@ -43,8 +43,10 @@ constructor differs from the sketch there, write the DGP simulator (a class with
 ``simulate(T, rng) -> VARData``, like :class:`LinearVARDGP`) and register it in :data:`DGPS`, then
 pre-register the row's settings and its reading (a power threshold, if any) before its first run,
 as :data:`PREREGISTRATION_P2` did for the Phase 2 rows, and set the row's ``preregistration`` to
-that file. A row the build can run but that has no pre-registration runs only when named, and its
-report is never labelled the pre-registered run.
+that file. A row the build can run but that has no pre-registration runs only when named and only
+under a configuration of its own (the study script's ``--config smoke``, on a seed of its own), so
+no sample of a registered design is scored before the row's pre-registration; its report is never
+labelled the pre-registered run.
 
 Importing this module imports no JAX (DESIGN D-31); fitting an MCMC arm does.
 """
@@ -291,7 +293,8 @@ class Row:
     requires: tuple[str, ...] = ()  # rai_bvar attributes the arms need
     phase: int = 2
     # the pre-registration of the row's settings and reading (a repository path); None: not
-    # pre-registered, so the study runs it only when it is named and never labels it registered
+    # pre-registered, so the study runs it only when it is named, only under its smoke config, and
+    # never labels it registered
     preregistration: str | None = None
 
 
