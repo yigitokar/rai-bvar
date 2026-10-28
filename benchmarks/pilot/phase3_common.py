@@ -76,8 +76,7 @@ def phase2_perf() -> Any:
 # --------------------------------------------------------------------------- timing hygiene
 
 
-def top_processes(k: int = 6) -> list[dict[str, Any]]:
-    """The ``k`` processes with the highest CPU share (``ps -Ao pid,pcpu,comm -r``)."""
+def _ps_rows() -> list[dict[str, Any]]:
     try:
         out = subprocess.run(
             ["ps", "-Ao", "pid=,pcpu=,comm="], capture_output=True, text=True, check=True
@@ -95,7 +94,22 @@ def top_processes(k: int = 6) -> list[dict[str, Any]]:
     rows.sort(key=lambda r: -r["pcpu"])
     for r in rows:
         r["comm"] = r["comm"][-80:]
-    return rows[:k]
+    return rows
+
+
+def top_processes(k: int = 6) -> list[dict[str, Any]]:
+    """The ``k`` processes with the highest CPU share (``ps -Ao pid,pcpu,comm``)."""
+    return _ps_rows()[:k]
+
+
+def other_cpu(heavy: float = 50.0) -> float:
+    """CPU share (percent of one core, ``ps``'s decaying average) of the *other jobs*: every
+    process except this one and its parent driver using at least ``heavy`` percent (the desktop's
+    daemons together use 100–130% on this machine at rest, each well below that). The 1-minute
+    load average after a timed block includes the measurement itself (a JAX process keeps 2–3
+    threads busy), so it cannot tell contention from the measured work."""
+    mine = {os.getpid(), os.getppid()}
+    return float(sum(r["pcpu"] for r in _ps_rows() if r["pid"] not in mine and r["pcpu"] >= heavy))
 
 
 def load_snapshot() -> dict[str, Any]:
@@ -109,6 +123,7 @@ def load_snapshot() -> dict[str, Any]:
         "loadavg": list(os.getloadavg()),
         "uptime": up,
         "top": top_processes(),
+        "other_cpu_pct": other_cpu(),
     }
 
 
@@ -125,10 +140,20 @@ def wait_idle(threshold: float = 2.0, timeout: float = 900.0, poll: float = 15.0
         time.sleep(poll)
 
 
-def contaminated(before: dict, after: dict, threshold: float = 2.0) -> bool:
-    """A timed block is contaminated when the 1-minute load average before or after it is above
-    ``threshold`` (the brief's rule: about 2)."""
-    return max(before["loadavg"][0], after["loadavg"][0]) > threshold
+#: Contention threshold: other jobs using more than 1.5 cores (``other_cpu``).
+OTHER_CPU_MAX = 150.0
+
+
+def contaminated(before: dict, after: dict, threshold: float = 2.0, *,
+                 gate_load: float | None = None) -> bool:  # fmt: skip
+    """A timed block is contaminated when the machine was not idle around it: the 1-minute load
+    average when its configuration started (``gate_load``, after the idle gate; else ``before``)
+    above ``threshold`` (the brief's "about 2"), or other processes using more than
+    :data:`OTHER_CPU_MAX` percent CPU before or after it. The load *after* a block is recorded but
+    not used: it includes the measured work itself (:func:`other_cpu`)."""
+    load0 = gate_load if gate_load is not None else before["loadavg"][0]
+    others = max(before.get("other_cpu_pct", 0.0), after.get("other_cpu_pct", 0.0))
+    return load0 > threshold or others > OTHER_CPU_MAX
 
 
 def _blas_info() -> dict[str, Any]:

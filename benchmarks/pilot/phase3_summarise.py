@@ -277,8 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", type=Path)
     ap.add_argument("--md", type=Path)
     args = ap.parse_args(argv)
-    mix = mixing_summary(load(args.dirs, "mix_qd7") + load(args.dirs, "mix_bp2")
-                         + load(args.dirs, "mix_sim"))  # fmt: skip
+    mix = mixing_summary([r for r in load(args.dirs, "mix_") if "gate" in r])
     costs = cost_summary(load(args.dirs, "cost_"))
     gks, gko = load(args.dirs, "gk_sweeps"), load(args.dirs, "gk_origins")
     result = {"mixing": mix, "costs": costs}

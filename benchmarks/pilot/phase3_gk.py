@@ -78,10 +78,12 @@ def sweeps(args: argparse.Namespace) -> dict:
 
     rows = []
     for arm in args.arms.split(","):
+        # the idle gate once per arm, before this process loads the machine itself
+        gate = pc.wait_idle(args.gate, args.wait) if args.gate > 0 else {"gate_open": None}
+        gate_load = gate["load"]["loadavg"][0] if "load" in gate else None
         for T_eff in T_EFFS:
             data = gk_data(T_eff)
             model = pc.build_model(arm, draws=1000, burn=args.warm, seed=3)
-            gate = pc.wait_idle(args.gate, args.wait) if args.gate > 0 else {"gate_open": None}
             before = pc.load_snapshot()
             try:
                 with warnings.catch_warnings():
@@ -125,7 +127,9 @@ def sweeps(args: argparse.Namespace) -> dict:
                 "load_before": before,
                 "load_after": after,
                 "gate": gate,
-                "contaminated": pc.contaminated(before, after, args.gate or 2.0),
+                "contaminated": pc.contaminated(
+                    before, after, args.gate or 2.0, gate_load=gate_load
+                ),
             }
             rows.append(row)
             print(f"{arm} T={T_eff}: {row['ms_per_sweep_min']:.2f} ms/sweep, compile ≈ "
@@ -148,6 +152,7 @@ def origins(args: argparse.Namespace) -> dict:
             for origin in ("1980Q1", "2018Q4"):
                 model = pc.build_model(arm, draws=draws, burn=1000, seed=0)
                 gate = pc.wait_idle(args.gate, args.wait) if args.gate > 0 else {"gate_open": None}
+                gate_load = gate["load"]["loadavg"][0] if "load" in gate else None
                 before = pc.load_snapshot()
                 t0 = time.perf_counter()
                 with warnings.catch_warnings():
@@ -160,7 +165,8 @@ def origins(args: argparse.Namespace) -> dict:
                     "arm": arm, "draws": draws, "origin": origin, "wall_s": wall,
                     "T_eff": len(data.upto(origin)) - pc.LAGS, "load_before": before,
                     "load_after": after, "gate": gate,
-                    "contaminated": pc.contaminated(before, after, args.gate or 2.0),
+                    "contaminated": pc.contaminated(before, after, args.gate or 2.0,
+                                                    gate_load=gate_load),
                 })  # fmt: skip
                 print(f"{arm} D={draws} {origin}: {wall:.1f} s (load {before['loadavg'][0]:.2f} "
                       f"→ {after['loadavg'][0]:.2f})", flush=True)  # fmt: skip

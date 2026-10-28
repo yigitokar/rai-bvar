@@ -18,9 +18,11 @@ As in BENCH-P2, each fit runs in a fresh process; one *repeat* is a cold process
 persistent compilation cache) and a warm one (the same cache). Per run: end-to-end ``fit()``
 wall time, compile time, run time, post-runner time (fit assembly and diagnostics), the runner's
 ms per sweep, the minimum of 3 × 1,000 sweeps of the compiled ``burn`` executable, peak RSS, the
-load average and top CPU processes before and after (a run is ``contaminated`` when the 1-minute
-load average exceeds 2 before or after it), the primary set's R-hat and bulk ESS by field and
-the lag-1 autocorrelation of ``log λ_i`` and the CommonSV scalars (R29, R31).
+load average, top CPU processes and other jobs' CPU share before and after (each run is launched
+after an idle gate, the 1-minute load average below 2; it is ``contaminated`` when the load at
+launch exceeded 2 or other jobs used more than 1.5 cores before or after it; the load after a
+run includes the fit itself), the primary set's R-hat and bulk ESS by field and the lag-1
+autocorrelation of ``log λ_i`` and the CommonSV scalars (R29, R31).
 
 Usage::
 
@@ -82,8 +84,38 @@ def _top(k: int = 5) -> list[str]:
     return [f"{c:.0f}% {n}" for c, n in rows[:k]]
 
 
+def _other_cpu(heavy: float = 50.0) -> float:
+    """CPU percent of the other jobs: processes other than this one and its parent using at least
+    ``heavy`` percent (the desktop's daemons stay below it; ``pilot/phase3_common.other_cpu``)."""
+    try:
+        out = subprocess.run(
+            ["ps", "-Ao", "pid=,pcpu="], capture_output=True, text=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return float("nan")
+    mine, tot = {os.getpid(), os.getppid()}, 0.0
+    for line in out.splitlines():
+        parts = line.split()
+        try:
+            pid, pcpu = int(parts[0]), float(parts[1])
+        except (ValueError, IndexError):
+            continue
+        if pid not in mine and pcpu >= heavy:
+            tot += pcpu
+    return tot
+
+
 def load_snapshot() -> dict[str, Any]:
-    return {"loadavg": list(os.getloadavg()), "top": _top(), "time": time.strftime("%H:%M:%S")}
+    return {"loadavg": list(os.getloadavg()), "top": _top(), "other_cpu_pct": _other_cpu(),
+            "time": time.strftime("%H:%M:%S")}  # fmt: skip
+
+
+def _contaminated(before: dict[str, Any], after: dict[str, Any], gate_load: float) -> bool:
+    """The machine was not idle: the 1-minute load average when the run was launched (after the
+    parent's idle gate) above ``LOAD_MAX``, or other jobs using more than 1.5 cores before or
+    after it. The load after a run is recorded, not used: it includes the fit itself."""
+    others = max(before["other_cpu_pct"], after["other_cpu_pct"])
+    return gate_load > LOAD_MAX or others > 150.0
 
 
 # --------------------------------------------------------------------------- cases
@@ -200,7 +232,7 @@ def run_child(args: argparse.Namespace) -> dict[str, Any]:
         },
         "load_before": before,
         "load_after": after,
-        "contaminated": max(before["loadavg"][0], after["loadavg"][0]) > LOAD_MAX,
+        "contaminated": _contaminated(before, after, args.gate_load),
     }
     t = time.perf_counter()
     rec["ess"] = ess_summary(fit, wall)
@@ -210,7 +242,7 @@ def run_child(args: argparse.Namespace) -> dict[str, Any]:
         rec["sweep_ms"] = perf.sweep_ms(fit, sweeps=args.sweep_block, reps=args.sweep_reps)
         a = load_snapshot()
         rec["sweep_ms"]["load_before"], rec["sweep_ms"]["load_after"] = b, a
-        rec["sweep_ms"]["contaminated"] = max(b["loadavg"][0], a["loadavg"][0]) > LOAD_MAX
+        rec["sweep_ms"]["contaminated"] = _contaminated(b, a, args.gate_load)
     rec["peak_rss_bytes"] = perf._peak_rss_bytes()
     rec["machine"] = perf.machine_info()
     return rec
@@ -259,11 +291,13 @@ def summarise(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
-def _child_cmd(args: argparse.Namespace, case: str, kind: str, cache: str, result: Path) -> list:
+def _child_cmd(
+    args: argparse.Namespace, case: str, kind: str, cache: str, result: Path, gate_load: float
+) -> list:
     cmd = [sys.executable, "-I", str(Path(__file__).resolve()), "--child", "--case", case,
            "--kind", kind, "--cache-dir", cache, "--result", str(result), "--draws",
            str(args.draws), "--burn", str(args.burn), "--sweep-block", str(args.sweep_block),
-           "--sweep-reps", str(args.sweep_reps)]  # fmt: skip
+           "--sweep-reps", str(args.sweep_reps), "--gate-load", str(gate_load)]  # fmt: skip
     return [*cmd, "--quick"] if args.quick else cmd
 
 
@@ -288,7 +322,9 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         res = Path(tmp) / "run.json"
                         env = {k: v for k, v in os.environ.items()
                                if not k.startswith("JAX_COMPILATION_CACHE")}  # fmt: skip
-                        proc = subprocess.run(_child_cmd(args, case, kind, cache, res), env=env)
+                        gl = os.getloadavg()[0]
+                        cmd = _child_cmd(args, case, kind, cache, res, gl)
+                        proc = subprocess.run(cmd, env=env)
                         if proc.returncode != 0:
                             raise RuntimeError(f"BENCH-P3 child {case}/{kind} failed")
                         rec = json.loads(res.read_text())
@@ -344,6 +380,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--kind", default="cold", help=argparse.SUPPRESS)
     ap.add_argument("--cache-dir", default="", help=argparse.SUPPRESS)
     ap.add_argument("--result", type=Path, help=argparse.SUPPRESS)
+    ap.add_argument("--gate-load", type=float, default=0.0, help=argparse.SUPPRESS)
     return ap
 
 

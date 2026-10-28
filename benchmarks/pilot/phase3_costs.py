@@ -17,10 +17,12 @@ counts, change from call to call):
 * ``sweep_burn``: the runner's ``burn`` executable (``fori_loop`` over a traced count, donated
   state), ``--block`` sweeps per call (ms per sweep; BENCH-P2's ``sweep_ms`` definition).
 
-Every block records the load average and the top CPU processes before and after it; with
-``--gate L`` (default 2) the script first waits (up to ``--wait`` s) for the 1-minute load
-average to fall below ``L`` and flags the block ``contaminated`` when the load before or after
-exceeds ``L``. Results: ``DIR/cost_<size>_<config>.json``.
+Every block records the load average, the top CPU processes and the other jobs' CPU share
+(``phase3_common.other_cpu``) before and after it. With ``--gate L`` (default 2) the script
+first waits, once per configuration and before it loads the machine itself, up to ``--wait`` s
+for the 1-minute load average to fall below ``L``; a block is ``contaminated`` when that gate
+load exceeds ``L`` or other jobs used more than 1.5 cores before or after it
+(``phase3_common.contaminated``). Results: ``DIR/cost_<size>_<config>.json``.
 
 Usage::
 
@@ -70,9 +72,15 @@ def measure(config: str, size: str, *, warm: int, reps: int, block: int, gate: f
     from rai_bvar.engines.mcmc.state import SweepCtx
     from rai_bvar.engines.mcmc.sweep import equation_phase, make_sweep, sweep_values
 
+    # the idle gate, once per configuration, before this process loads the machine itself
+    gate_info = (
+        pc.wait_idle(gate, wait) if gate > 0 else {"gate_open": None, "load": pc.load_snapshot()}
+    )
+    gate_load = gate_info["load"]["loadavg"][0]
     data = pc.size_data(size)
     model = pc.build_model(config, draws=1000, burn=warm, seed=11, const_path=const_path)
-    out: dict = {"config": config, "size": size, "const_path_setting": const_path, "blocks": {}}
+    out: dict = {"config": config, "size": size, "const_path_setting": const_path, "blocks": {},
+                 "gate": gate_info}  # fmt: skip
     with _jax.x64(), _blas.single_thread():
         res = resolve(model, data, rb.Runtime())
         static = res.static
@@ -112,7 +120,6 @@ def measure(config: str, size: str, *, warm: int, reps: int, block: int, gate: f
         blocks: dict = {}
 
         def timed(name: str, fn, make_args, per: int = 1) -> None:
-            gate_info = pc.wait_idle(gate, wait) if gate > 0 else {"gate_open": None}
             before = pc.load_snapshot()
             t0 = time.perf_counter()
             compiled = jax.jit(fn).lower(*make_args(0)).compile()
@@ -120,7 +127,7 @@ def measure(config: str, size: str, *, warm: int, reps: int, block: int, gate: f
             res_t = _time(compiled, make_args, reps, per)
             after = pc.load_snapshot()
             res_t.update(compile_s=compile_s, load_before=before, load_after=after,
-                         gate=gate_info, contaminated=pc.contaminated(before, after, gate or 2.0))  # fmt: skip
+                         gate=gate_info, contaminated=pc.contaminated(before, after, gate or 2.0, gate_load=gate_load))  # fmt: skip
             blocks[name] = res_t
             print(f"  {config} {size} {name}: {res_t['ms_min']:.3f} ms (median "
                   f"{res_t['ms_median']:.3f}; load {before['loadavg'][0]:.2f} → "
@@ -158,7 +165,6 @@ def measure(config: str, size: str, *, warm: int, reps: int, block: int, gate: f
 
         burn_fn = functools.partial(fns.burn)
         nblk = np.asarray(block, np.int32)
-        gate_info = pc.wait_idle(gate, wait) if gate > 0 else {"gate_open": None}
         before = pc.load_snapshot()
         s_b = jax.block_until_ready(burn_fn(ck, jax.tree.map(jnp.copy, st), d, p, cache,
                                             its(0), np.asarray(1, np.int32)))  # fmt: skip
@@ -173,7 +179,7 @@ def measure(config: str, size: str, *, warm: int, reps: int, block: int, gate: f
         blocks["sweep_burn"] = {
             "ms_min": times[0], "ms_median": times[len(times) // 2], "reps": reps, "all": times,
             "load_before": before, "load_after": after, "gate": gate_info,
-            "contaminated": pc.contaminated(before, after, gate or 2.0),
+            "contaminated": pc.contaminated(before, after, gate or 2.0, gate_load=gate_load),
         }  # fmt: skip
         print(f"  {config} {size} sweep_burn: {times[0]:.3f} ms (load "
               f"{before['loadavg'][0]:.2f} → {after['loadavg'][0]:.2f})", flush=True)  # fmt: skip
