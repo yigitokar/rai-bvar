@@ -56,7 +56,6 @@ COSTS: tuple[tuple[str, list[str]], ...] = (
     ("mn_cholesky", ["--size", "bp2", "--configs", "mn_const", "--const-path", "cholesky"]),
     ("csv", ["--size", "bp2", "--configs", "csv_conj,csv_struct"]),
     ("csv_weighted", ["--size", "bp2", "--configs", "csv_conj", "--const-path", "cholesky"]),
-    ("qd7", ["--size", "qd7", "--configs", ",".join(CONFIGS)]),
 )
 
 
