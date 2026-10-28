@@ -48,10 +48,11 @@ and the submission steps.
    `stochvol`/`factorstochvol`, R `BVAR` and the Bank of England `bvar`, using the maintainer fields
    on CRAN and PyPI.
 
-4. **PR #15 (the DGP study, App. D.11).** App. D.11, TabDdgp (`figures/tab_dgp.py`) and the
+4. **PR #15 (the DGP study, App. D.11). Done.** App. D.11, TabDdgp (`figures/tab_dgp.py`) and the
    evidence comments of Sections 1, 6 and 12 cite commits 58ab09f (where all 600 records were made;
-   each record's `git_commit`) and 75e0c2a (the reports), which are on the open draft PR #15
-   (branch `claude/compassionate-bose-ed1c0b`), not yet on `main`. Keep that branch, and merge PR #15
-   with a merge commit (not squash or rebase), so that both commits stay reachable and `make tables`
-   keeps working. `RUN_COMMIT` in `tab_dgp.py` must stay 58ab09f, because the records name it; after
-   a merge, the paper may add "merged into main as <commit>" next to "commit 75e0c2a (PR #15)".
+   each record's `git_commit`) and 75e0c2a (the reports). PR #15 was merged into `main` on
+   2026-10-28 with a merge commit, 8b5fce6, so both commits are reachable from `main`; the PR's last
+   commit (501940a) changed only `SPEC.md` and the pre-registration's addendum, which now quotes
+   the run decisions, and `dgp_study.json` is the same at 75e0c2a and 8b5fce6. Table D.6's note now
+   reads "merged into main as 8b5fce6", and `tab_dgp.py` asserts that both commits are ancestors of
+   it. `RUN_COMMIT` in `tab_dgp.py` must stay 58ab09f, because the records name it.

@@ -24,6 +24,7 @@ import tab_common as tc
 NAME = "tab_dgp"
 REPORT = "benchmarks/reports/dgp_study.json"
 REF = "75e0c2a"  # PR #15 head; the report files are unchanged since 1959834
+MERGE = "8b5fce6"  # PR #15 merged into main (merge commit, 2026-10-28); REF is an ancestor
 RUN_COMMIT = "58ab09f99012f825eccda604abd39d6bc942fbae"
 
 DGP_LABEL = {"linear-homoskedastic": "homoskedastic", "linear-sv": "SV", "linear-sv-outliers": "SV with outliers"}
@@ -56,6 +57,7 @@ def main() -> None:
     assert j["registered"] is True and j["design_key"] == "81f067e0cefaaea5", (j["registered"], j["design_key"])
     g = j["meta"]["git"]
     assert g["git_commit"] == RUN_COMMIT and g["git_dirty"] is False and g["preregistration_in_commit"], g
+    assert tc.is_ancestor(args.ref, MERGE) and tc.is_ancestor(RUN_COMMIT, MERGE), (args.ref, MERGE)
     assert j["nominal"] == 0.1 and j["verdict_defaults"]["min_converged"] == 0.95, j["verdict_defaults"]
     S = j["summary"]
     assert len(S) == 8 and all(s["n"] == 200 for s in S)
@@ -100,7 +102,8 @@ def main() -> None:
     rows += [r"\bottomrule", r"\end{tabular}"]
     gate = ", ".join(f"{s['gate_pass']:.3f}".rstrip("0").rstrip(".") for s in S)
     foot = ("Recorded, not re-run: " + tc.code(REPORT) + " of the main repository at " + tc.code(args.ref)
-            + " (PR~\\#15), the pre-registered full run, every record from commit "
+            + " (PR~\\#15, merged into main as " + tc.code(MERGE)
+            + "), the pre-registered full run, every record from commit "
             + tc.code(RUN_COMMIT[:7]) + " with a clean tree. 200 replications per row; "
             "b/w/i counts ``better'', ``worse'' and inconclusive verdicts; gate off is "
             "\\code{verdict(min_converged=0)}, reported, not the engine's verdict. A rate of 0 has "

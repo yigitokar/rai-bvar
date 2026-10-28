@@ -159,7 +159,7 @@ the JSON records in `record/`, the JUnit XML per test directory and `meta.json`;
 the release commit from the committed CI log excerpt
 `figures/data/provenance/ci_run_40061724239_fast_suite.txt`. After the release, `tab_dgp.py` (the
 size and power of the verdict rule, App. D) reads `benchmarks/reports/dgp_study.json` of the main
-repository at commit 75e0c2a (PR #15). No `[REL]` cell is left. The other
+repository at commit 75e0c2a (PR #15, merged into `main` as 8b5fce6). No `[REL]` cell is left. The other
 tables (Tab1, Tab7, Tab13 in the main text; Tab2, Tab5 and Tab12, moved to Appendices C, D and F;
 TabA1, TabC1, TabF2, TabF3, TabG1 and TabH1) are typed into the sources; the generators that OUTLINE
 section 14 planned for them were not written.

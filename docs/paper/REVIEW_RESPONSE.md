@@ -70,9 +70,9 @@ with this section, this section holds (the entries concerned carry an "Update" l
 - **AUTHOR_TODO.md** lists only the items left to the author after submission: his own reading
   statement and approval of App. J; PyPI and Zenodo (the public repository, the push of
   `paper-draft` and the tag are done); the third-party observations, the `bayesianVARs` one
-  stated without notifying its maintainers first (the author's decision); and keeping PR #15's
-  commits reachable (merge with a merge commit). The drafting-stage lists are in
-  `git show 83f2b56:docs/paper/AUTHOR_TODO.md`. The "Author N" numbers below refer to that file.
+  stated without notifying its maintainers first (the author's decision); and PR #15's commits,
+  now reachable from `main` (merged with a merge commit, 8b5fce6, on 2026-10-28). The
+  drafting-stage lists are in `git show 83f2b56:docs/paper/AUTHOR_TODO.md`. The "Author N" numbers below refer to that file.
 - **Still open before upload.** arXiv compiles with pdfLaTeX, and the pdfTeX branch of `main.tex`
   has not been tested here (Author 23). The paper does not depend on the main-repository notes, so
   it is unaffected by the stale count in NOTES B.8 ("33/33"; the paper uses 37 from `mutants.py`

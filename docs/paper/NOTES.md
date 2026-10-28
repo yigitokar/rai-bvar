@@ -250,7 +250,8 @@ re-derived before it goes into the paper).
     body reads this as a finding about the D-35 budget for outlier models (the report has no such
     reading).
     Evidence: main repo `benchmarks/reports/dgp_study.{md,json,jsonl}` and
-    `dgp_study_preregistration.md` (commit 75e0c2a, PR #15). Status: recorded (one run, M5 Max).
+    `dgp_study_preregistration.md` (commit 75e0c2a, PR #15, merged into main as 8b5fce6 on
+    2026-10-28). Status: recorded (one run, M5 Max).
 21. **bayesianVARs' predict() at h >= 2 under SV (black box).** After the release (PR #21, binaries
     on Linux CI) its parameter posteriors and h = 1 predictive agree with the exact SWA oracle, but
     on n3p2_sv its predict() differs from SWA at h >= 2 (h4:y1 q75 z +4.52, q25 -4.17) where
