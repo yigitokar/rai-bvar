@@ -47,9 +47,9 @@ report is one pre-registration's study: rows of two pre-registrations named toge
 regenerated later with ``--report-only`` keeps.
 
 Under ``--config pilot`` or ``full`` (the registered design and seed) the script refuses, before
-it scores anything, a row without a pre-registration, a row whose pre-registration is not in the
-checked-out commit (``HEAD``), and replications to run on a working tree whose tracked files
-differ from ``HEAD``.
+it writes or scores anything, a row without a pre-registration, a repository git cannot read, a
+row whose pre-registration is not a file of the checked-out commit (``HEAD``), and replications
+to run unless git reports that no tracked file differs from ``HEAD``.
 
 ``--config smoke`` only checks that the script runs (2 chains × 100 draws, every 8th origin, two
 replications, a seed of its own so no registered replication is scored); its numbers mean nothing.
@@ -143,19 +143,34 @@ def git_state() -> dict[str, Any]:
 
 
 def in_commit(commit: str, path: str) -> bool:
-    """Whether ``path`` exists in ``commit`` (``git cat-file -e``; an empty ``commit`` would read
-    the index, so it is no commit)."""
+    """Whether ``path`` is a file of ``commit`` (``git cat-file -t`` names a blob: a directory is
+    not a pre-registration; an empty ``commit`` would read the index, so it is no commit)."""
     if not commit:
         return False
     try:
-        subprocess.run(
-            ["git", "-C", str(REPO), "cat-file", "-e", f"{commit}:{path}"],
+        kind = subprocess.run(
+            ["git", "-C", str(REPO), "cat-file", "-t", f"{commit}:{path}"],
             capture_output=True,
             check=True,
-        )
+            text=True,
+        ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return False
-    return True
+    return kind == "blob"
+
+
+def modified_paths() -> list[str]:
+    """The tracked files that differ from ``HEAD`` (``git status --porcelain``), if git can say."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    return [line[3:] for line in out.splitlines() if line.strip()]
 
 
 def machine() -> dict[str, Any]:
@@ -331,6 +346,9 @@ def label(
                 reasons.append(f"{path} is not in commit {commit[:12]}")
     if any(r.get("git_dirty") for r in records):
         reasons.append("some records were produced with modified tracked files")
+    unknown = sum(1 for r in records if r.get("git_dirty") is None)
+    if unknown:  # a tree whose state git could not report is not known to be clean
+        reasons.append(f"{unknown} records do not say whether tracked files were modified")
     if cfg.name in REGISTERED_CONFIGS:
         off = sorted(
             {
@@ -507,11 +525,12 @@ def markdown(rep: dict[str, Any]) -> str:
         f"- This invocation: started {m.get('started_at')}, finished {m.get('finished_at')} (UTC)."
     )
     if not m.get("ran"):
-        why = (
-            "regenerated with `--report-only`"
-            if m.get("report_only")
-            else "every replication was already recorded"
-        )
+        if m.get("report_only"):
+            why = "regenerated with `--report-only`"
+        elif m.get("skipped"):
+            why = "every selected replication was already recorded"
+        else:
+            why = "there was nothing to run"
         lines.append(
             f"- This invocation ran no replication ({why}), so the machine, worker count and load "
             "above, the notes below and the wall-time estimate (the recorded seconds divided by "
@@ -697,26 +716,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             "(rai_bvar.validation.dgp) before its first run; --config smoke runs it on a seed "
             "of its own."
         )
+    git = git_state()
+    if registered and git["git_commit"] == "unknown":
+        p.error(
+            f"git could not read the repository at {REPO}: under --config {cfg.name} the "
+            "pre-registration, the commit and the state of the working tree must be known."
+        )
     paths = {row.preregistration for row in rows} if registered else set()
     uncommitted = sorted(path for path in paths if not in_commit("HEAD", path))
     if uncommitted:
         p.error(
-            f"{', '.join(uncommitted)} is not in the checked-out commit (HEAD): under --config "
-            f"{cfg.name} commit the pre-registration before the rows it registers run (or check "
-            "the row's Row.preregistration path)."
+            f"{', '.join(uncommitted)} is not a file of the checked-out commit (HEAD): under "
+            f"--config {cfg.name} commit the pre-registration before the rows it registers run "
+            "(or check the row's Row.preregistration path)."
         )
     start, stop = 0, cfg.reps
     if args.reps:
         a, b = args.reps.split(":")
         start, stop = int(a or 0), int(b or cfg.reps)
-    git = git_state()
-    t0 = time.time()
-    started_at = dgp.utc_now()
-
-    def log(msg: str) -> None:
-        print(f"[{time.time() - t0:8.0f}s] {msg}", flush=True)
-
-    args.out.parent.mkdir(parents=True, exist_ok=True)
     records_path = args.out.with_suffix(".jsonl")
     records = load_records(records_path, cfg.design)
     done = {(r["row"], r["rep"]) for r in records}
@@ -726,6 +743,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         for row in sorted(rows, key=lambda r: -len(r.arms))  # the longest rows first
         if (row.name, rep) not in done
     ]
+    if registered and tasks and not args.report_only and git["git_dirty"] is not False:
+        # before anything is written: a refused run leaves no file behind
+        if git["git_dirty"] is None:
+            p.error(
+                f"git could not report whether tracked files differ from HEAD: under --config "
+                f"{cfg.name} the records' working tree must be known to be clean."
+            )
+        changed = modified_paths()
+        shown = ", ".join(changed[:10]) + (
+            f" and {len(changed) - 10} more" if len(changed) > 10 else ""
+        )
+        p.error(
+            f"tracked files differ from HEAD ({shown or 'git status lists none now'}): under "
+            f"--config {cfg.name} the records would not be the registered run. Run from a clean "
+            "checkout of the commit the records are to come from, with an OUT path that git does "
+            "not track."
+        )
+    t0 = time.time()
+    started_at = dgp.utc_now()
+
+    def log(msg: str) -> None:
+        print(f"[{time.time() - t0:8.0f}s] {msg}", flush=True)
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     meta: dict[str, Any] = {
         "git": git,
         "machine": machine(),
@@ -744,11 +785,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"commit {git['git_commit'][:12]}{' (dirty)' if git['git_dirty'] else ''}; "
         f"{args.workers} workers; cache {args.cache}"
     )
-    if registered and tasks and not args.report_only and git["git_dirty"]:
-        p.error(
-            f"tracked files differ from HEAD: under --config {cfg.name} the records would not be "
-            "the registered run. Commit the changes, or run from a clean checkout."
-        )
     for row, status in pending:
         log(f"row {row.name}: {status}")
     for row in rows:

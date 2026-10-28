@@ -11,8 +11,9 @@ replication present and none recorded twice. Without ``--rows`` the script runs 
 pre-registration's rows (``--preregistration``, by default the Phase 2 file), so rows of another
 pre-registration are another study, and a report of rows of two pre-registrations is never
 labelled. A row without a pre-registration runs only when named and only under the smoke config;
-under pilot and full the script also refuses a pre-registration that is not in ``HEAD`` and
-replications to run on a modified tree. ``git_state`` and ``in_commit`` are stand-ins unless a test
+under pilot and full the script also refuses an unreadable repository, a pre-registration that is
+not a file of ``HEAD``, and replications to run unless the tree is known to be clean, before it
+writes anything. ``git_state``, ``in_commit`` and ``modified_paths`` are stand-ins unless a test
 says otherwise.
 The ``slow`` test runs the real smoke config for one replication of one row (tiny chains).
 """
@@ -119,6 +120,7 @@ def run_main(study, monkeypatch, tmp_path):
     monkeypatch.setattr(dgp, "run_replication", fake_replication)
     monkeypatch.setattr(study, "git_state", lambda: dict(CLEAN))
     monkeypatch.setattr(study, "in_commit", lambda commit, path: True)
+    monkeypatch.setattr(study, "modified_paths", lambda: ["src/rai_bvar/api.py"])
     monkeypatch.setattr(study, "_init_worker", lambda: None)  # no JAX config in this process
     monkeypatch.setenv("JAX_COMPILATION_CACHE_DIR", str(tmp_path / "xla"))
 
@@ -189,8 +191,8 @@ def test_pilot_run_records_resumes_and_is_labelled(run_main, study):
     assert again["summary"] == rep["summary"]
     # its machine, workers, notes and estimate are its own, as for --report-only
     assert (
-        "- This invocation ran no replication (every replication was already recorded), so the "
-        "machine"
+        "- This invocation ran no replication (every selected replication was already "
+        "recorded), so the machine"
     ) in out.with_suffix(".md").read_text()
 
 
@@ -212,7 +214,9 @@ def test_labels(run_main, study, monkeypatch, capsys):
     for config in ("pilot", "full"):
         with pytest.raises(SystemExit):
             run_main("--config", config)
-        assert "tracked files differ from HEAD" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "tracked files differ from HEAD (src/rai_bvar/api.py)" in err
+        assert "Commit the changes" not in err and "an OUT path that git does not track" in err
     path = out.with_suffix(".jsonl")
     assert len(path.read_text().splitlines()) == 6  # nothing ran
     _, rep = run_main("--config", "pilot", "--report-only")  # 66 missing, none run
@@ -220,7 +224,15 @@ def test_labels(run_main, study, monkeypatch, capsys):
     _, rep = run_main("--config", "smoke", "--rows", "linear-sv")  # not registered: runs
     assert rep["meta"]["ran"] == 2
     monkeypatch.setattr(study, "git_state", lambda: dict(CLEAN))
-    run_main("--config", "pilot")
+    out, rep = run_main("--config", "pilot")  # a resume: 66 run, 6 recorded
+    assert (
+        rep["meta"]["ran"] == 66 and "ran no replication" not in out.with_suffix(".md").read_text()
+    )
+    # with every replication recorded, a run-mode invocation on a modified tree runs nothing and
+    # writes its report: the label reads the records' trees, not this one
+    monkeypatch.setattr(study, "git_state", lambda: CLEAN | {"git_dirty": True})
+    _, rep = run_main("--config", "pilot")
+    assert rep["registered"] and "ran" not in rep["meta"]
     recs = [json.loads(x) for x in path.read_text().splitlines()]
     path.write_text("".join(json.dumps(r | {"git_dirty": r["rep"] == 5}) + "\n" for r in recs))
     monkeypatch.setattr(study, "git_state", lambda: CLEAN | {"git_dirty": True})
@@ -233,6 +245,15 @@ def test_labels(run_main, study, monkeypatch, capsys):
     # the flag is this invocation's: it goes with the reporting commit, even the records' own one
     c = CLEAN["git_commit"]
     assert f"records from commit `{c}`; this report written at commit `{c}` (tracked files" in md
+    # records whose tree git could not report are not known to be clean
+    path.write_text(
+        "".join(json.dumps(r | {"git_dirty": None}) + "\n" for r in recs[:3])
+        + "".join(json.dumps(r) + "\n" for r in recs[3:])
+    )
+    _, rep = run_main("--config", "pilot", "--report-only")
+    assert rep["not_registered_because"] == [
+        "3 records do not say whether tracked files were modified"
+    ]
 
 
 def test_label_needs_the_registered_arm_specs(run_main, monkeypatch):
@@ -284,6 +305,7 @@ def test_in_commit_of_this_checkout(study):
     assert not study.in_commit("HEAD", "benchmarks/no-such-file.md")
     assert not study.in_commit("0" * 40, study.PREREGISTRATION)
     assert not study.in_commit("", "benchmarks/dgp_study.py")  # not the index
+    assert not study.in_commit("HEAD", "benchmarks/reports")  # a directory, not a file
 
 
 def test_label_needs_every_preregistered_row(run_main):
@@ -354,16 +376,55 @@ def test_a_preregistration_not_in_head_is_refused(run_main, study, monkeypatch, 
     other = dataclasses.replace(row, preregistration=path)
     monkeypatch.setattr(dgp, "ROWS", tuple(other if r is row else r for r in dgp.ROWS))
     monkeypatch.setattr(study, "in_commit", lambda commit, p: p != path)
-    for args in (["pilot"], ["full"], ["pilot", "--report-only"]):
+    for args in (
+        ["pilot", "--preregistration", path],
+        ["full", "--preregistration", path],
+        ["pilot", "--rows", "linear-sv-bart"],
+        ["full", "--rows", "linear-sv-bart"],
+        ["pilot", "--preregistration", path, "--report-only"],
+    ):
         with pytest.raises(SystemExit):
-            run_main("--config", *args, "--preregistration", path)
-        assert f"{path} is not in the checked-out commit (HEAD)" in capsys.readouterr().err
+            run_main("--config", *args)
+        assert f"{path} is not a file of the checked-out commit (HEAD)" in capsys.readouterr().err
     out, rep = run_main("--config", "pilot")  # the Phase 2 rows' file is in HEAD
     assert rep["registered"]
     lines = out.with_suffix(".jsonl").read_text().splitlines()
     assert all(json.loads(x)["row"] != "linear-sv-bart" for x in lines)  # nothing scored
     _, rep = run_main("--config", "smoke", "--rows", "linear-sv-bart")  # a seed of its own
     assert {s["row"] for s in rep["summary"]} == {"linear-sv-bart"} and not rep["registered"]
+    # complete records of the row, then its file is gone from HEAD: --report-only is refused too
+    hashes = study.REGISTERED_SPEC_HASHES | {"BART × SV": "0" * 16}
+    monkeypatch.setattr(study, "REGISTERED_SPEC_HASHES", hashes)
+    monkeypatch.setattr(study, "in_commit", lambda commit, p: True)
+    _, rep = run_main("--config", "pilot", "--preregistration", path)
+    assert rep["registered"] and rep["meta"]["ran"] == 24
+    monkeypatch.setattr(study, "in_commit", lambda commit, p: p != path)
+    with pytest.raises(SystemExit):
+        run_main("--config", "pilot", "--preregistration", path, "--report-only")
+    assert f"{path} is not a file of the checked-out commit (HEAD)" in capsys.readouterr().err
+
+
+def test_git_must_know_the_tree_under_a_registered_config(
+    run_main, study, monkeypatch, capsys, tmp_path
+):
+    """A repository git cannot read, or a tree whose state git cannot report (``git status``
+    failing while ``git cat-file`` works), runs no registered replication and writes nothing."""
+    monkeypatch.setattr(study, "git_state", lambda: CLEAN | {"git_dirty": None})
+    out = tmp_path / "new" / "study"
+    args = [str(out), "--config", "pilot", "--workers", "1", "--cache", str(tmp_path / "c")]
+    with pytest.raises(SystemExit):
+        study.main(args)
+    captured = capsys.readouterr()
+    assert "git could not report whether tracked files differ from HEAD" in captured.err
+    assert captured.out == "" and not (tmp_path / "new").exists()  # no log line, no directory
+    _, rep = run_main("--config", "smoke", "--rows", "linear-sv")  # not registered: runs
+    assert rep["meta"]["ran"] == 2
+    unknown = {"git_commit": "unknown", "git_dirty": None, "git_diff_sha256": None}
+    monkeypatch.setattr(study, "git_state", lambda: dict(unknown))
+    for extra in ([], ["--report-only"]):
+        with pytest.raises(SystemExit):
+            run_main("--config", "pilot", *extra)
+        assert "git could not read the repository" in capsys.readouterr().err
 
 
 def test_the_row_selection_is_checked(run_main, capsys):
@@ -385,9 +446,9 @@ def test_a_named_row_this_build_cannot_run_is_pending(run_main):
     assert rep["rows"] == [] and rep["summary"] == [] and not out.with_suffix(".jsonl").exists()
     assert rep["records_commit"] is None and not rep["registered"]
     assert rep["preregistration"] is None
-    assert f"- Code: no records; this report written at commit `{CLEAN['git_commit']}`" in (
-        out.with_suffix(".md").read_text()
-    )
+    md = out.with_suffix(".md").read_text()
+    assert f"- Code: no records; this report written at commit `{CLEAN['git_commit']}`" in md
+    assert "- This invocation ran no replication (there was nothing to run), so" in md
 
 
 def test_a_replication_recorded_twice_counts_once_and_is_not_registered(run_main):
