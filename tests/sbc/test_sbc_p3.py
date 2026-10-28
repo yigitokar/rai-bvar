@@ -17,6 +17,8 @@ models are ``sbc_p3.py``'s. Here:
 
 from __future__ import annotations
 
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -27,8 +29,10 @@ from sbc_p3 import (
     BY_ID,
     NOT_MET_ROWS,
     SBC_CONFIG,
+    SBC_N,
     SBC_OVERRIDES,
     SBC_ROWS,
+    SEED,
     CommonSVPredictiveJoint,
     reference_next_common,
     sbc_model,
@@ -36,7 +40,7 @@ from sbc_p3 import (
 
 from rai_bvar.validation.joint import COMPOSITIONS_P3, LAGGED_P3, JointSpecP3, composition_id
 from rai_bvar.validation.reference import effective_log_var, state_log_var
-from rai_bvar.validation.sbc import SBCResult
+from rai_bvar.validation.sbc import SBCConfig, SBCResult
 
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
@@ -45,9 +49,19 @@ def test_quantity_selection_p3():
     """Joint-model kinds, quantities and shard coverage (module docstring)."""
     rows = [r for shard in SBC_ROWS.values() for r in shard]
     assert sorted(rows) == list(range(301, 331))  # every row in exactly one shard file
-    # Q44, E179: t_max = 400 for exactly these eight rows, nothing else changed; 200 elsewhere
-    assert SBC_CONFIG["t_max"] == 200
-    assert SBC_OVERRIDES == {r: {"t_max": 400} for r in (304, 306, 308, 311, 315, 325, 326, 327)}
+    # Q44, E179: P2 §9.6's configuration and seed; t_max = 400 for exactly these eight rows,
+    # nothing else changed, 200 elsewhere; each row's SBCConfig is the one run_sbc uses
+    from sbc_p3_run import sbc_config
+
+    t_max_400 = (304, 306, 308, 311, 315, 325, 326, 327)
+    assert SBC_CONFIG == {"L": 99, "burn": 300, "pilot": 1000, "t_max": 200, "alpha": 1e-2}
+    assert SEED == 20261026
+    assert SBC_OVERRIDES == {r: {"t_max": 400} for r in t_max_400}
+    assert SBC_N == int(os.environ.get("RAI_BVAR_SBC_N", "1000"))  # 1000 unless a local smoke run
+    for r, nm in BY_ID.items():
+        want = SBCConfig(N=SBC_N, L=99, burn=300, pilot=1000, alpha=1e-2, seed=20261026,
+                         t_max=400 if r in t_max_400 else 200)  # fmt: skip
+        assert sbc_config(nm) == want, r
     lagged = {r for r, nm in BY_ID.items() if nm in LAGGED_P3}
     assert lagged == {316, 319, 320, 321, 322, 323, 325, 329, 330}
     kinds = {}
@@ -198,6 +212,7 @@ _STAGE2 = {"stage": 2, "q": [0.05, 0.0]}  # the continue band, then a stage-2 fa
         (325, _stage([_POOLED_325], row=325), _STAGE2, "fail"),  # a later stage
         (308, _stage([_POOLED_308], min_p=0.05 / 90), _STAGE1, "fail"),  # γ in the continue band
         (308, _stage([_POOLED_308], min_p=0.151 / 90), _STAGE1, "fail"),  # γ in (γ, γ + β₁]
+        (308, _stage([_POOLED_308], min_p=0.16 / 90), _STAGE1, "xfail"),  # γ just above γ + β₁
         (308, _stage([_EMPTY]), _STAGE1, "fail"),  # a reason of another kind
         (308, _stage([_EMPTY, _POOLED_308]), _STAGE1, "fail"),  # another kind beside pooled
         (325, _stage((), row=325, checks_ok=False), _STAGE1, "fail-empty"),  # failed, no reason

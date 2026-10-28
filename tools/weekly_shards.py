@@ -75,8 +75,8 @@ The 240-min step leaves headroom on every shard at these times. A Gandy–Scott 
 or 325 at ``t_max = 400`` (about five times its stage 1, up to about 285 min for 325) would not
 fit; their stage-1 γ values in run 40414682400 (0.47, 0.48, 1.0) were far from the band that
 triggers one (0.0033–0.153). The weekly contract tests and the ordering-invariance test of
-conjugate × ``CommonSV`` (row 27) stay in ``rest`` (local: 13 min for the 18 weekly contract
-compositions).
+conjugate × ``CommonSV`` (row 27) stay in ``rest`` (local: 13 min for WP35's 18 weekly contract
+compositions; the 19th, structural × SV × NG, row 319's class, adds about 16 s).
 """
 
 from __future__ import annotations

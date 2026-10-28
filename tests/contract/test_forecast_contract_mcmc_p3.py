@@ -13,9 +13,9 @@ shared ``sim_data``.
 **Compositions** (:data:`COMPOSITIONS_P3`): each global-local family and SSVS in both forms
 (structural Mode I × ``Constant("ig")`` and reduced × ``SV``), the horseshoe with
 ``Constant("iw_equivalent")``, ``SV(outliers=True)``, ``SV`` (structural) and reduced ×
-``Constant("ig")``, SSVS × ``SV``, and ``CommonSV`` with the conjugate prior (the shared-factor
-path; also with its parity options and interior blocks), structural Mode I, the reduced form,
-and × HS and × NG. The fast tier (§9.11) fits the three §9.11 names: structural × SV × HS,
+``Constant("ig")``, SSVS and NG × ``SV`` (NG is §9.4 row 319's class), and ``CommonSV`` with the
+conjugate prior (the shared-factor path; also with its parity options and interior blocks),
+structural Mode I, the reduced form, and × HS and × NG. The fast tier (§9.11) fits the three §9.11 names: structural × SV × HS,
 conjugate × ``CommonSV`` and structural × ``CommonSV``; every other composition is ``slow``
 (weekly).
 """
@@ -77,6 +77,7 @@ COMPOSITIONS_P3 = {
     ),
     "structural-SV(outliers)-HS": (rb.Horseshoe(form="structural"), SV(outliers=True)),
     "structural-SV-SSVS": (rb.SSVS(form="structural"), SV()),
+    "structural-SV-NG": (rb.NormalGamma(form="structural"), SV()),  # §9.4 row 319's class
     "reduced-SV-HS": (rb.Horseshoe(form="reduced"), SV()),
     "reduced-SV-NG": (rb.NormalGamma(form="reduced"), SV()),
     "reduced-SV-R2D2": (rb.R2D2(form="reduced"), SV()),

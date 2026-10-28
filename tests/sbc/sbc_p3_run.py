@@ -38,11 +38,17 @@ def record(payload: dict) -> None:
             fh.write(json.dumps(payload, default=float) + "\n")
 
 
+def sbc_config(name: str) -> SBCConfig:
+    """Row ``name``'s SBC configuration: :data:`sbc_p3.SBC_CONFIG` with the row's
+    :data:`sbc_p3.SBC_OVERRIDES` (Q44, E179), ``N = SBC_N`` and the seed :data:`sbc_p3.SEED`."""
+    sizes = {**SBC_CONFIG, **SBC_OVERRIDES.get(composition_id(name), {})}  # Q44, E179
+    return SBCConfig(N=SBC_N, seed=SEED, **sizes)
+
+
 def run_sbc(name: str, record_property: Any) -> tuple[bool, dict[str, Any], Any]:
     """SBC of row ``name``: ``(passed, record, last stage)``."""
     model, quantities, names = sbc_model(name, "full")
-    sizes = {**SBC_CONFIG, **SBC_OVERRIDES.get(composition_id(name), {})}  # Q44, E179
-    cfg = SBCConfig(N=SBC_N, seed=SEED, **sizes)
+    cfg = sbc_config(name)
     t0 = time.perf_counter()
     seq, results = sbc_sequential(model, quantities, names, cfg)
     last = results[-1]
