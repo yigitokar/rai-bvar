@@ -49,6 +49,8 @@ ROOT = HERE.parents[1]
 #: FRED-QD medium set (``rai_bvar.datasets``, vintage 2026-09): 204 quarters 1969Q1–2019Q4,
 #: so ``T_eff = 200`` at ``p = 4`` (the sample ends before 2020, as the GK evaluation does).
 QD7_END, QD7_ROWS = "2019Q4", 204
+#: FRED-MD medium set, 1969M9–2019M12: ``T_eff = 600`` at ``p = 4`` (R22).
+MD7_END, MD7_ROWS = "2019-12", 604
 LAGS = 4
 #: BENCH-P2's shape and data (P2 §10.1: ``simulate_var_sv(20, 4, 300, seed=0)``).
 BP2_N, BP2_T = 20, 300
@@ -207,9 +209,28 @@ def sim_data(n: int, T: int, seed: int = 0, lags: int = LAGS) -> Any:
     return phase2_perf().bench_data(n, lags, T, seed)
 
 
+def fredmd_medium(vintage: str = "2026-09") -> Any:
+    """The FRED-MD medium set, 1969M9–2019M12: ``T_eff = 600`` at ``p = 4`` (R22's ``T = 600``
+    pilot of the CommonSV ``h`` acceptance). The 2025-10 gap interpolated by the loader lies
+    outside the window."""
+    import warnings
+
+    import rai_bvar as rb
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        d = rb.datasets.load("fred-md", vintage, variables="medium")
+    w = d.upto(MD7_END).tail(MD7_ROWS)
+    if len(w) != MD7_ROWS or np.isnan(w.values).any():
+        raise RuntimeError(f"FRED-MD medium window has {len(w)} rows or missing values")
+    return w
+
+
 def size_data(size: str) -> Any:
     if size == "qd7":
         return fredqd_medium()
+    if size == "md7":
+        return fredmd_medium()
     if size == "bp2":
         return sim_data(BP2_N, BP2_T, 0)
     if size.startswith("sim"):  # "sim<n>x<T>"
