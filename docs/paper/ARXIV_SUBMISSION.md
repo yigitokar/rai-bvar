@@ -7,7 +7,7 @@ after the final adversarial check of that day; Sections 0, 1, 2, 4, 5 and 6 upda
 post-release F1 edits of cd8d605; Sections 0, 1 and 4 updated on 2026-10-25 after the weekly-tier
 edits of fae94d7, Sections 0, 1, 2, 4, 5 and 6 on 2026-10-27 after the DGP-study and
 bayesianVARs edits of c39ab47, and Sections 0, 1, 2 and 4 on 2026-10-28 after the merge of
-PR #15, 52546e2). Every number below comes from a build or a command run between 2026-10-24 and
+PR #15, 478ab32). Every number below comes from a build or a command run between 2026-10-24 and
 2026-10-28; the commands are given so that they can be repeated.
 
 ## 0. Before you submit
@@ -41,7 +41,7 @@ tags, stay on the branch `paper-draft`. Checked on 2026-10-24:
   gitignored; the test's TeX Live 2026 BibTeX regenerates it byte for byte);
 - the stripped tarball typesets to the same PDF as an unstripped one: the pdfLaTeX builds of both
   have 109 pages with byte-identical page content streams (compared with pypdf; re-checked for the
-  tarball above, the unstripped files taken from 52546e2);
+  tarball above, the unstripped files taken from 478ab32);
 - the shipped `.tex` files hold no comment text; the only local path left in the tarball is in the
   header comments of `code/ex_a.py` and `code/ex_b.py`, lines the listings do not print.
 
@@ -88,7 +88,7 @@ unpacks the tarball twice, each time into a fresh temporary directory, and compi
 - The `.bbl`: build (b)'s BibTeX 0.99e with TeX Live 2026's `plainnat.bst` regenerated a
   `main.bbl` byte-identical to the shipped one, which tectonic's BibTeX 0.99d wrote (natbib,
   `plainnat`, 129 entries, 0 BibTeX warnings). The shipped `.bbl` therefore matches TeX Live 2026.
-- The PDFs of (a) and (b) have identical text on all 109 pages (re-checked for 52546e2; for
+- The PDFs of (a) and (b) have identical text on all 109 pages (re-checked for 478ab32; for
   c39ab47 a fourth pdflatex pass again left `main.aux` unchanged).
 - Converged: a fourth pdflatex pass on (a) leaves `main.aux` unchanged. tectonic's own rerun rule
   is not as reliable: from no `main.aux`, the sources of cd8d605 stopped one pass short, at 108
@@ -141,7 +141,7 @@ Compared by text extraction (PyMuPDF) and by the `.aux` label tables of the two 
    App. A starts on p. 36, and the appendices end and the references start on p. 100. Both have 11
    figures, 30 tables, 6 listings, 13 algorithms and 129 references. All 247 labels have the same
    numbers in both builds. (Re-measured on 2026-10-28 for the tarball of Section 1, the tectonic
-   side being `build.sh`'s converged build of 52546e2.)
+   side being `build.sh`'s converged build of 478ab32.)
 2. **Page drift.** 235 of the 247 labels fall on the same page. Twelve are one page off, all
    pdfLaTeX one page earlier except two: `sec:walk-mcmc` (p. 19 in tectonic, p. 18 in pdfLaTeX),
    `sec:validation-cost` and `sec:validation-tiers` (20, 19), `sec:robustness-f3` (26, 25),
