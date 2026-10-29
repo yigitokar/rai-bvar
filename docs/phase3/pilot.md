@@ -5,7 +5,10 @@
 criterion was changed, and nothing under `src/` was touched. It gives the budget evidence for D-58 (Q21, the owner's
 decision), replaces the cost estimates of §10 (E163, E170) with idle-machine measurements, reports BENCH-P3, and
 estimates the compute of the Gruber–Kastner acceptance run (§9.10; Q26). The decision rule of §1 was committed
-(`ea50e09`) before any ladder result existed, and its addendum (`8d677b4`) before the runs it governs.
+(`ea50e09`) before the campaign ran, and its addendum (`8d677b4`) before the runs it governs. Before that commit two
+checks of the scripts had printed gate verdicts: the harness check (seed 7, 4 × 2,000 and 4 × 3,000; described below) and a smoke test
+(4 × 3,000 after 200 burn-in sweeps; DL × Constant, row 325's CommonSV, SSVS(Beta) × SV at `n = 7`), all failing at
+2,000. They were not campaign settings, and the rule was written from the design, not from them.
 
 **Reproduce.** The mixing campaign (ESS and R-hat do not depend on the load, so the workers may share the machine):
 `python -I benchmarks/pilot/phase3_run_all.py --out DIR --only mixing --workers 6 --single-thread --bp2-seeds 0`
@@ -15,7 +18,10 @@ estimates the compute of the Gruber–Kastner acceptance run (§9.10; Q26). The 
 (each run takes `--skip-started`, so a campaign resumes). The timing campaign, on a quiet machine with nothing else of
 this pilot running: `… --only costs` (twice), `python -I benchmarks/pilot/phase3_gk.py --out DIR --sweeps --origins`
 and `python -I benchmarks/phase3_perf.py --out DIR/bench3.json`. `python -I benchmarks/pilot/phase3_summarise.py DIR…`
-prints the tables of this document. Every result is a JSON file with the machine fingerprint, the load average, the
+prints the tables of this document, and with `--csv-prefix benchmarks/reports/phase3_pilot` writes the two committed
+CSV files: `phase3_pilot_ess.csv` (bulk ESS, ESS per 1,000 sweeps, split R-hat, lag-1 autocorrelation, mean and s.d. of
+every primary, extra, hyperprior-index and log-prior quantity of the 172 mixing runs, at each run's full length) and
+`phase3_pilot_gate.csv` (every run's gate ladder). Every result is a JSON file with the machine fingerprint, the load average, the
 top CPU processes and the other jobs' CPU share before and after the measurement; every script requires `--out`
 (results never land in the working tree).
 
@@ -67,7 +73,7 @@ marked and are upper bounds.
 
 ---
 
-## 1. Decision rule (fixed before any ladder result)
+## 1. Decision rule (fixed before the campaign ran; see Status)
 
 - **Gate.** P2 §8.2 unchanged: every primary quantity (P2 D-33 with P3 D-52's additions) has rank-normalised split
   R-hat < 1.01 and bulk ESS > 400, 4 chains, no numerical failure. It is evaluated by the production function
@@ -664,6 +670,10 @@ Each is a measurement with its evidence; nothing was changed because of it (the 
 | The D2 screen's default runtime at `n = 100` | The default `Runtime.memory_budget_gb = 2` stops it before sampling; a documentation or default question | §5 |
 
 ## 9. Not measured here (and why)
+
+- **The raw results are not committed** (as in Phase 2's pilot): the JSON files of every run stay outside the repository;
+  the per-quantity ESS and the gate ladders are in `benchmarks/reports/phase3_pilot_{ess,gate}.csv`, the timings in
+  this document. The secondary `a_ij`, intercepts and `h` at fixed dates are in the JSON only.
 
 - **x86 and a second Apple machine**: only this M5 Max was available (as in Phase 2's pilot). The P-core/E-core
   sensitivity (§7 item 14) is specific to heterogeneous CPUs.

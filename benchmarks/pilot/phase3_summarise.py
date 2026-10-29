@@ -328,13 +328,47 @@ def q26(gk_sweeps: list[dict[str, Any]], gk_origins: list[dict[str, Any]],
     }
 
 
+def write_csv(runs: list[dict[str, Any]], ess_path: Path, gate_path: Path) -> None:
+    """The per-quantity ESS of every mixing run (primary, extra, hyperprior-index and log-prior
+    quantities, at the run's full length) and every run's gate ladder, as CSV."""
+    import csv
+
+    keep = ("gl_a_idx", "log_prior", "gl_log_tau", "common_h_0", "common_h_mid")
+    with ess_path.open("w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["size", "config", "seed", "draws", "quantity", "primary", "extra", "ess_bulk",
+                    "ess_per_1k", "rhat", "acf1", "mean", "sd"])  # fmt: skip
+        for r in sorted(runs, key=lambda r: (r["size"], r["config"], r["seed"])):
+            for name, row in r["ess"].items():
+                if not (row["primary"] or row["extra"] or _field(name) in keep):
+                    continue
+                w.writerow([r["size"], r["config"], r["seed"], r["draws"], name,
+                            int(row["primary"]), int(row["extra"]), f"{row['ess_bulk']:.6g}",
+                            f"{row['ess_per_1k']:.6g}", f"{row['rhat']:.6g}",
+                            f"{row['acf1']:.6g}", f"{row['mean']:.6g}", f"{row['sd']:.6g}"])  # fmt: skip
+    with gate_path.open("w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["size", "config", "seed", "D", "pass", "n_primary", "n_fail", "rhat_max",
+                    "ess_min", "worst"])  # fmt: skip
+        for r in sorted(runs, key=lambda r: (r["size"], r["config"], r["seed"])):
+            for g in r["gate"]:
+                w.writerow([r["size"], r["config"], r["seed"], g["D"], int(g["pass"]),
+                            g["n_primary"], g["n_fail"], f"{g['rhat_max']:.6g}",
+                            f"{g['ess_min']:.6g}", g["worst"]])  # fmt: skip
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("dirs", type=Path, nargs="+")
     ap.add_argument("--json", type=Path)
     ap.add_argument("--md", type=Path)
+    ap.add_argument("--csv-prefix", type=Path, help="write <prefix>_ess.csv and <prefix>_gate.csv")
     args = ap.parse_args(argv)
-    mix = mixing_summary([r for r in load(args.dirs, "mix_") if "gate" in r])
+    mix_runs = [r for r in load(args.dirs, "mix_") if "gate" in r]
+    mix = mixing_summary(mix_runs)
+    if args.csv_prefix:
+        p = args.csv_prefix
+        write_csv(mix_runs, p.with_name(p.name + "_ess.csv"), p.with_name(p.name + "_gate.csv"))
     costs = cost_summary(load(args.dirs, "cost_"))
     gks, gko = load(args.dirs, "gk_sweeps"), load(args.dirs, "gk_origins")
     result = {"mixing": mix, "costs": costs}
