@@ -7,12 +7,17 @@ decision), replaces the cost estimates of §10 (E163, E170) with idle-machine me
 estimates the compute of the Gruber–Kastner acceptance run (§9.10; Q26). The decision rule of §1 was committed
 (`ea50e09`) before any ladder result existed, and its addendum (`8d677b4`) before the runs it governs.
 
-**Reproduce.** `python -I benchmarks/pilot/phase3_run_all.py --out DIR --only mixing --workers 5` (the mixing
-campaign; ESS and R-hat do not depend on the load, so the workers may share the machine), then, on an idle machine and
-with nothing else running, `--only costs`, `python -I benchmarks/pilot/phase3_gk.py --out DIR --sweeps --origins` and
-`python -I benchmarks/phase3_perf.py --out DIR/bench3.json`. `python -I benchmarks/pilot/phase3_summarise.py DIR`
-prints the tables. Every result is a JSON file with the machine fingerprint and the load average and top CPU processes
-before and after the measurement; every script requires `--out` (results never land in the working tree).
+**Reproduce.** The mixing campaign (ESS and R-hat do not depend on the load, so the workers may share the machine):
+`python -I benchmarks/pilot/phase3_run_all.py --out DIR --only mixing --workers 6 --single-thread --bp2-seeds 0`
+(every size's runs and BENCH-P2-shape seed 0), then the addendum's BENCH-P2-shape seeds 1–2:
+`… --sizes bp2 --bp2-seeds 0,1,2 --bp2-late-draws 20000 --configs <the 12 GL configurations>` and
+`… --sizes bp2 --bp2-seeds 0,1,2 --configs mn_const,mn_sv,csv_conj,csv_struct,csv_conj325,csv_struct325`
+(each run takes `--skip-started`, so a campaign resumes). The timing campaign, on a quiet machine with nothing else of
+this pilot running: `… --only costs` (twice), `python -I benchmarks/pilot/phase3_gk.py --out DIR --sweeps --origins`
+and `python -I benchmarks/phase3_perf.py --out DIR/bench3.json`. `python -I benchmarks/pilot/phase3_summarise.py DIR…`
+prints the tables of this document. Every result is a JSON file with the machine fingerprint, the load average, the
+top CPU processes and the other jobs' CPU share before and after the measurement; every script requires `--out`
+(results never land in the working tree).
 
 | Script | Measures |
 | :--- | :--- |
@@ -43,10 +48,10 @@ the scan and the runner's `sample` executable compile to different XLA programs;
 | Item | Value |
 | :--- | :--- |
 | Machine | Apple M5 Max, 18 cores (6 performance + 12 efficiency), 64 GB, macOS 26.6.2 (arm64) |
-| Software | Python 3.12.13, NumPy 2.5.4 (BLAS/LAPACK: Accelerate), SciPy 1.18.1, `jax`/`jaxlib` 0.12.0.1 (CPU backend, 1 device); `jax_enable_x64` on inside the engine; `XLA_FLAGS` unset for every timing |
+| Software | Python 3.12.13, NumPy 2.5.4 (BLAS/LAPACK: Accelerate), SciPy 1.18.1, `jax`/`jaxlib` 0.12.0.1 (CPU backend, 1 device); `jax_enable_x64` on inside the engine; `XLA_FLAGS` unset for every timing unless a row says otherwise |
 | Data | FRED-QD and FRED-MD vintage 2026-09 from the checksum-verified local cache (`rai_bvar.datasets`, SPEC §5.8); BENCH-P2's generator `pilot_common.simulate_var_sv` |
-| Load, mixing campaign | **not idle, by design**: 1-minute load average 8–97 (median 29) while 5–11 pilot workers shared the machine with other sessions' test runs. ESS, R-hat and the gate do not depend on the load; no timing from the mixing campaign is used in §4–§6 |
-| Load, timing campaign | LOAD-TIMING |
+| Load, mixing campaign | **not idle, by design**: 1-minute load average 8–97 (median 28.5, 176 runs) while 5–11 pilot workers shared the machine with other sessions' test runs. ESS, R-hat and the gate do not depend on the load; no timing from the mixing campaign is used in §4–§6 |
+| Load, timing campaign | three rounds on 2026-10-28, with nothing of this pilot running alongside except where a row says so: round 1 (19:43–21:32) the costs, the GK sweeps and origins; round 2 (21:42–23:33) BENCH-P3 and the costs again; round 3 (23:33–23:50) the GK sweeps of the arms round 1 had contaminated, a state check, and the GK arms side by side (loaded by design). Other sessions' tests ran intermittently throughout. The idle gate opened at a 1-minute load of 1.3–2.0; every figure in §4–§6 is from a clean block, except BENCH-P3's 2 contaminated processes of 18 (§5) |
 | Threading | The mixing workers after the first five BENCH-P2-shape runs used single-threaded XLA (`--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1`); every timing used the default (multi-threaded) XLA unless a row says otherwise |
 
 Every timing is the minimum over repeats of an AOT-compiled call timed with `block_until_ready`, on a burned-in
@@ -106,6 +111,14 @@ R22's `T = 600` (FRED-MD medium, 1969M9–2019M12) and R29's `q ≈ T` (`n = 20,
 CommonSV runs. The mixing workers started after the first five BENCH-P2 runs use single-threaded XLA
 (`phase3_run_all.py --single-thread`); ESS and R-hat are properties of the chain's law, not of the threading.
 
+### 1.3 Runs added after the addendum (before they ran)
+
+Two sets of runs were added after the first results and committed before they ran (`0f8b89c`, `9193dc3`): R18's
+isolation runs, `NormalGamma(a=0.1)` and `DirichletLaplace(a=0.5)` × `Constant()` at `qd7` (5 seeds, 4 × 50,000;
+`bayesianVARs`' fixed `a` in place of GK's grid, everything else as the defaults), and four reruns of seed 0 at `qd7`
+(NG, R2D2, DL, SSVS(Beta) × `Constant()`) that record per-chain block means (the same chains; their gate and ESS
+results equal the first runs'). They change no rule of §1.
+
 ---
 
 ## 2. Global-local mixing and the D-58 recommendation
@@ -116,7 +129,8 @@ Seeds passing the P2 §8.2 gate at each budget (kept draws per chain, 4 chains, 
 budget the rule of §1 recommends. Configuration names: `<family>_<volatility>` with `const` = `Constant()`, `sv` =
 `SV()`; `mn` the structural Minnesota reference (`hierarchy="fixed"`); `ssvs_beta` = `SSVS(p=Beta(1, 1))`; `ngfix`,
 `dlfix` = `NormalGamma(a=0.1)`, `DirichletLaplace(a=0.5)` (R18's isolation runs, §2.3, not defaults). "Slowest primary"
-is the primary quantity with the lowest ESS per 1,000 sweeps (median over seeds).
+is the primary quantity with the lowest ESS per 1,000 sweeps (median over seeds, at the length every seed has: 50,000 at
+`qd7`, 20,000 for the GL rows at `bp2`).
 
 **`qd7`** (FRED-QD medium, `n = 7`, `p = 4`, `T_eff = 200`; 5 seeds, 4 × 50,000 each):
 
@@ -209,17 +223,18 @@ the local log variances (WP30's reference group function; not monitored in produ
 **Where ESS per 1,000 sweeps is not a rate.** When a chain mixes, the bulk ESS of the slowest primary grows in
 proportion to the run: from 10,000 to 50,000 draws its median ratio over seeds is 5.4–5.9 for HS, Minnesota × SV and
 CommonSV at `n = 7` (3.3–6 at the BENCH-P2 shape). For NG, R2D2 and DL × Constant (GK's grid on `a`) it is 0.9–1.5,
-and 1.2–2.5 for SSVS: the four chains do not reconcile in 50,000 sweeps (split R-hat stays at 1.04–1.07 for NG and
+and 1.2–2.5 for SSVS(Beta) at both sizes and SSVS at the BENCH-P2 shape: the four chains do not reconcile in 50,000 sweeps (split R-hat stays at 1.04–1.07 for NG and
 R2D2 from 10,000 to 50,000). Their ESS per 1,000 sweeps (0.03–0.5) bounds a mixing time from below and does not
 project to a budget: "400 ÷ (4 × 0.1/1000) = 10⁶ draws per chain" would understate the problem.
 
 ### 2.3 What mixes slowly (R18; E163(c); E179 rows 304, 306, 308, 311, 315, 326, 327)
 
 - **GK's grid on `a` (NG, R2D2, DL) nearly absorbs the shrunk groups.** The cross-lag groups (olcl-lagwise ids 1, 3, 5,
-  7) move to the small end of the 1,000-point grid (median index 20–45, `a ≈ 0.02–0.05`), their local variances follow
-  (`mean_log_v` between −35 and −100 at `n = 7`, so local variances `e^{−35}` to `e^{−100}`), and the chain all but
+  7) move to the small end of the 1,000-point grid (ids 3, 5, 7: median index 20–45, `a ≈ 0.02–0.05`; id 1 at `n = 7`:
+  74–105), their local variances follow (`mean_log_v` medians between −35 and −82, single seeds down to −100, so local
+  variances `e^{−35}` to `e^{−100}`), and the chain all but
   stops there: `gl_a_idx` and `mean_log_v` mix at 0.03–0.1 per 1,000 sweeps with split R-hat 1.2–1.8 at 4 × 50,000,
-  the primary `log ξ_g` at 0.1–0.5. The per-chain means of 10,000-sweep blocks (`chain_block_means` in the results)
+  the primary `log ξ_g` at 0.1–1.0. The per-chain means of 10,000-sweep blocks (`chain_block_means` in the results)
   show slow excursions, for example NG × Constant's `gl_a_idx[3]` wandering between 14 and 60 and `mean_log_v[5]`
   between −20 and −73 from block to block. **The grid is the cause:** with `bayesianVARs`' fixed `a` and everything else
   unchanged (olcl-lagwise groups, `scale="psi"`), NG (`a = 0.1`) passes at 5,000 (5 of 5 seeds) and DL (`a = 0.5`) at
@@ -228,7 +243,7 @@ project to a budget: "400 ÷ (4 × 0.1/1000) = 10⁶ draws per chain" would unde
   306, 308 and 326 at pilot sizes. It bears on Q23 (GK's semi-global defaults with hyperpriors, or `bayesianVARs`'
   fixed `a`; the design recommends GK's).
 - **The horseshoe's cross-lag group scales are slow but mix.** HS has no grid; its slowest quantities are `log ζ_g` of
-  the cross lags at lags 2–4 (ids 3, 5, 7): 5.1, 5.7, 10.4 per 1,000 sweeps at `n = 7` (own-lag groups 30–83), and at
+  the cross lags at lags 2–4 (ids 3, 5, 7): 5.1, 5.7, 10.4 per 1,000 sweeps at `n = 7` (the cross lags of lag 1: 28; the own-lag groups 17–83), and at
   the BENCH-P2 shape, whose DGP has cross lags `N(0, 0.02²)/l`, `log ζ ≈ −12.5` with lag-1 autocorrelation
   0.998–0.999 and 0.3–1.1 per 1,000 sweeps. HS's ESS grows with the run (ratio 5.5–5.9 at `n = 7`, 3.3–3.6 at
   `n = 20`). E163(c)'s "ESS 6 at 2 × 200" was this quantity in a short run; E179's rows 311 and 327 (HS global, reduced
@@ -241,7 +256,7 @@ project to a budget: "400 ÷ (4 × 0.1/1000) = 10⁶ draws per chain" would unde
   blind spot E179 found for row 308 (pooled ESS of `log p(θ)`), at pilot sizes.
 - **SSVS's indicators rarely switch** (D-44's semiautomatic scales, `c0 = 0.01`, `c1 = 100`): the inclusion counts
   `N1[g]` mix at 0.04–0.9 per 1,000 sweeps at `n = 7` and 0.04–2.5 at `n = 20`; the primaries they move inherit it
-  (`B_own1` and the log-likelihood 0.04–0.6, split R-hat up to 1.8 at 4 × 50,000). In the per-chain block means of
+  (`B_own1` and the log-likelihood 0.04–0.6; split R-hat 1.3–1.6 at 4 × 50,000 at the BENCH-P2 shape). In the per-chain block means of
   SSVS(Beta) × Constant at `n = 7`, one chain keeps one cross-lag-2 coefficient in the model (`N1[3] ≈ 1.0`) for the
   last 30,000 sweeps while the other three keep none. Under `p ~ Beta(1, 1)` the primary `gl_p` of the cross-lag groups
   mixes at 0.1–0.6. E179 row 315's slow quantities (`small_dev`, `gamma`, `N1`) at pilot sizes.
@@ -253,7 +268,7 @@ chains):
 
 | Family (default prior) | `Constant`, `n = 7` | `SV`, `n = 7` | `Constant`, `n = 20` | `SV`, `n = 20` |
 | :--- | ---: | ---: | ---: | ---: |
-| Horseshoe | **20,000** (3/5; 5/5 at 50,000) | **50,000** (4/5) | > 50,000 (projection ≈ 200,000) | > 50,000 |
+| Horseshoe | **20,000** (3/5; 5/5 at 50,000) | **50,000** (4/5) | > 50,000 (ESS projection 200,000–350,000) | > 50,000 |
 | NormalGamma (GK grid on `a`) | > 50,000, no mixing | > 50,000, no mixing | > 50,000, no mixing | > 50,000, no mixing |
 | R2D2 (GK grid on `a`) | > 50,000, no mixing | > 50,000, no mixing | > 50,000, no mixing | > 50,000, no mixing |
 | DirichletLaplace (GK grid on `a`) | > 50,000, no mixing | 20,000 (4/5), **gate blind** (§2.3) | > 50,000, no mixing | > 50,000 |
@@ -370,13 +385,292 @@ ESS per 1,000 sweeps (median over seeds of each field's slowest quantity):
   row 325's priors there, where the posterior has `ρ ≈ 0.999` and `σ_h ≈ 0.035` (autocorrelation 0.98). That is E169's
   mechanism, and the `σ_h`, `log σ_h` part of row 325's pooled-ESS failure (E179); its `mean |h|` part is the level
   direction above (`mean |h|` and `mean h` have the same ESS here). For the C1/C2 runs (Q41: 4 × 200,000) the margin at
-  these sizes is about 10 over the budget at which the median fit passes.
+  these sizes is 10–20 over the budget at which the median fit passes.
 - **R22: the `h` acceptance falls with `T` but stays far above §8's 0.1 warning.** Mean block acceptance of the `h`
   independence MH (blocks of 100 dates): 0.56–0.68 at `T = 200`, 0.92–0.96 at `T = 300` (BENCH-P2 shape, small
   `σ_h`), 0.54 at `T = 600`; `ρ` acceptance 0.66–0.95. No run hit the Newton cap (`acc_csv_newton = 0` everywhere).
 
 ---
 
-## 4. Costs (§10)
+## 4. Costs (§10): the estimates replaced
 
-Timing campaign in progress; this section is filled from it.
+BENCH-P2's shape and data (`n = 20, p = 4, T = 300`, `T_pad = 320`, 4 chains `vmap`ped, one device, default XLA
+threading), on a state burned in for 500 sweeps. ms per call of all 4 chains: the equation phase and each global step
+the minimum of 10 calls (every call a new sweep index, so the rejection-loop counts vary), the sweeps the minimum of
+10 calls of 200 sweeps (`scan`: the production sweep in a `lax.scan`; `burn`: the runner's `burn` executable, a
+`fori_loop` over a traced count with the state donated, BENCH-P2's definition). Two rounds; per block the lowest clean
+value of the two (a contaminated one would be marked `*`, as an upper bound; §0's rule). Round 1 (19:43–20:45) ran
+while another session's tests kept about one core busy; its GL blocks came out 1.4–1.6 times slower than round 2
+(23:06–23:33) and many were contaminated (finding 14 of §7). Every round-2 block was clean, so every entry below is.
+
+| configuration | path | equation phase | global steps | sweep, standalone | sweep, scanned | sweep, in `burn` |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| `csv_conj` (bp2) | shared_factor | 0.53 | common_sv 0.96 | 1.49 | 1.43 | 1.44 |
+| `csv_conj` (bp2) | weighted | 2.06 | common_sv 0.94 | 3.02 | 2.99 | 2.99 |
+| `csv_struct` (bp2) | weighted | 2.05 | common_sv 0.94 | 3.04 | 3.03 | 3.03 |
+| `dl_const` (bp2) | weighted | 2.38 | gl_scales 10.11 | 12.43 | 13.28 | 13.29 |
+| `dl_sv` (bp2) | weighted | 2.45 | gl_scales 10.56 | 13.73 | 14.08 | 14.19 |
+| `hs_const` (bp2) | weighted | 2.41 | gl_scales 3.42 | 5.85 | 6.30 | 6.34 |
+| `hs_sv` (bp2) | weighted | 2.38 | gl_scales 3.41 | 7.02 | 7.43 | 7.43 |
+| `mn_const` (bp2) | eigen | 0.28 | — | 0.39 | 0.31 | 0.31 |
+| `mn_const` (bp2) | cholesky_const | 1.42 | — | 1.51 | 1.40 | 1.38 |
+| `mn_sv` (bp2) | weighted | 2.05 | — | 3.50 | 3.87 | 3.87 |
+| `ng_const` (bp2) | weighted | 2.41 | gl_scales 4.69 | 7.74 | 8.03 | 8.07 |
+| `ng_sv` (bp2) | weighted | 2.37 | gl_scales 4.73 | 8.89 | 9.17 | 9.16 |
+| `r2d2_const` (bp2) | weighted | 2.42 | gl_scales 9.82 | 12.44 | 13.39 | 13.49 |
+| `r2d2_sv` (bp2) | weighted | 2.41 | gl_scales 10.06 | 13.71 | 14.44 | 14.55 |
+| `ssvs_beta_const` (bp2) | weighted | 2.40 | gl_scales 0.29 | 2.64 | 2.62 | 2.62 |
+| `ssvs_beta_sv` (bp2) | weighted | 2.38 | gl_scales 0.30 | 4.38 | 4.35 | 4.35 |
+| `ssvs_const` (bp2) | weighted | 2.39 | gl_scales 0.23 | 2.64 | 2.54 | 2.53 |
+| `ssvs_sv` (bp2) | weighted | 2.39 | gl_scales 0.25 | 4.24 | 4.36 | 4.35 |
+
+### 4.1 The GL scale step per family (replaces §10's 0.2–0.6 ms and E163(a))
+
+| Family | step, `Constant` | step, `SV` | E163(a) (load ≈ 3) | share of the GL × `Constant` sweep |
+| :--- | ---: | ---: | ---: | ---: |
+| Horseshoe | 3.42 | 3.41 | 6.0 | 54% |
+| NormalGamma | 4.69 | 4.73 | 7.8 | 58% |
+| R2D2 | 9.82 | 10.06 | 17.6 | 73% |
+| DirichletLaplace | 10.11 | 10.56 | 15.5 | 76% |
+| SSVS (`p = 0.5`) | 0.23 | 0.25 | 0.28 | 9% |
+| SSVS (`p ~ Beta(1, 1)`) | 0.29 | 0.30 | — | 11% |
+
+- §10 estimated 0.2–0.6 ms (about 7 elementwise passes for the slowest GIG lane). The shipped step costs 3.4 ms (HS)
+  to 10–10.6 ms (R2D2, DL) per sweep of 4 chains: **6–50 times** the estimate. E163(a)'s loaded figures were 1.2–1.8
+  times these, about what this pilot's own round 1 measured with one other job on the machine. Neither of E163's
+  `random.py` options has landed (the file is unchanged since WP28), so these are the shipped sampler's costs.
+- The scale step is 54–76% of the GL × `Constant` sweep for the families with gamma and GIG lines; the equation phase
+  (the deviation path, D-41) is the same for every family (2.37–2.45 ms, against 2.05 ms for Minnesota × SV's
+  weighted path). SSVS's step costs 0.23–0.30 ms.
+
+### 4.2 The CommonSV step, the shared-factor phase, the standalone and in-runner sweep (replaces E170(a), §10)
+
+At E170's size (`n = 20, p = 4, T = 300`, 4 chains):
+
+| Quantity | measured | E170(a) (loaded) | §10 estimate |
+| :--- | ---: | ---: | ---: |
+| `h, ρ, σ_h` step (`G_COMMON_SV`, `block = 100`) | 0.95 ms | 0.87 ms | — |
+| equation phase, shared-factor path (conjugate × CommonSV) | 0.53 ms | 0.61 ms | — |
+| equation phase, weighted path (the same posterior, `const_path="cholesky"`) | 2.06 ms | 2.20 ms | — |
+| conjugate × CommonSV sweep, standalone / scanned / in `burn` | 1.49 / 1.43 / 1.44 ms | 1.52 / — / 3.88 ms | 0.3–0.6 ms |
+| per-equation program (Mode I Minnesota × CommonSV) sweep, in `burn` | 3.03 ms | — | "what structural SV costs" |
+| *Minnesota × SV (BENCH-P2's composition) sweep, in `burn`* | *3.87 ms* | — | — |
+
+- **The runner's loop adds nothing.** E170(a) measured the conjugate CommonSV sweep at 3.88 ms inside the runner's
+  `burn` loop against 1.52 ms standalone and called it "a Phase 2 runner property" (Mode II × Constant 0.33 ms
+  standalone, 1.22 ms in `burn`). On an idle machine the `burn` executable and a `scan` of the production sweep agree
+  within 1.5% for every configuration of §4's table, and single standalone sweeps differ from them only by the call's
+  dispatch (Minnesota × Constant: 0.39 standalone, 0.31 in `burn`) or by being the cheapest of 10 sweeps whose
+  rejection loops vary (the GL rows). E170's in-runner figure was a loaded-machine measurement.
+- The shared-factor path makes the equation phase 3.9 times cheaper than the weighted path; with the `h` step the
+  conjugate CommonSV sweep is 1.44 ms, 2.1–2.7 times cheaper than the per-equation program and the Minnesota × SV
+  sweep. §10's 0.3–0.6 ms for the whole sweep is 2.4–5 times low: the `h` step alone costs 0.95 ms.
+
+
+### 4.3 GL × Constant loses the eigen path (§10: "0.35 → ≈ 3 ms per sweep")
+
+| Minnesota × Constant | sweep (in `burn`) | equation phase |
+| :--- | ---: | ---: |
+| eigen path (Mode I, the default) | 0.31 ms | 0.28 ms |
+| `const_path="cholesky"` (`cholesky_const`) | 1.38 ms | 1.42 ms |
+| a GL prior (the weighted deviation path, any family) | — | 2.37–2.42 ms |
+
+A GL coefficient prior varies, so the eigen path is off (D-43): the equation phase alone costs 7.6–7.9 times the
+eigen path's whole sweep (§10's "0.35 → ≈ 3 ms" holds to its order), and with the scale step a GL × `Constant` sweep
+costs 2.5 ms (SSVS) to 13.5 ms (R2D2), 8–44 times the Minnesota × `Constant` sweep and, except for SSVS, more than
+the Minnesota × SV sweep (3.87 ms).
+
+---
+
+## 5. BENCH-P3 (reported, not gated)
+
+`python -I benchmarks/phase3_perf.py --out DIR/bench3.json` (3 repeats, each a cold and a warm process, the three
+cases interleaved in every repeat so they share the load drift; 4 chains × 10,000 kept draws after 1,000, one device;
+an idle gate before every process). Medians over repeats:
+
+| Case | wall, cold | wall, warm | compile, cold | sampling (runner) | after the runner | ms per sweep (min 3 × 1,000) | peak RSS | gate (primaries failing; worst) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| `commonsv_n100`: conjugate × CommonSV, `n = 100, p = 4, T = 300` | 153.9 s | 147.3 s | 4.5 s | 81 s (7.8 ms per sweep) | 62 s | 6.80 | 25–31 GiB | 3 of 204; `common_sigma` R-hat 1.024, ESS 116 |
+| `hs_sv_bp2`: HS × SV, BENCH-P2 shape | 95.3 s | 90.2 s | 6.6 s | 79 s (7.7 ms) | 4.1 s | 7.47 | 3.3 GiB | 7 of 109; `gl_log_zeta[5]` 1.114, 29 |
+| `bench_p2`: BENCH-P2 (same session) | 52.0 s | 49.7 s | 3.3 s | 43 s (4.1 ms) | 3.9 s | 3.89 | 2.9 GiB | 4 of 101; `sigma[y7]` 1.016, 510 |
+| *BENCH-P2 reference baseline* (`tests/bench/baseline.json`) | *52.3 s* | *49.6 s* | *3.5 s* | — | *4.0 s* | *3.90* | *3.0 GiB* | *4 of 101* |
+
+Contamination (§0): 0 of 6 processes for `hs_sv_bp2` and `bench_p2`, 2 of 6 for `commonsv_n100` (repeat 1, launched
+at a load of 2.8 and 2.2); without them its cold median is 152.2 s against 153.9 s.
+
+- **The conjugate CommonSV screen at `n = 100, p = 4, T = 300`** (`q = 500`, the D2 screen's headline size, on
+  BENCH-P2's generator at `n = 100`) fits in 154 s (cold) and 147 s (warm) end to end, 6.8 ms per sweep of 4 chains. §10
+  estimated 3–6 min for 4 × 11,000 sweeps. **It does not run with the default runtime**: its stored draws need
+  5.3 GiB at the default `store_max = 2500` (monitor 1.6 GiB, parameters 3.7 GiB), above `Runtime.memory_budget_gb =
+  2`, so the fit stops before sampling with `StorageBudgetError` (its message names the remedies). BENCH-P3 raises the
+  runtime's budget to 8 GiB and changes nothing in the model. Of its 154 s, 81 s are sampling (7.8 ms per sweep in the runner) and 62 s come after the runner:
+diagnostics and storage of 5,257 monitored quantities, 4,950 of them the secondary `a_ij`; the process peaks at
+25–31 GiB of resident memory. The fit does not pass the gate at 4 × 10,000 (3 of 204 primaries: `common_sigma` R-hat
+1.024, ESS 116; `common_rho` 1.019, 143; the log-likelihood 1.015, 214), on E169's slow `σ_h` (lag-1 autocorrelation
+0.985).
+- **HS × SV at the BENCH-P2 shape** costs 1.82 times BENCH-P2 in the same session (wall time, warm cache), from
+  7.47 ms against 3.89 ms per sweep; BENCH-P2 itself reproduced its reference baseline
+  (`tests/bench/baseline.json`: 52.3 s cold, 49.6 s warm, 3.90 ms per sweep) at 52.0 s cold, 49.7 s warm and 3.89 ms per sweep: the same machine as the baseline, within 1%.
+- **R29 at `q = 500 > T = 300`**: the shared-factor `log λ_i` have lag-1 autocorrelation 0.59 (median over the 100 equations; at most
+0.63) and bulk ESS ≥ 687 at 4 × 10,000 (17 per 1,000 sweeps), against 0.56 and 106 at `q = 100 ≈ T = 120`: no sign of
+R29's two-block stickiness when `q` exceeds `T`; the binding quantities are `σ_h` and `ρ` (E169).
+
+---
+
+## 6. Compute estimate for the GK acceptance run (Q26; §9.10)
+
+**The run.** 160 expanding-window origins 1980Q1–2019Q4 from the sample start 1960Q1 (`T_eff = 77, …, 236`); one fit
+per origin and arm serves `h = 1` and the matching `h = 4` origins (the forecast of `h = 1..4` is one call); eight arms
+— Minnesota-EB, HS (olcl-lagwise and global), NG (olcl-lagwise and global), R2D2, DL, SSVS(`p ~ Beta(1, 1)`) — in the
+reduced form with `SV()` at `n = 21, p = 4`, `scale="none"`, mean 0. Warm-started backtest: the first origin of an arm
+burns 1,000 sweeps, every later one `warm_burn = 250`, then `D` kept draws per chain, 4 chains.
+
+**Measured inputs** (§0's hygiene; `phase3_gk.py`; BENCH-P2's generator at `n = 21`, so the shapes and the samplers are
+the run's, the posterior is not):
+
+| Arm (reduced × SV, `n = 21`) | `T_eff = 77` | 156 | 236 | 8 arms side by side, single-threaded (ratio) |
+| :--- | ---: | ---: | ---: | ---: |
+| Minnesota-EB | 4.07 | 5.28 | 7.07 | 1.50 |
+| HS, olcl-lagwise | 9.52 | 10.59 | 12.09 | 1.36 |
+| HS, global | 9.64 | 10.41 | 12.67 | 1.38 |
+| NG, olcl-lagwise | 10.89 | 11.91 | 13.61 | 1.33 |
+| NG, global | 10.46 | 11.51 | 13.02 | 1.38 |
+| R2D2 | 16.00 | 17.30 | 18.56 | 1.34 |
+| DL | 15.68 | 17.22 | 18.90 | 1.36 |
+| SSVS (`p ~ Beta(1, 1)`) | no fit (D-44) | 6.97 | 8.58 | 1.42 |
+
+ms per sweep of 4 chains, the runner's `burn` executable, minimum over rounds (default threading; two rounds for
+Minnesota-EB, HS, NG global, R2D2, DL, whose first round was contaminated: within 7% of these, except Minnesota-EB
+at `T_eff = 77`, 20% higher); the last column is the mean
+over the three windows of ms per sweep with all eight arms running at once as single-threaded processes over ms per
+sweep alone. Compilation of the `burn` executable: 1.0–2.5 s per arm and `T_pad` bucket.
+
+- **Per origin beyond the sweeps**: one cold backtest origin end to end (`_run_origin`: resolution, EB for
+  Minnesota-EB, compilation, sampling, diagnostics, storage, the `h = 1..4` forecast with 1,000 draws and the integrated
+  LPD), at `T_eff` 77 and 232 and `D` 2,000 and 6,000, for HS and Minnesota-EB: 37.3, 44.5, 71.7, 88.9 s (HS at 77/2,000, 232/2,000, 77/6,000, 232/6,000) and 17.4, 26.5,
+  32.2, 54.5 s (Minnesota-EB). A fit of `a + b·D`
+  to (wall − sweeps × ms per sweep) gives `a ≈ 8.1 s` per origin (an upper bound inside a backtest, where the
+  executables of a `T_pad` bucket compile once) and no per-draw term (`b ≈ −0.0005 s` per draw, the fit's sampling loop being
+  slightly cheaper than the `burn` executable).
+- **SSVS cannot fit the first 31 origins**: D-44's semiautomatic scales need `T_eff > k + n + 1 = 107` in the reduced
+  form at `n = 21, p = 4`, so 1980Q1–1987Q3 raise at fit ("SSVS(semiautomatic=True) scales by the flat-prior posterior
+  s.d., which needs more observations than coefficients (T = 77, needed > 107)"); the estimate counts its 129 feasible
+  origins. WP40's pre-registration has to decide this arm (`semiautomatic=False`, a later start for it, or not met).
+
+**Estimate** (`D` kept draws per chain, 4 chains):
+
+| `D` (kept draws per chain) | all arms one after another (device-hours) | slowest arm (DL, R2D2) | 8 arms side by side, single-threaded (wall) |
+| ---: | ---: | ---: | ---: |
+| 2,000 | 11.6 h | 2.0 h | 2.8 h |
+| 5,000 | 23.2 h | 4.3 h | 5.8 h |
+| **10,000** (D-35's SV default) | **42.5 h** | 8.0 h | **10.9 h** |
+| **20,000** (§2.4's D-58) | **81.1 h** | 15.4 h | **21.0 h** |
+| 50,000 | 197 h | 37.8 h | 51 h |
+
+Per origin: (1,000 sweeps at an arm's first origin, else 250, plus `D`) × ms per sweep, interpolated linearly in
+`T_eff` between the measured windows, plus `a`; "side by side" multiplies each arm by its measured contention ratio
+and takes the slowest. Not included: the persistent compilation cache's savings across buckets, and any rerun.
+
+- **At the budgets on the table**: 42.5 device-hours at the D-35 SV default (4 × 10,000), 81 at 4 × 20,000 (§2.4's
+  D-58), 197 at 4 × 50,000. The arms are independent, so they can run side by side as eight single-threaded processes
+  (`XLA_FLAGS="--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"`; with the default threading, side
+  by side processes collapse the reduced form, §7 item 13): measured contention 1.33–1.50 times, so **about 11 hours of
+  wall time at 4 × 10,000 and 21 hours at 4 × 20,000** on this machine.
+- **A documented quick configuration first** (Q26's recommendation): every 8th origin (20 origins), 4 × 2,000, cold
+  starts: 1.8 device-hours in all, 27 minutes of wall time with the arms side by side; every 4th
+  origin: 3.7 device-hours, 53 minutes.
+- **The budget does not buy convergence here.** At the GK size the GL arms do not pass the gate at 4 × 20,000 on real
+  data (§2.5: HS × SV split R-hat 1.55 on `B_own1`, NG × SV 1.30), and the families with GK's grid on `a` do not mix at
+  any ladder budget (§2.2). If §9.10's "beats" goes through `compare()`'s convergence rule (SPEC §9.5: "≥ 95% of
+  origins converged"), the GL criteria C1–C6 would fail on the gate whatever the budget, as Clark–Ravazzolo's
+  criterion 6 did before its budget was raised (`benchmarks/reports/clark_ravazzolo_preregistration.md`); WP40's
+  pre-registration has to state how the gate enters the verdicts before any of this compute is spent.
+
+---
+
+## 7. Findings
+
+Each is a measurement with its evidence; nothing was changed because of it (the brief: report, do not fix).
+
+1. **GK's grid on `a` makes NG, R2D2 and DL fits non-mixing (R18; Q23).** §2.3: the shrunk cross-lag groups sit at
+   the small end of the grid (`a ≈ 0.02–0.05`) with local variances `e^{−35}`–`e^{−100}`; `gl_a_idx` and
+   `mean_log_v` mix at 0.03–0.1 per 1,000 sweeps; the gate's slowest primary does not gain ESS with the run. With
+   `bayesianVARs`' fixed `a` (NG 0.1, DL 0.5) the same compositions pass at 5,000 and 2,000. Inputs for R18 (a move
+   for `(a_g, local scales)` jointly, or the fixed-`a` default) and for Q23, whose recommendation (GK's hyperpriors as
+   the defaults) these runs do not support as the samplers stand.
+2. **The production gate is blind to DL's group level (D-52; E179 row 308).** DL × SV passes at 4 × 20,000 at `n = 7`
+   with `gl_a_idx` and `mean_log_v` at split R-hat 1.3–1.8 (§2.3). D-52 gives DL no primary group quantity.
+3. **The horseshoe's cross-lag group scales mix slowly but finitely (R18; E163(c); E179 rows 311, 327).** `log ζ_g` of
+   the cross lags at lags 2–4: 5–10 per 1,000 sweeps at `n = 7`, 0.3–1.1 at `n = 20` where the DGP's cross lags are
+   near zero; HS × Constant passes at 4 × 20,000 and HS × SV at 4 × 50,000 at `n = 7`, neither at `n = 20` on the
+   ladder.
+4. **SSVS's indicators barely switch (E179 row 315).** `N1[g]` 0.04–2.5 per 1,000 sweeps; one chain keeps a different
+   inclusion pattern for 30,000 sweeps; no SSVS configuration passes on the ladder (§2.3).
+5. **CommonSV's level shift is its slowest direction and slows with `T` (R31; Q34; E170(b)).** `mean h` 10.8 → 3.6 per
+   1,000 sweeps on the shared-factor path from `T = 200` to `T = 600`, 4.5 → 0.56 on the per-equation program, where
+   `log λ_i` decides the budget (4 × 50,000 at `n = 7`; no pass at 4 × 20,000 at `T = 600`). §3.2.
+6. **The centred `σ_h² | h, ρ` step slows as `ρ → 1` (E169; E179 row 325).** 7.5 per 1,000 sweeps under row 325's
+   priors at `ρ ≈ 0.999`, against 20–38 elsewhere; at `n = 100` (BENCH-P3) `σ_h` and `ρ` fail the gate at 4 × 10,000
+   (§3.2, §5).
+7. **R29 does not show; R22 is far from its threshold.** The shared-factor `log λ_i` mix at 106 per 1,000 sweeps at
+   `q ≈ T` and 17 at `q = 500 > T = 300`; the `h` block acceptance is 0.54 at `T = 600`; no Newton cap was hit (§3.2,
+   §5). Q32 has no support from these runs.
+8. **The GL scale step is 6–50 times §10's estimate (E163(a) confirmed in kind).** 3.4 ms (HS) to 10–10.6 ms (R2D2,
+   DL) per sweep of 4 chains at `n = 20, p = 4`, 54–76% of the GL × `Constant` sweep; E163's loaded figures were
+   1.2–1.8 times these (§4.1).
+9. **E170(a)'s in-runner cost is not reproduced.** The conjugate CommonSV sweep costs the same in the runner's `burn`
+   loop as standalone (§4.2), against E170's 3.88 ms in `burn` and 1.52 ms standalone; the runner adds nothing on an
+   idle machine (the same for Minnesota × Constant, against the P2 figures E170 cites).
+10. **The D2 screen at `n = 100` does not run with the default runtime.** `StorageBudgetError` before sampling (5.3 GiB
+    stored at the default `store_max` against `Runtime.memory_budget_gb = 2`); with the budget raised it fits in about
+    2.5 minutes, two fifths of which come after the runner (diagnostics and storage, 4,950 of the 5,257 monitored
+    quantities the secondary `a_ij`), at a peak of 25–31 GiB resident (§5).
+11. **SSVS cannot fit GK's first 31 origins (§9.10; WP40).** D-44's semiautomatic scales need `T_eff > 107` in the
+    reduced form at `n = 21, p = 4`; 1980Q1–1987Q3 have `T_eff` 77–107 (§6).
+12. **The GL arms of the GK run do not pass the gate at a default budget (§9.10; WP40; Q31).** §2.5, §6: at `n = 21`
+    on real data HS × SV and NG × SV fail at 4 × 20,000 with split R-hat 1.55 and 1.30 on `B_own1`; with SPEC §9.5's
+    "≥ 95% of origins converged" in `compare()`, the GK criteria would be decided by the gate.
+13. **XLA's default threading collapses the reduced-form sweep under contention.** At `n = 21` (reduced × SV), with the
+    machine oversubscribed (1-minute load 23–37: other sessions' tests and this pilot's mixing workers), the `burn`
+    executable ran at 400–485 ms per sweep (Minnesota-EB), 810–850 ms (HS) and 1,210–1,250 ms (SSVS) with XLA's
+    default intra-op threading, against 29–38 ms for HS single-threaded within the same half hour; on a quiet machine the two
+    agree (HS 9.5–12.3 ms, Minnesota-EB 4.1–7.3 ms either way). The structural HS × `Constant` sweep at `n = 20` was not
+    affected (about 18–21 ms both ways at a load of about 30). The engine runs BLAS single-threaded
+    (`engines.mcmc._blas.single_thread`) but leaves XLA's intra-op pool at the machine's core count, so several MCMC
+    processes side by side (the GK arms, a backtest with `n_jobs`, a shared CI runner) can slow the reduced form by
+    20–100 times. (Scratch measurements of `phase3_gk.py` during the mixing campaign, 15:54–17:22; not part of §6.)
+    Reported, not changed.
+14. **Clean timings of the GL kernels need a quiet machine, not only a low load average.** On this M5 Max (6
+    performance, 12 efficiency cores), round 1 of the cost campaign, with another session's job holding about one core,
+    measured the GL scale step and the deviation-path equation phase 1.4–1.6 times slower than round 2, while the
+    Minnesota and CommonSV sweeps agreed within 3% between the rounds; the HS × SV sweep costs the same after 500 and
+    after 11,000 sweeps (7.40 and 7.42 ms; R2D2 × `Constant` 13.40 and 13.60 ms), so the difference is the machine,
+    not the chain's state. Presumably the GL kernels' elementwise work, spread over XLA's intra-op threads, lands
+    partly on efficiency cores when a performance core is taken (not checked: core placement needs `powermetrics`). Repeated rounds and their minima are the clean figure (§4).
+
+---
+
+## 8. Decisions and open choices for the owner
+
+| Item | What WP36 recommends | Evidence |
+| :--- | :--- | :--- |
+| D-58 (Q21): the GL default budget | **4 × 20,000** kept draws for every GL composition, stated as what it is: the smallest ladder budget at which the median HS × `Constant` fit (and DL × SV, and the Minnesota × SV reference) passes at `n = 7`; it does not make NG, R2D2, DL × `Constant` or SSVS converge at any ladder budget, nor HS at `n = 20`. The alternatives: keep D-35's defaults and accept `converged = False`, or 4 × 50,000 (HS × SV's answer at `n = 7`) | §2.4 |
+| Q23 / R18: GK's grid on `a` as the default hyperprior | Not decided here; the runs show the grid, not the families, makes NG and DL non-mixing (fixed `a`: 5,000 and 2,000) | §2.3, §7 item 1 |
+| D-52: no primary group quantity for DL | A design question: the gate passes DL × SV fits whose group level has split R-hat 1.3–1.8 | §2.3, §7 item 2 |
+| Q34: CommonSV interweaving shift move | Supported: the level shift is CommonSV's slowest direction, sets the per-equation program's budget (4 × 50,000 at `n = 7`) and slows with `T` | §3.2 |
+| Q32: a collapsed `λ_i` draw | Not supported: R29 does not show at `q ≈ T` or `q = 500 > T` | §3.2, §5 |
+| Q26: compute for the GK run | 42.5 device-hours at 4 × 10,000, 81 at 4 × 20,000, 197 at 4 × 50,000 (one device, arms in sequence), about 11 h and 21 h of wall time with the eight arms side by side as single-threaded processes; a quick configuration first (every 8th origin, 4 × 2,000: 1.8 device-hours) | §6 |
+| WP40's pre-registration | Three things to settle before any score: the SSVS arm on the first 31 origins (D-44's `T_eff > 107`); how the convergence gate enters "beats" (the GL arms do not pass it at `n = 21`); and single-threaded XLA when arms run side by side | §6, §7 items 11–13 |
+| The D2 screen's default runtime at `n = 100` | The default `Runtime.memory_budget_gb = 2` stops it before sampling; a documentation or default question | §5 |
+
+## 9. Not measured here (and why)
+
+- **x86 and a second Apple machine**: only this M5 Max was available (as in Phase 2's pilot). The P-core/E-core
+  sensitivity (§7 item 14) is specific to heterogeneous CPUs.
+- **More than one seed at `n = 21`**: the GK transfer check (§2.5) is one seed per arm at 4 × 20,000 (its failures
+  are far from the gate: split R-hat 1.30–1.55).
+- **R2D2 and SSVS with the grid or the spike/slab replaced** (only NG and DL were isolated with a fixed `a`): R2D2 shares
+  the grid mechanism; SSVS's slow quantity is the indicator, which a different `c0`/`c1` would change, a prior choice.
+- **The GK run's end-to-end backtest** (warm starts across 160 origins): §6 composes it from measured per-sweep and
+  per-origin costs; WP40's quick configuration measures it.
+- **Multi-device runs** (`set_cpu_devices`, `shard_map`): not part of WP36's items; P2 measured 1.6–1.7× at BENCH-P2.
