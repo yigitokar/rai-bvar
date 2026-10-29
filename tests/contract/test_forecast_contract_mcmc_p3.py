@@ -13,9 +13,10 @@ shared ``sim_data``.
 **Compositions** (:data:`COMPOSITIONS_P3`): each global-local family and SSVS in both forms
 (structural Mode I × ``Constant("ig")`` and reduced × ``SV``), the horseshoe with
 ``Constant("iw_equivalent")``, ``SV(outliers=True)``, ``SV`` (structural) and reduced ×
-``Constant("ig")``, SSVS × ``SV``, and ``CommonSV`` with the conjugate prior (the shared-factor
-path; also with its parity options and interior blocks), structural Mode I, the reduced form,
-and × HS and × NG. The fast tier (§9.11) fits the three §9.11 names: structural × SV × HS,
+``Constant("ig")``, SSVS and NG × ``SV`` (NG at §9.4 row 319's fixed ``a = 0.5, b = 10,
+c = 0.005``, the fixed-``a`` path), and ``CommonSV`` with the conjugate prior (the shared-factor
+path; also with its parity options and interior blocks), structural Mode I, the reduced form, and
+× HS and × NG. The fast tier (§9.11) fits the three §9.11 names: structural × SV × HS,
 conjugate × ``CommonSV`` and structural × ``CommonSV``; every other composition is ``slow``
 (weekly).
 """
@@ -77,6 +78,10 @@ COMPOSITIONS_P3 = {
     ),
     "structural-SV(outliers)-HS": (rb.Horseshoe(form="structural"), SV(outliers=True)),
     "structural-SV-SSVS": (rb.SSVS(form="structural"), SV()),
+    "structural-SV-NG": (  # §9.4 row 319 exactly (E93): a fixed, so only the ξ_g line runs
+        rb.NormalGamma(form="structural", a=0.5, b=10.0, c=0.005),
+        SV(),
+    ),
     "reduced-SV-HS": (rb.Horseshoe(form="reduced"), SV()),
     "reduced-SV-NG": (rb.NormalGamma(form="reduced"), SV()),
     "reduced-SV-R2D2": (rb.R2D2(form="reduced"), SV()),
@@ -139,6 +144,10 @@ def test_composition_is_the_phase3_one(composition, model, fitted):
         assert st.mean.const_path != "shared_factor"
     form = "reduced" if composition.startswith("reduced") else "structural"
     assert st.mean.kind == f"linear_{form}"
+    if st.coef.varies:  # the global-local or SSVS kind, and a fixed a where the prior fixes it
+        assert st.coef.kind == prior.kind, composition
+        if isinstance(getattr(prior, "a", None), float):
+            assert st.coef.a_grid == 0, composition
 
 
 # Phase 2's invariants, unchanged, with this module's fixtures

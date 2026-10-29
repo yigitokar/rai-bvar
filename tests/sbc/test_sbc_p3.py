@@ -8,7 +8,11 @@ models are ``sbc_p3.py``'s. Here:
 * ``test_quantity_selection_p3`` (PR): every row has a joint model of the right kind (exogenous:
   the row itself, no predictive; lagged: ``y_{T+1}``, and ``h_{T+1}`` with SV); the quantities are
   the §9.5 ones (the GL and CommonSV test functions, ``W``, the log-likelihoods, ``log p(θ)``)
-  without data functions, squares or cross-products; the shard files cover every row once;
+  without data functions, squares or cross-products; the shard files cover every row once; and
+  the configuration is the registered one (P2 §9.6; Q44, E179): ``SBC_CONFIG``, ``SEED``, the eight
+  ``t_max = 400`` overrides and each row's ``SBCConfig``, its gate values included;
+* ``test_run_sbc_runs_the_registered_config`` (PR): ``run_sbc`` itself hands ``sbc_sequential``
+  that configuration for every row (both stubbed, so no SBC runs);
 * ``test_truth_and_forecast_core_are_the_same_map_p3`` (weekly, beside the SBC it guards): the
   truth ``ỹ_{T+1}`` of the references equals the production ``simulate_paths`` at the same
   ``(θ, log λ_eff,T+1, ε)`` (1e-12), for a CommonSV row of each form and a lagged GL row, and the
@@ -16,6 +20,8 @@ models are ``sbc_p3.py``'s. Here:
 """
 
 from __future__ import annotations
+
+import os
 
 import jax
 import jax.numpy as jnp
@@ -27,8 +33,10 @@ from sbc_p3 import (
     BY_ID,
     NOT_MET_ROWS,
     SBC_CONFIG,
+    SBC_N,
     SBC_OVERRIDES,
     SBC_ROWS,
+    SEED,
     CommonSVPredictiveJoint,
     reference_next_common,
     sbc_model,
@@ -36,18 +44,40 @@ from sbc_p3 import (
 
 from rai_bvar.validation.joint import COMPOSITIONS_P3, LAGGED_P3, JointSpecP3, composition_id
 from rai_bvar.validation.reference import effective_log_var, state_log_var
-from rai_bvar.validation.sbc import SBCResult
+from rai_bvar.validation.sbc import SBCConfig, SBCResult
 
 pytestmark = pytest.mark.filterwarnings("error:Explicitly requested dtype")
 
 
+T_MAX_400 = (304, 306, 308, 311, 315, 325, 326, 327)
+
+
+def _registered_config(row: int) -> SBCConfig:
+    """Row ``row``'s registered SBC configuration (P2 §9.6; Q44, E179), every field that sets a
+    result spelled out: thinning ``⌈2·IAT⌉``, ``max|ỹ| < 1e3``, ESS ``≥ 0.8·L`` in ``≥ 99%`` of the
+    replications, the pooled gate's ``n = 40`` (only ``rep_block``, which bounds memory, is left
+    to its default)."""
+    return SBCConfig(N=SBC_N, L=99, burn=300, pilot=1000, alpha=1e-2, seed=20261026,
+                     t_max=400 if row in T_MAX_400 else 200, iat_factor=2.0, max_abs_data=1e3,
+                     min_ess=0.8, ess_coverage=0.99, pooled_min_reps=40)  # fmt: skip
+
+
 def test_quantity_selection_p3():
-    """Joint-model kinds, quantities and shard coverage (module docstring)."""
+    """Joint-model kinds, quantities, shard coverage and the registered configuration
+    (``SBC_CONFIG``, ``SEED``, the eight Q44 overrides, each row's ``SBCConfig``; module
+    docstring)."""
     rows = [r for shard in SBC_ROWS.values() for r in shard]
     assert sorted(rows) == list(range(301, 331))  # every row in exactly one shard file
-    # Q44, E179: t_max = 400 for exactly these eight rows, nothing else changed; 200 elsewhere
-    assert SBC_CONFIG["t_max"] == 200
-    assert SBC_OVERRIDES == {r: {"t_max": 400} for r in (304, 306, 308, 311, 315, 325, 326, 327)}
+    # Q44, E179: P2 §9.6's configuration and seed; t_max = 400 for exactly these eight rows,
+    # nothing else changed, 200 elsewhere (run_sbc's own use is the next test's)
+    from sbc_p3_run import sbc_config
+
+    assert SBC_CONFIG == {"L": 99, "burn": 300, "pilot": 1000, "t_max": 200, "alpha": 1e-2}
+    assert SEED == 20261026
+    assert SBC_OVERRIDES == {r: {"t_max": 400} for r in T_MAX_400}
+    assert SBC_N == int(os.environ.get("RAI_BVAR_SBC_N", "1000"))  # 1000 unless a local smoke run
+    for r, nm in BY_ID.items():
+        assert sbc_config(nm) == _registered_config(r), r
     lagged = {r for r, nm in BY_ID.items() if nm in LAGGED_P3}
     assert lagged == {316, 319, 320, 321, 322, 323, 325, 329, 330}
     kinds = {}
@@ -75,6 +105,32 @@ def test_quantity_selection_p3():
             assert any(".coef.small_dev[" in k for k in names), r
     assert kinds == {301: "JointSpecP3", 316: "PredictiveJoint", 320: "CommonSVPredictiveJoint"}
     assert len(COMPOSITIONS_P3) == 30
+
+
+class _Stop(Exception):
+    """Raised by the stubbed ``sbc_sequential`` once it has its arguments."""
+
+
+def test_run_sbc_runs_the_registered_config(monkeypatch):
+    """``run_sbc`` hands ``sbc_sequential`` the registered configuration of every row and nothing
+    else (module docstring); ``sbc_model`` and ``sbc_sequential`` are stubbed, so no SBC runs."""
+    import sbc_p3_run
+
+    stub = (object(), object(), ("q0",))
+    calls = []
+
+    def sequential(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise _Stop
+
+    monkeypatch.setattr(sbc_p3_run, "sbc_model", lambda name, size: stub)
+    monkeypatch.setattr(sbc_p3_run, "sbc_sequential", sequential)
+    for r, nm in BY_ID.items():
+        with pytest.raises(_Stop):
+            sbc_p3_run.run_sbc(nm, lambda *a: None)
+        args, kwargs = calls.pop()
+        assert args == (*stub, _registered_config(r)) and kwargs == {}, r
+    assert not calls
 
 
 @pytest.mark.slow
@@ -198,6 +254,7 @@ _STAGE2 = {"stage": 2, "q": [0.05, 0.0]}  # the continue band, then a stage-2 fa
         (325, _stage([_POOLED_325], row=325), _STAGE2, "fail"),  # a later stage
         (308, _stage([_POOLED_308], min_p=0.05 / 90), _STAGE1, "fail"),  # γ in the continue band
         (308, _stage([_POOLED_308], min_p=0.151 / 90), _STAGE1, "fail"),  # γ in (γ, γ + β₁]
+        (308, _stage([_POOLED_308], min_p=0.16 / 90), _STAGE1, "xfail"),  # γ just above γ + β₁
         (308, _stage([_EMPTY]), _STAGE1, "fail"),  # a reason of another kind
         (308, _stage([_EMPTY, _POOLED_308]), _STAGE1, "fail"),  # another kind beside pooled
         (325, _stage((), row=325, checks_ok=False), _STAGE1, "fail-empty"),  # failed, no reason

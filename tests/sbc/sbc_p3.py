@@ -7,7 +7,11 @@ the predictive ``y_{T+1}`` through the production forecast core (exogenous rows 
 
 * **exogenous rows** (D-56): the row's ``JointSpecP3`` itself, its quantities the SBC selection of
   Phase 2 (``sbc_models.keep_quantity``: every test function except data functions, squares and
-  cross-products, which are moment devices or constant given ``y``);
+  cross-products, which are moment devices or constant given ``y``). So the SBC also leaves out the
+  joint test function ``a_g·log ξ_g`` that §9.4 names on the grid rows 304, 306 and 326
+  (``glob.coef.a*log_xi[g]``; its factors ``a_idx[g]`` and ``log_xi[g]`` are ranked), and
+  CommonSV's ``ρ·log σ_h``: both are cross-product moment devices, Geweke-only (M35's catcher is
+  G on rows 304 and 306, §9.6);
 * **lagged rows without CommonSV** (316, 319, 330): Phase 2's ``sbc_models.PredictiveJoint``
   unchanged (``y_{T+1}`` and, with SV, ``h_{T+1}``);
 * **lagged CommonSV rows** (320–323, 325, 329): :class:`CommonSVPredictiveJoint`. Phase 2's
