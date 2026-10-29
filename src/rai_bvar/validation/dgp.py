@@ -297,6 +297,14 @@ class Row:
     # never labels it registered
     preregistration: str | None = None
 
+    def __post_init__(self) -> None:
+        path = self.preregistration
+        if path is not None and not (isinstance(path, str) and path.strip()):
+            raise ValueError(
+                f"row {self.name!r}: preregistration must be None or a repository path, "
+                f"not {path!r}"
+            )
+
 
 _C, _SV, _SVO = "Linear × Constant", "Linear × SV", "Linear × SV(outliers)"
 
@@ -391,7 +399,7 @@ def row_status(row: Row) -> str | None:
     """``None`` when the row runs by default (this build can run it and it is pre-registered),
     else why it is pending."""
     missing = row_missing(row)
-    if row.preregistration is None:
+    if not row.preregistration:
         missing.append("a pre-registration")
     if missing:
         return f"pending (Phase {row.phase}): needs {', '.join(missing)}"
