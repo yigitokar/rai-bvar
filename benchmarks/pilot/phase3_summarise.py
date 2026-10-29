@@ -213,19 +213,49 @@ def fields_markdown(summary: dict[str, Any], size: str, csv: bool = False) -> st
 
 
 def cost_summary(costs: list[dict[str, Any]]) -> dict[str, Any]:
-    out = {}
+    """Per configuration and block, over every round (repeated cost runs): the clean block with
+    the lowest time if there is one, else the lowest contaminated one (an upper bound); with the
+    number of rounds and of clean rounds."""
+    out: dict[str, Any] = {}
     for c in costs:
         key = f"{c['size']}/{c['config']}" + (
             f"/{c['const_path_setting']}" if c.get("const_path_setting", "auto") != "auto" else ""
         )
-        out[key] = {
-            name: {"ms_min": b["ms_min"], "ms_median": b["ms_median"],
+        cur = out.setdefault(key, {"_static": c.get("static", {})})
+        for name, b in c["blocks"].items():
+            row = {"ms_min": b["ms_min"], "ms_median": b["ms_median"],
                    "contaminated": bool(b.get("contaminated")),
-                   "load": [b["load_before"]["loadavg"][0], b["load_after"]["loadavg"][0]]}
-            for name, b in c["blocks"].items()
-        }  # fmt: skip
-        out[key]["_static"] = c.get("static", {})
+                   "load": [b["load_before"]["loadavg"][0], b["load_after"]["loadavg"][0]]}  # fmt: skip
+            old = cur.get(name)
+            rounds = (old or {}).get("rounds", 0) + 1
+            clean = (old or {}).get("clean_rounds", 0) + (not row["contaminated"])
+            better = old is None or (
+                (old["contaminated"], old["ms_min"]) > (row["contaminated"], row["ms_min"])
+            )
+            cur[name] = {**(row if better else old), "rounds": rounds, "clean_rounds": clean}
     return out
+
+
+def costs_markdown(costs: dict[str, Any]) -> str:
+    """ms per call of 4 chains (``vmap``): the equation phase, every global step, and the
+    standalone, scanned and in-runner sweep; ``*`` marks a contaminated block (an upper bound)."""
+    cols = ("equation_phase", "steps", "sweep_standalone", "sweep_scan", "sweep_burn")
+    rows = ["| configuration | path | equation phase | global steps | sweep, standalone | "
+            "sweep, scanned | sweep, in `burn` |", "| :--- | :--- |" + " ---: |" * 5]  # fmt: skip
+    for key, blocks in sorted(costs.items()):
+        size, config, *_cp = key.split("/")
+
+        def ms(b: dict[str, Any]) -> str:
+            return f"{b['ms_min']:.2f}" + ("*" if b["contaminated"] else "")
+
+        steps = "; ".join(
+            f"{n.split(':')[2]} {ms(b)}" for n, b in blocks.items() if n.startswith("step:")
+        )
+        path = re.search(r"const_path='(\w+)'", blocks["_static"].get("mean", ""))
+        cells = [ms(blocks[c]) if c in blocks else (steps or "—") for c in cols]
+        rows.append(f"| `{config}` ({size}) | {path.group(1) if path else ''} | "
+                    + " | ".join(cells) + " |")  # fmt: skip
+    return "\n".join(rows)
 
 
 # --------------------------------------------------------------------------- Q26
@@ -239,11 +269,17 @@ def q26(gk_sweeps: list[dict[str, Any]], gk_origins: list[dict[str, Any]],
     cold (``burn``), the others warm-started (``warm_burn``). ms per sweep is interpolated
     linearly in ``T_eff`` between the measured windows; the per-origin cost beyond the sweeps
     (``overhead(D) = a + b·D``) is fitted to the end-to-end origin timings."""
-    sweeps: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    best: dict[tuple[str, int], float] = {}
     for doc in gk_sweeps:
+        if doc.get("machine", {}).get("xla_flags", ""):  # default XLA threading only
+            continue
         for r in doc["sweeps"]:
             if "error" not in r:
-                sweeps[r["arm"]].append((r["T_eff"], r["ms_per_sweep_min"]))
+                k = (r["arm"], r["T_eff"])
+                best[k] = min(best.get(k, math.inf), r["ms_per_sweep_min"])
+    sweeps: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    for (arm, T), v in sorted(best.items()):
+        sweeps[arm].append((T, v))
 
     def ms(arm: str, T: int) -> float:
         pts = sorted(sweeps[arm])
@@ -311,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
             md.append(f"### {size}: ESS per 1,000 sweeps (GL)\n\n" + fields_markdown(mix, size))
             md.append(f"\n### {size}: ESS per 1,000 sweeps (CommonSV)\n\n"
                       + fields_markdown(mix, size, csv=True) + "\n")  # fmt: skip
+    if costs:
+        md.append("### costs\n\n" + costs_markdown(costs) + "\n")
     text = "\n".join(md)
     if args.md:
         args.md.write_text(text)

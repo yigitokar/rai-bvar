@@ -7,7 +7,9 @@ device, 4 chains × 10,000 kept draws after 1,000 burn-in sweeps, ``thin = 1``):
 * ``commonsv_n100``: the conjugate CommonSV screen (D2, P3 §5.3),
   ``Linear(Minnesota(form="conjugate", hierarchy="fixed")) × CommonSV()`` at ``n = 100, p = 4,
   T = 300`` on ``simulate_var_sv(100, 4, 300, seed = 0)`` (BENCH-P2's generator at ``n = 100``);
-  the shared-factor path, ``q = 500`` (so also R29's ``q > T`` regime);
+  the shared-factor path, ``q = 500`` (so also R29's ``q > T`` regime), with
+  ``Runtime(memory_budget_gb=8)``: its stored draws need 5.3 GiB at the default ``store_max``,
+  above the default 2 GiB budget (``MEMORY_BUDGET_GB``);
 * ``hs_sv_bp2``: ``Linear(Horseshoe()) × SV()`` at the BENCH-P2 shape and data (``n = 20, p = 4,
   T = 300``);
 * ``bench_p2``: BENCH-P2 itself (``benchmarks/phase2_perf.py``'s model and data), run in the same
@@ -145,6 +147,21 @@ def case_model(case: str, *, draws: int, burn: int, quick: bool = False) -> Any:
     raise ValueError(f"unknown case {case!r}")
 
 
+#: ``commonsv_n100`` stores 5.3 GiB at the default ``store_max = 2500`` (monitor 1.6 GiB, params
+#: 3.7 GiB), above the default ``Runtime.memory_budget_gb = 2``: the D2 screen at its headline size
+#: does not run with the default runtime (``StorageBudgetError`` before sampling). BENCH-P3 keeps the
+#: model (4 × 10,000 kept draws, the default ``store_max``) and raises the runtime's budget.
+MEMORY_BUDGET_GB = {"commonsv_n100": 8.0}
+
+
+def case_runtime(case: str) -> Any:
+    import rai_bvar as rb
+
+    if case in MEMORY_BUDGET_GB:
+        return rb.Runtime(memory_budget_gb=MEMORY_BUDGET_GB[case])
+    return rb.Runtime()
+
+
 # --------------------------------------------------------------------------- one run (child)
 
 
@@ -209,7 +226,7 @@ def run_child(args: argparse.Namespace) -> dict[str, Any]:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         t0 = time.perf_counter()
-        fit = model.fit(data, runtime=rb.Runtime())
+        fit = model.fit(data, runtime=case_runtime(args.case))
         wall = time.perf_counter() - t0
     after = load_snapshot()
     timing = dict(fit.timing)
@@ -224,6 +241,7 @@ def run_child(args: argparse.Namespace) -> dict[str, Any]:
         "runner_timing": timing,
         "runner_ms_per_sweep": float(timing.get("ms_per_sweep", float("nan"))),
         "converged": bool(fit.converged),
+        "runtime": repr(case_runtime(args.case)),
         "warnings": sorted({str(w.message).splitlines()[0][:160] for w in caught}),
         "static": {
             "mean": repr(fit.static.mean),
