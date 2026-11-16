@@ -50,6 +50,9 @@ On the 2026-09 vintage `res.verdict()` returned `better` at both horizons (Apple
 
 ## Development
 
+[CONTRIBUTING.md](CONTRIBUTING.md) explains the reference codes used in the code (`D-35`, `E175`, `WP36`)
+and what a pull request has to show.
+
 ```bash
 uv sync --group dev
 uv run pytest                                       # fast suite (what CI runs on every PR)
