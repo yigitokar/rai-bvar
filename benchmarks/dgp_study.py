@@ -115,7 +115,8 @@ REGISTERED_CONFIGS = ("pilot", "full")
 
 def git_state() -> dict[str, Any]:
     """The commit (``git rev-parse HEAD``), whether tracked files differ from it, and the SHA-256
-    of ``git diff HEAD`` when they do (as ``benchmarks/clark_ravazzolo.py``)."""
+    of ``git diff HEAD`` when they do (as ``benchmarks/clark_ravazzolo.py``). ``git_dirty`` is
+    ``None`` when git cannot report the tree's state, also where it can still read the commit."""
     import hashlib
 
     def git(*args: str) -> bytes:
@@ -125,10 +126,14 @@ def git_state() -> dict[str, Any]:
 
     try:
         commit = git("rev-parse", "HEAD").decode().strip()
+    except (OSError, subprocess.CalledProcessError):
+        return {"git_commit": "unknown", "git_dirty": None, "git_diff_sha256": None}
+    dirty: bool | None
+    try:  # the commit can be readable while the tree's state is not (an unreadable index)
         dirty = bool(git("status", "--porcelain", "--untracked-files=no").strip())
         diff = hashlib.sha256(git("diff", "HEAD")).hexdigest() if dirty else None
     except (OSError, subprocess.CalledProcessError):
-        return {"git_commit": "unknown", "git_dirty": None, "git_diff_sha256": None}
+        dirty, diff = None, None
     try:
         git("cat-file", "-e", f"HEAD:{PREREGISTRATION}")
         prereg = True

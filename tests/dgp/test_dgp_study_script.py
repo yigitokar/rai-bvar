@@ -599,6 +599,26 @@ def test_git_state_of_this_checkout(study):
         assert len(state["git_commit"]) == 40
 
 
+def test_git_state_with_an_unreadable_index(study, monkeypatch, capsys, tmp_path):
+    """The real ``git_state`` where ``git status`` fails and ``git rev-parse`` works (an index
+    file git cannot read): the commit is kept, the tree's state is unknown, and a registered run
+    is refused for that reason before it writes anything."""
+    commit = study.git_state()["git_commit"]
+    if commit == "unknown":
+        pytest.skip("not a git checkout")
+    index = tmp_path / "index"
+    index.write_text("not an index\n")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(index))
+    state = study.git_state()
+    assert state["git_commit"] == commit
+    assert state["git_dirty"] is None and state["git_diff_sha256"] is None
+    out = tmp_path / "new" / "study"
+    with pytest.raises(SystemExit):
+        study.main([str(out), "--config", "pilot", "--workers", "1"])
+    assert "git could not report whether tracked files differ from HEAD" in capsys.readouterr().err
+    assert not (tmp_path / "new").exists()
+
+
 @pytest.mark.slow
 @pytest.mark.filterwarnings("ignore::UserWarning")  # tiny chains: every SV fit misses the gate
 def test_smoke_config_runs_end_to_end(study, monkeypatch, tmp_path):
