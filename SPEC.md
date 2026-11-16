@@ -1,6 +1,6 @@
 # `rai-bvar`: Technical Architecture & Engineering Specification
 
-**Version:** 2.3 (revision of v1) · **Status:** Draft; decisions D1–D5 settled (§14); Phases 0–2 delivered (§13) · **Date:** 2026-10-24
+**Version:** 2.3 (revision of v1) · **Status:** Draft; decisions D1–D6 settled (§14); Phases 0–2 delivered (§13) · **Date:** 2026-10-24
 
 ---
 
@@ -122,7 +122,7 @@ Not a reference: `bayesm` (Rossi's Bayesian marketing/micro-econometrics package
 
 **R3. One predictive contract.** Analytic and MCMC models return the same `ForecastResult` (§7). Evaluation and structural analysis never depend on how a model was estimated.
 
-**R4. Numerical rules.** No explicit inverses, float64 everywhere (JAX defaults to float32; one documented exception inside `bartz`), precision-based samplers, log-space densities (§8).
+**R4. Numerical rules.** No explicit inverses, float64 everywhere (JAX defaults to float32; one documented exception, the `bartz` sub-state of the BART block), precision-based samplers, log-space densities (§8).
 
 **R5. Clean-room implementation** (§2.1).
 
@@ -408,7 +408,7 @@ $$
 - **SV states.** Log-volatility paths have a banded (tridiagonal) precision, so they are sampled in `O(T)` with a precision sampler (Rue 2001; Chan & Jeliazkov 2009; McCausland, Miller & Pelletier 2011), the method Kastner & Frühwirth-Schnatter (2014) call "all without a loop" (AWOL). No Kalman-filter loops for SV.
 - **Mixture approximation.** `log ε²` is approximated by the 10-component mixture of Omori, Chib, Shephard & Nakajima (2007), an extension of Kim, Shephard & Chib (1998). The offset added before taking logs is documented and tested.
 - **ASIS** (Kastner & Frühwirth-Schnatter 2014) interweaves the centred and non-centred parametrisations of the SV parameters.
-- **float64.** The MCMC engine calls `jax.config.update("jax_enable_x64", True)` on import, and tests assert dtypes. JAX defaults to float32. **One documented exception:** `bartz` computes and samples leaf full conditionals in float32 even with x64 enabled. This is confined to the BART block, and its Geweke and SBC tests must pass with it.
+- **float64.** The MCMC engine calls `jax.config.update("jax_enable_x64", True)` on import, and tests assert dtypes. JAX defaults to float32. **One documented exception:** the `bartz` sub-state of the BART block is float32. `bartz` (0.7.0 to 0.13.0) does not trace under `jax_enable_x64`, so the adapter traces it with x64 switched off; its residuals, precision scales, caches and leaves are float32, and everything outside the sub-state stays float64 (D6; `docs/phase4/SPIKE.md` §Q2). The BART block standardises each equation's target per estimation window, because the float32 leaf error grows with the level the trees have not fitted relative to the noise (at most 2·10⁻⁴ posterior s.d. within 10 noise s.d.). The block's Geweke and SBC tests must pass with it.
 - **Log space.** Densities are evaluated in log space; mixtures use `logsumexp`.
 - **Positive-definiteness by construction.** Covariances come from triangular factors with positive diagonals. Adding silent jitter is forbidden; a failed Cholesky raises with diagnostics (condition number, offending block).
 - **Randomness.** JAX keys are split deterministically per (chain, iteration, block, equation); the analytic engine uses a NumPy `Generator`. The same seed gives bitwise-identical results on the same platform and versions, with the same chain count and device count. The keys are prefix-stable, so chain `c` consumes the same random numbers whatever the number of chains, but a run with another chain count or on several devices (`shard_map`) equals the reference run only to rounding: XLA vectorises the SV and CCCM reductions differently for another batch size, and over a long run a last-bit difference can flip an accept/reject decision, after which the chains agree only in distribution (DESIGN §5.2, §5.6). Sharding is therefore opt-in.
@@ -587,7 +587,7 @@ Size (false `better` rate on null DGPs) and power are reported in the documentat
 | :--- | :--- | :--- |
 | Analytic engine | `numpy`, `scipy.linalg`, `scipy.optimize` | float64 |
 | MCMC engine | `jax` (x64 enabled) | Hand-written Gibbs; `lax.scan` over iterations; `vmap` over chains and equations |
-| BART | `bartz` (MIT, JAX, pre-1.0) | Low-level `mcmcstep` / `mcmcloop` API with per-observation `error_scale`. Version pinned behind an adapter; gated by the Phase 4 spike (§13); fallback is an in-house JAX BART |
+| BART | `bartz` (MIT, JAX, pre-1.0) | Low-level `mcmcstep` / `mcmcloop` API with per-observation `error_scale`. An adapter around an exactly pinned version (`bartz==0.13.0`; D6, decided after the Phase 4 spike, §13). The adapter's bitwise suite is re-run on every version bump |
 | Containers | `xarray.DataTree` (core since xarray 2024.10) | Posterior and forecast storage; the native format of ArviZ 1.x |
 | Diagnostics | in-repo NumPy (`rai_bvar.diagnostics`; DESIGN D-24) | R-hat, bulk/tail/mean ESS, MCSE of means and quantiles, tested against ArviZ reference values; ArviZ is not a dependency. `arviz-stats` remains the plan for PSIS-LFO-CV (§9.4, Phase 4) |
 | Scores | `scoringrules` (Apache-2.0) | CRPS, threshold-weighted CRPS, energy and variogram scores (§9.2) |
@@ -744,6 +744,8 @@ CI: the fast suite is green on the merged Phase 2 commits (`3802295`, `08e1eda`,
   3. Is a fixed error precision (`Wishart(value=...)`, which skips the σ update) the right hook to leave volatility entirely to `rai-bvar`'s SV block?
 
   If any answer is no, decide between a fork and an in-house JAX BART before continuing.
+
+  **Outcome (D6, owner, 2026-11-16).** The spike (`docs/phase4/SPIKE.md`) answers yes to all three. The block is an adapter around a pinned `bartz`; no fork and no in-house JAX BART. Its conditions are the float32 sub-state and the per-window standardisation of §8, an exact pin, and a CI job that installs the `bart` extra and runs the adapter's suite.
 - `BART` mean block, GIRFs with common random numbers, PSIS-LFO screening.
 
 **Exit:** DGP power test (threshold DGP) and false-positive test (linear-SV DGP) pass (their rows are declared as pending in `rai_bvar.validation.dgp.ROWS`, §10.5); qualitative replication of Clark et al. (2023).
@@ -766,7 +768,7 @@ CI: the fast suite is green on the merged Phase 2 commits (`3802295`, `08e1eda`,
 
 | Risk | Mitigation |
 | :--- | :--- |
-| `bartz` embedding relies on undocumented `State` fields; pre-1.0 API; float32 leaf updates | Phase 4 spike; adapter with a pinned version; upstream a public setter; fallback in-house JAX BART (significant effort, budget accordingly) |
+| `bartz` embedding relies on undocumented `State` fields; pre-1.0 API; a float32 sub-state | Decided by the Phase 4 spike (D6): an adapter with an exact pin; the adapter's bitwise suite runs in CI with the `bart` extra and on every version bump; a public setter is to be requested upstream (drafts in `docs/phase4/SPIKE.md` §5.2, not filed). The fields the setter writes changed at 4 of the 5 minor releases from 0.7 to 0.12, so a bump is a reviewed change. An in-house JAX BART remains the fallback if a release cannot be adapted |
 | Overlap with emerging Python projects (Bank of England `bvar`, Chan's toolkit port, `bvhar`) | Differentiate on the ablation/verdict engine, factorial composition and validation (§1.4); reuse MIT code where it helps; consider interop or contributing instead of duplicating |
 | Backtest compute cost (grid × origins × chains) | Caching, warm starts, `estimate_cost()`, analytic models as a first screen |
 | Variable-ordering dependence | R8, ordering-sensitivity check, order-invariant models in Phase 5 |
@@ -786,6 +788,7 @@ The Phase 2 implementation decisions (D-1…D-35) and open questions (Q1…Q14; 
 | D3 | Default Minnesota form for MCMC models | **Structural**, with the prior mean of `γ_i` centred on `a_i` so the reduced-form prior mean is preserved (§4.1) | Equations stay independent and parallel; `Linear` and `BART` share one structural treatment of `a_i`, keeping the mean-axis ablation clean; Chan (2022) gives an analytic twin. `form="reduced"` (CCCM 2022) remains available |
 | D4 | Reference datasets | **FRED-QD + FRED-MD**, small / medium / large sets, downloaded on demand with pinned vintages (§5.8) | Literature standard (GLP, CCM, Clark-Ravazzolo); not bundled because of third-party copyrights; fixtures use federal-agency series only |
 | D5 | Relationship with the Bank of England `bvar` | **Build our own analytic engine; use BoE `bvar` as a Python-side parity oracle in CI** | The conjugate model is the baseline of every ablation, so its contract (conditional moments), MH over hyperparameters, Lenza-Primiceri scaling and look-ahead-free refits must stay under our control. The engine is small (about 1–2 weeks) |
+| D6 | How is the `BART` mean block built? | **An adapter around a pinned `bartz`** (`bartz==0.13.0`); no fork, no in-house JAX BART (owner, 2026-11-16) | The Phase 4 spike (`docs/phase4/SPIKE.md`) answers its three questions with yes: the target and weights can be written into `State` each sweep exactly, the block passes Geweke and SBC, and a fixed error precision leaves volatility to the SV block. Cost: the whole `bartz` sub-state is float32 (§8, R4), targets are standardised per window, and every version bump re-runs the adapter's suite |
 
 ---
 
