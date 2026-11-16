@@ -247,13 +247,31 @@ def write_data() -> Path:
 
 
 def check_data() -> int:
-    committed = pd.read_csv(DATA_DIR / CASES["C2"].data_file, float_precision="round_trip")
+    """The committed C2 CSV against a fresh simulation, by the rule of the test
+    ``test_c2_data_regenerate_from_the_stated_process`` (``tests/parity/oracles/
+    test_commonsv_exact.py``): columns and dates exactly, values with ``rtol = atol = 1e-12`` (the
+    same draws; floating-point rounding differs across CPU models and BLAS builds, ≈ 4e-16 between
+    arm64 and x86). Prints the max |difference|; returns 1 when the files differ."""
+    name = CASES["C2"].data_file
+    committed = pd.read_csv(DATA_DIR / name, float_precision="round_trip")
     fresh = simulate_c2()[0]
-    same = list(committed.columns) == list(fresh.columns) and np.array_equal(
-        committed.drop(columns="date").to_numpy(), fresh.drop(columns="date").to_numpy()
-    )
-    print(f"{CASES['C2'].data_file}: {'identical' if same else 'DIFFERS'}")
-    return int(not same)
+    if list(committed.columns) != list(fresh.columns) or committed.shape != fresh.shape:
+        print(f"{name}: DIFFERS (columns {list(committed.columns)} and shape {committed.shape}; "
+              f"fresh {list(fresh.columns)} and {fresh.shape})")  # fmt: skip
+        return 1
+    dates = np.array_equal(committed["date"].to_numpy(), fresh["date"].to_numpy())
+    a = committed.drop(columns="date").to_numpy()
+    b = fresh.drop(columns="date").to_numpy()
+    diff = float(np.max(np.abs(a - b)))
+    close = np.allclose(a, b, rtol=1e-12, atol=1e-12)
+    if not dates:
+        verdict = "DIFFERS (dates)"
+    elif not close:
+        verdict = "DIFFERS (values beyond rtol = atol = 1e-12)"
+    else:
+        verdict = "identical" if diff == 0.0 else "equal to rounding (rtol = atol = 1e-12)"
+    print(f"{name}: {verdict}; max |diff| = {diff:.3g}")
+    return int(not (dates and close))
 
 
 # ------------------------------------------------------------------------------------------------
@@ -639,7 +657,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("data", help="write tests/parity/fixtures/data/commonsv_n3.csv (C2)")
-    sub.add_parser("check", help="compare a fresh C2 regeneration with the committed CSV")
+    sub.add_parser(
+        "check", help="compare a fresh C2 regeneration with the committed CSV (rtol = atol = 1e-12)"
+    )
     p_run = sub.add_parser("run", help="one run of a case into a staging directory")
     p_run.add_argument("case", choices=sorted(CASES))
     p_run.add_argument("index", type=int, choices=range(CHAINS))

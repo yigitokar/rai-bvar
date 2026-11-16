@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import re
+import statistics
 import sys
 from functools import cache
 from pathlib import Path
@@ -857,12 +858,19 @@ def test_sv_predictive_sources(name):
 
 @pytest.mark.parametrize("name", BV_SV_FIXTURES)
 def test_sv_predictive_path_is_the_compared_block(name):
-    """E173: the path's own h = 1 passed its check against predict(), and the compared h >= 2
-    quantiles are the path's, not a copy of predict()'s native ones."""
+    """E173: the path's own h = 1 passed its check against predict(), on the recorded numbers as
+    well as the flag (m = the 5 quantiles of every equation, the Phase 2 bound at that m), and
+    every compared h >= 2 quantile is the path's, not a copy of predict()'s native one."""
     ds = fixture(name)
-    assert int(ds.attrs["forecast_h1_check_pass"]) == 1
+    a = ds.attrs
+    assert int(a["forecast_h1_check_pass"]) == 1
+    m = int(a["forecast_h1_check_m"])
+    assert m == ds["forecast_q"].sizes["quantile"] * int(a["n"]) == 5 * int(a["n"])
+    bound = float(a["forecast_h1_check_bound"])
+    assert bound == max(4.0, statistics.NormalDist().inv_cdf(1 - 0.01 / (2 * m)))
+    assert float(a["forecast_h1_check_max_abs_z"]) <= bound
     path, native = ds["forecast_q"].values[1:], ds["forecast_predict_q"].values[1:]
-    assert not np.array_equal(path, native)
+    assert np.all(path != native)
 
 
 @pytest.mark.parametrize("name", GL_RUNS)
