@@ -1,4 +1,5 @@
-"""Analytic twins and exact oracles of ``CommonSV``, A8 (``n = 3``) and A11 (P3 DESIGN §9.7; WP32).
+"""Analytic twins and exact oracles of ``CommonSV``, A8 (``n = 3``, WP32; ``n = 20`` weekly, WP37) and A11
+(P3 DESIGN §9.7).
 
 **A8.** The conjugate prior × ``CommonSV`` on its shared-factor path (§5.3) against the same
 composition with the weighted path forced (row 323's configuration, ``const_path="weighted"``;
@@ -123,6 +124,78 @@ def test_a8_shared_factor_path_equals_the_weighted_path():
     z = parity_z(xs, xw)
     crit = critical(z.size)
     print(f"A8: m = {z.size}, max |z| = {np.max(np.abs(z)):.2f}, critical {crit:.2f}")
+    assert np.all(np.abs(z) <= crit), (np.sort(np.abs(z))[-5:], crit)
+
+
+def _a8_draws(fit) -> np.ndarray:
+    """A8's compared quantities of one fit, ``(chains, draws, m)``: every reduced-form ``B``
+    entry, the lower triangle of ``Σ = A⁻¹ΛA⁻ᵀ``, ``h`` at the first, middle and last data rows,
+    ``ρ`` and ``σ_h``."""
+    p = fit.param_draws
+    B = np.asarray(fit.reduced_form_draws().values)  # (C, D, k, n)
+    C, D = B.shape[:2]
+    S = base_sigma(np.asarray(p.struct.a), np.asarray(p.vol.core.log_lam))
+    h = np.stack([np.asarray(fit.monitor[f]) for f in ("common_h_0", "common_h_mid",
+                                                         "common_h_T")], axis=-1)  # fmt: skip
+    post = fit.posterior["posterior"]
+    scal = np.stack([post["rho"].values, post["sigma"].values], axis=-1)
+    return np.concatenate([B.reshape(C, D, -1), lower(S).reshape(C, D, -1),
+                           h[:, fit.draw_index], scal], axis=-1)  # fmt: skip
+
+
+def _common_sv_var(n: int, p: int, T: int, seed: int):
+    """A stationary VAR(``p``) of ``n`` variables with one common log-volatility (``ρ = 0.9``,
+    ``σ_h = 0.15``) and correlated shocks, ``T`` data rows after ``p`` presample rows."""
+    import pandas as pd
+
+    import rai_bvar as rb
+
+    rng = np.random.default_rng(seed)
+    A = [0.45 * np.eye(n) + 0.05 * np.eye(n, k=1)] + [
+        0.1 / (lag + 1) * np.eye(n) for lag in range(1, p)
+    ]
+    corr = 0.2 * np.ones((n, n)) + 0.8 * np.eye(n)
+    L = np.linalg.cholesky(corr) * np.linspace(0.6, 1.4, n)[:, None]
+    burn = 100
+    y = np.zeros((T + p + burn, n))
+    h = 0.0
+    for t in range(p, T + p + burn):
+        h = 0.9 * h + 0.15 * rng.standard_normal()
+        y[t] = sum(A[lag] @ y[t - 1 - lag] for lag in range(p)) + np.exp(h / 2) * (
+            L @ rng.standard_normal(n)
+        )
+    y = y[burn:]
+    index = pd.period_range("1950Q1", periods=T + p, freq="Q")
+    frame = pd.DataFrame(y, index=index, columns=[f"y{i}" for i in range(n)])
+    return rb.VARData.from_frame(frame, tcodes=1)
+
+
+@pytest.mark.slow
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_a8_at_scale_shared_factor_path_equals_the_weighted_path():
+    """A8 at ``n = 20, p = 4, T = 300`` (weekly, WP37; §9.7's A8 row): the conjugate Minnesota
+    prior × ``CommonSV`` through the public API on its shared-factor path against the same model
+    with the weighted path forced (``const_path="cholesky"`` resolves to ``"weighted"`` for
+    ``CommonSV``, as row 323), on one simulated dataset; SUR rows (the stationary data's own-lag
+    means are 0, so no SOC row exists); 4 × 4,000 draws each after 1,000; the Phase 2 parity rule
+    over every compared quantile."""
+    import rai_bvar as rb
+    from rai_bvar.engines.mcmc.resolve import resolve
+
+    n, p, T = 20, 4, 300
+    data = _common_sv_var(n, p, T, seed=2037)
+    prior = rb.Minnesota(form="conjugate", hierarchy="fixed", sur=1.0)
+    fits, paths = [], []
+    for const_path, seed in (("auto", 3), ("cholesky", 4)):
+        settings = rb.MCMCSettings(chains=4, draws=4000, burn=1000, seed=seed, store_max=4000,
+                                   const_path=const_path)  # fmt: skip
+        model = rb.BVAR(mean=rb.Linear(prior), vol=rb.CommonSV(), lags=p, mcmc=settings)
+        paths.append(resolve(model, data, Runtime()).static.mean.const_path)
+        fits.append(model.fit(data))
+    assert paths == ["shared_factor", "weighted"]
+    z = parity_z(_a8_draws(fits[0]), _a8_draws(fits[1]))
+    crit = critical(z.size)
+    print(f"A8 (n = {n}): m = {z.size}, max |z| = {np.max(np.abs(z)):.2f}, critical {crit:.2f}")
     assert np.all(np.abs(z) <= crit), (np.sort(np.abs(z))[-5:], crit)
 
 
