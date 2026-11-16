@@ -4,7 +4,10 @@ Model-agnostic statistics (WP7): Geweke joint-distribution tests (:mod:`.geweke`
 calibration (:mod:`.sbc`), rank uniformity (:mod:`.uniformity`), multiplicity and the Gandy–Scott
 sequential wrapper (:mod:`.sequential`), and density-ratio / MH identities (:mod:`.identities`).
 Independent references (WP9): prior samplers, simulators and log joints (:mod:`.reference`,
-:mod:`.simulate`, :mod:`.log_joint`, :mod:`.testfns`, :mod:`.joint`).
+:mod:`.simulate`, :mod:`.log_joint`, :mod:`.testfns`, :mod:`.joint`). The DGP tests of the
+verdict engine (SPEC §10.5: size and power of ``compare().verdict()`` on simulated data) are in
+:mod:`.dgp` (NumPy simulators, the row registry, one replication, the summaries); the study
+script is ``benchmarks/dgp_study.py``.
 
 Importing this package imports no JAX; the names below are resolved lazily (the JAX drivers enable
 float64 when first imported, SPEC §8).

@@ -5,7 +5,7 @@ chunks of ``S_c = min(1024, 2^⌈log₂ S⌉)`` for ``S`` paths (:func:`make_for
 per ``(program, H, S_c)``; the last chunk is padded)::
 
     (log λ^pers_i, log λ^eff_i)_{T+1..T+H} = vol.draw_ahead_eq(vol_keys[i], vd_i, ·, H, gfut)
-    fut_i = mean.future_eq(mean_keys[i], md_i, H);   gfut = global steps' futures (Empty in Phase 2)
+    fut_i = mean.future_eq(mean_keys[i], md_i, H);   gfut = {Block: future} of the global steps
     scan h = 1..H (carry: the lag window (p, n), most recent last):
         x = regressors_from_window(window, t_last + h, n_det)
         g = [mean.predict_eq(md_i, fut_i, x, h, gfut)]_i      structural: Γx;  reduced: 0
@@ -50,6 +50,13 @@ the effective variance under a transitory scale, need ``store="paths"``; a Const
 date-free. One-s.d. shocks use the **persistent** variance by default (a "one-s.d. shock in March
 2020" excludes the outlier scale): ``e^{h}``, or ``e^{h} ν/(ν−2)`` under ``t_scale="unit"`` (the
 shock variance net of outliers); unit shocks give ``Φ_h A⁻¹`` whatever the date.
+
+**Global futures** (P3 §2.4) are a mapping ``{Block: future}`` (``Empty`` in Phase 2), so a block
+finds its own: under ``CommonSV`` the Constant cores add ``gfut[Block.G_COMMON_SV]``, the path
+``h_{T+j} = ρh_{T+j−1} + σ_hη_j`` of ``CommonSVStep.future``. ``draw_parameters`` and the IRFs read
+the common ``h`` too (P3 §5.5): at the last in-sample period ``log λ_i + h_T`` (``h_T`` from the
+draw's ``CommonSVDraw``), at other dates ``log λ_i + h_t`` from the stored paths
+(``store="paths"``), so ``chol`` and the FEVD at a date include ``e^{h_t}``.
 """
 
 from __future__ import annotations
@@ -69,6 +76,7 @@ from rai_bvar.engines.mcmc import _jax
 from rai_bvar.engines.mcmc.compose import Program, compose
 from rai_bvar.engines.mcmc.config import StaticConfig
 from rai_bvar.engines.mcmc.data import regressors_from_window
+from rai_bvar.engines.mcmc.keys import Block
 from rai_bvar.engines.mcmc.state import CCCMDraw, Empty, LinearDraw, ParamDraw
 
 Array = jax.Array
@@ -133,10 +141,13 @@ def _with_index(eq_map: Callable, f: Callable, n: int) -> Callable:
     return mapped
 
 
-def _global_futures(program: Program, key: Array, gd: Any, H: int) -> tuple[Any, ...]:
-    """Futures of the program's global steps (``GlobalStep.future``; ``Empty`` in Phase 2), each
-    from ``fold_in(glob_key, block)``."""
-    return tuple(g.future(random.fold_in(key, int(g.block)), gd, H) for g in program.global_steps)
+def _global_futures(program: Program, key: Array, gd: Any, H: int) -> dict[Block, Any]:
+    """Futures of the program's global steps as a mapping ``{Block: future}`` (P3 §2.4;
+    ``GlobalStep.future``, ``Empty`` in Phase 2), each from ``fold_in(glob_key, block)``."""
+    return {
+        Block(int(g.block)): g.future(random.fold_in(key, int(g.block)), gd, H)
+        for g in program.global_steps
+    }
 
 
 def simulate_paths(
@@ -160,7 +171,7 @@ def simulate_paths(
     hist = jnp.asarray(hist, jnp.float64)
     t_last = jnp.asarray(t_last, jnp.float64)
     fut = Empty() if fut is None else fut
-    gfut = () if gfut is None else gfut
+    gfut = {} if gfut is None else gfut
 
     def step(window: Array, inputs: tuple[Array, Array, Array]) -> tuple[Array, tuple]:
         h, e, log_lam = inputs
@@ -521,8 +532,9 @@ def _pool(fit: Any, row: int | None, which: str, shock: str = "sd") -> _Pool:
     vol = fit.static.vol
     T_eff = int(np.asarray(fit.engine_data.T_eff))
     transitory = vol.transitory != "none"
+    time_varying = vol.persistent != "constant" or vol.common  # CommonSV: e^{h_t} (P3 §5.5)
     needs = shock == "sd" and (
-        (row is not None and row != T_eff - 1 and vol.persistent != "constant")
+        (row is not None and row != T_eff - 1 and time_varying)
         or (which == "effective" and transitory)
     )
     if not needs:
@@ -554,9 +566,11 @@ def _log_lam(fit: Any, pool: _Pool, row: int | None, which: str) -> np.ndarray:
     """
     T_eff = int(np.asarray(fit.engine_data.T_eff))
     t = T_eff - 1 if row is None else row
+    vol = fit.static.vol
     if pool.paths is not None:
-        lam = np.asarray(pool.paths.h)[..., t + 1]  # h index t + 1 ↔ data row t
-        if fit.static.vol.persistent == "constant":
+        # h index t + 1 ↔ data row t; under CommonSV the paths hold log λ_i + h_t (P3 §5.5)
+        lam = np.asarray(pool.paths.h)[..., t + 1]
+        if vol.persistent == "constant" and not vol.common:
             lam = np.asarray(pool.params.vol.core.log_lam)
         if which == "effective":
             return lam + np.asarray(pool.paths.log_scale2)[..., t]
@@ -568,6 +582,8 @@ def _log_lam(fit: Any, pool: _Pool, row: int | None, which: str) -> np.ndarray:
             lam = np.asarray(core.log_lam)
         else:
             raise TypeError(f"no log variance in a {type(core).__name__} draw")
+        if vol.common:  # the last in-sample period: log λ_i + h_T of the CommonSVDraw
+            lam = lam + np.asarray(pool.params.glob.vol.h_T)[..., None]
     nu = getattr(pool.params.vol.trans, "nu", None)
     if which == "persistent" and fit.static.vol.t_scale == "unit" and nu is not None:
         nu = np.asarray(nu, dtype=np.float64)

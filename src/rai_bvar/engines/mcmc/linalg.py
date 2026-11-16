@@ -25,6 +25,15 @@ reads a key (the noise ``z`` is injected, D-17), forms an explicit inverse, or a
   their excess over the next edge, which never cancels (:func:`laplacian_precision_sample`).
 * **Stable AR(1) regression** (N02 §6.1): ``b_T`` and ``chol(B_T)`` of the 2×2 auxiliary posterior
   from **centred** cross-products (the uncentred form loses up to 5 digits; N02 cross-check 1).
+* **Deviation draw in log space** (P3 D-41, §3.4): D-14's draw in deviation coordinates with the
+  Jacobi scaling done in logs, for log prior precisions far outside the float range; returns
+  ``log|d|`` exactly (:func:`precision_draw_log`).
+* **Shared factor** (P3 D-47, §5.3): one Jacobi-scaled Cholesky of the shared ``q × q`` matrix
+  serves every equation through its leading blocks (:func:`shared_factor_gram`,
+  :func:`shared_factor_prepare`, :func:`shared_factor_rhs`, :func:`shared_factor_draw`).
+* **Tridiagonal Newton** (P3 D-48, §5.4): the damped Newton mode and negative Hessian of
+  ``Σ_t[−(n/2)x_t − ½q_t e^{−x_t}] − ½xᵀQx + lᵀx`` for tridiagonal ``Q`` (the CommonSV ``h``
+  block), each step one :func:`tridiag_precision_sample` solve (:func:`tridiag_newton`).
 
 **Pivots.** ``min_pivot`` is the smallest factorisation pivot (``l_t²``). A NaN pivot (failed or
 poisoned factorisation; JAX fills a failed Cholesky with NaN) counts as 0, so ``min_pivot ≤ 0``
@@ -34,7 +43,7 @@ exactly when the factorisation failed and the value itself stays finite.
 from __future__ import annotations
 
 import functools
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -51,7 +60,15 @@ GramMode = Literal["packed", "packed_tiled", "batched"]
 
 _EIG_NEG_TOL = 1e-10  # eigen path: eigenvalues ≥ −1e-10·max|eigenvalue| (DESIGN §3.7.2)
 
+NEWTON_MAX_ITER = 50  # P3 §5.4: ≤ 50 Newton iterations per h block
+NEWTON_MAX_HALVINGS = 30  # P3 §5.4: damped by halving, at most 30 times per iteration
+NEWTON_TOL = 1e-10  # P3 §5.4: stop when ‖Δ‖∞ < 1e-10
+
 __all__ = [
+    "NEWTON_MAX_HALVINGS",
+    "NEWTON_MAX_ITER",
+    "NEWTON_TOL",
+    "TridiagNewton",
     "eigen_draw",
     "eigen_prepare",
     "eigen_prepare_dense",
@@ -62,10 +79,16 @@ __all__ = [
     "lstsq_draw",
     "precision_draw",
     "precision_draw_factored",
+    "precision_draw_log",
     "precision_factor",
     "precision_moments",
+    "shared_factor_draw",
+    "shared_factor_gram",
+    "shared_factor_prepare",
+    "shared_factor_rhs",
     "solve_unit_lower",
     "stable_ar1_regression",
+    "tridiag_newton",
     "tridiag_precision_sample",
     "weighted_gram",
 ]
@@ -195,6 +218,44 @@ def precision_draw(K: Array, b: Array, z: Array) -> tuple[Array, StepInfo]:
     L, s, info = precision_factor(K)
     theta = precision_draw_factored(L, s, b, z)
     return theta, StepInfo(info.ok & jnp.all(jnp.isfinite(theta)), info.min_pivot)
+
+
+def precision_draw_log(
+    log_prec: Array, G: Array, b: Array, z: Array
+) -> tuple[Array, Array, StepInfo]:
+    """The deviation ``d ~ N(K⁻¹b̃, K⁻¹)``, ``K = diag(exp(log_prec)) + G``, for ``z ~ N(0, I)``,
+    with the Jacobi scaling in log space; returns ``(d, dev_log, info)``, ``dev_log = log|d|``
+    exactly (P3 D-41, §3.4).
+
+    ``G`` is the masked data Gram ``(c ⊗ c) ⊙ Gram`` (PSD; lower triangle and diagonal read) and
+    ``b`` the masked data right-hand side in deviation coordinates, ``b̃ = b_{D-14} − K·mean``
+    (structural ``c ⊙ F_θᵀ(w ⊙ (target − F_θ meanθ))``; CCCM ``Xᵀ(G_j + W_j ⊙ (f_j − X m_j))``);
+    the coefficient is ``mean + d``. With ``log s_j = −½ logaddexp(log P_j, log G_jj)`` (never
+    overflows), ``A = I + offdiag(exp(log s_i + log s_j) G_ij)`` (unit diagonal: D-14's ``sKs``)
+    and ``L = chol(A)``: ``u = L⁻ᵀ(L⁻¹(s ⊙ b̃) + z)``, ``d = exp(log s) ⊙ u``,
+    ``dev_log = log s + log|u|``. This is :func:`precision_draw` rewritten with
+    ``b̃ = b − K·mean``, the same function of ``z`` to rounding wherever D-14 is finite; here a
+    log precision of ``±1600`` is fine: ``d`` may underflow to 0 (harmlessly, below the rounding
+    of every residual) while ``dev_log`` stays exact. Padding as in :func:`precision_draw`
+    (inactive slots: log precision 0, zero Gram, ``b̃ = 0``; the caller masks).
+    ``info.ok`` iff every pivot ``L_jj`` is finite and positive, ``d`` is finite and ``dev_log`` is
+    not NaN (D-14); pivots ``L_jj²``.
+    """
+    log_s = -0.5 * jnp.logaddexp(log_prec, jnp.log(jnp.diagonal(G)))
+    m = log_s.shape[0]
+    A = jnp.where(jnp.eye(m, dtype=bool), 1.0, jnp.exp(log_s[:, None] + log_s[None, :]) * G)
+    L = lax.linalg.cholesky(A, symmetrize_input=False)
+    s = jnp.exp(log_s)
+    u = _solve_lower(L, _solve_lower(L, s * b) + z, transpose=True)
+    d = s * u
+    dev_log = log_s + jnp.log(jnp.abs(u))
+    dL = jnp.diagonal(L)
+    ok = (
+        jnp.all(jnp.isfinite(dL) & (dL > 0.0))
+        & jnp.all(jnp.isfinite(d))
+        & ~jnp.any(jnp.isnan(dev_log))
+    )
+    return d, dev_log, StepInfo(ok, _min_pivot(dL * dL))
 
 
 def lstsq_draw(A: Array, rhs: Array, z: Array) -> tuple[Array, StepInfo]:
@@ -378,6 +439,78 @@ def fixed_factor_draw(c: FixedFactorCache, lam: Array, z: Array) -> Array:
     return c.theta_hat + jnp.sqrt(lam) * c.s * _solve_lower(c.Lc, z, transpose=True)
 
 
+# ------------------------------------------------------- shared factor (P3 D-47, §5.3; CommonSV)
+
+
+def shared_factor_gram(w: Array, F: Array, Fd: Array | None = None) -> Array:
+    """``G = (√w ⊙ F)ᵀ(√w ⊙ F) + F_dᵀF_d`` (``q × q``, exactly symmetric) of the shared design
+    ``F`` (``T × q``) with the common weights ``w = m_t e^{−h_t}`` (``EqContext.common_w``) and
+    the λ-free dummy rows ``F_d`` (``m × q``, Mode II weight 1, **not** weighted by ``h``; E88)."""
+    Fw = jnp.sqrt(w)[:, None] * F
+    G = Fw.T @ Fw
+    if Fd is not None:
+        G = G + Fd.T @ Fd
+    return jnp.tril(G) + jnp.tril(G, -1).T
+
+
+def shared_factor_prepare(prec: Array, G: Array) -> tuple[Array, Array, StepInfo]:
+    """The factor shared by every equation, once per chain and sweep: :func:`precision_factor`
+    of ``K̃ = diag(P̃) + G``, i.e. ``s = diag(P̃ + G)^{−½}``, ``L = chol(s(P̃ + G)s)``, with
+    ``P̃`` the λ-free Mode II prior precision that is equal across equations on their active
+    slots (``SharedPrior.shared_prec``) and ``G`` from :func:`shared_factor_gram`. Equation
+    ``i``'s ``K̃_i`` is the leading ``q_i × q_i`` block of ``K̃``, so its Jacobi-scaled Cholesky
+    factor is the leading block of ``L`` (and its scaling the leading part of ``s``)."""
+    return precision_factor(jnp.diag(prec) + G)
+
+
+def shared_factor_rhs(
+    prec: Array,
+    mean: Array,
+    F: Array,
+    w: Array,
+    y: Array,
+    cmask: Array,
+    Fd: Array | None = None,
+    yd: Array | None = None,
+) -> Array:
+    """``b_i = c_i ⊙ (P̃μ_i + Fᵀ(w ⊙ y_i) + F_dᵀy_{d,i})``: equation ``i``'s λ-free right-hand
+    side (P3 §5.3), with ``y`` its target column (``T``), ``yd`` its dummy targets (``m``) and
+    ``cmask`` its leading active-slot mask. Batched over equations by ``vmap`` with ``F``, ``w``
+    and ``F_d`` unbatched (one ``O(T q n)`` product)."""
+    b = prec * mean + F.T @ (w * y)
+    if Fd is not None:
+        if yd is None:
+            raise ValueError("shared_factor_rhs: dummy rows Fd need their targets yd")
+        b = b + Fd.T @ yd
+    return jnp.where(cmask > 0, b, 0.0)
+
+
+def shared_factor_draw(
+    L: Array, s: Array, b: Array, cmask: Array, lam: Array, z: Array
+) -> tuple[Array, StepInfo]:
+    """``θ_i ~ N(K̃_i⁻¹b_i, λ_i K̃_i⁻¹)`` on equation ``i``'s active slots from the shared factor
+    ``(L, s)`` of :func:`shared_factor_prepare` (P3 §5.3; ``λ_i`` the variance, ``z`` its noise):
+
+        ``v_i = c_i ⊙ L⁻¹(s ⊙ b_i)``,  ``θ_i = c_i ⊙ s ⊙ L⁻ᵀ(v_i + √λ_i·(c_i ⊙ z_i))``.
+
+    ``cmask`` must be a leading mask (1 on ``[0, q_i)``, 0 after; Mode II's ``[δ_i | a_i]``):
+    ``b_i`` is zero beyond ``q_i``, so the forward solve's leading part is the leading-block
+    solve and its trailing part ``−L₂₂⁻¹L₂₁v₁`` is masked to 0; with ``v_i`` and ``z_i`` zero
+    beyond ``q_i`` the back solve's trailing part is exactly 0 and its leading part the
+    leading-block solve. No per-equation factor is built. ``θ`` is 0 on inactive slots.
+    ``info``: ``ok`` iff the pivots of the leading block are finite and positive and ``θ`` is
+    finite (a failed factorisation leaves NaN everywhere, so every equation fails); ``min_pivot``
+    over the leading block (equal to D-14's pivots of ``K̃_i``)."""
+    on = cmask > 0
+    v = jnp.where(on, _solve_lower(L, s * b), 0.0)
+    w = v + jnp.sqrt(lam) * jnp.where(on, z, 0.0)
+    theta = jnp.where(on, s * _solve_lower(L, w, transpose=True), 0.0)
+    dL = jnp.diagonal(L)
+    piv_ok = jnp.all(jnp.where(on, jnp.isfinite(dL) & (dL > 0.0), True))
+    ok = piv_ok & jnp.all(jnp.isfinite(theta))
+    return theta, StepInfo(ok, _min_pivot(jnp.where(on, dL * dL, jnp.inf)))
+
+
 # --------------------------------------------------------------------------- SV kernels
 
 
@@ -523,3 +656,104 @@ def stable_ar1_regression(
         ]
     )
     return jnp.stack([gam, phi]), chol
+
+
+# ------------------------------------------------------- tridiagonal Newton (P3 D-48, §5.4)
+
+
+class TridiagNewton(NamedTuple):
+    """Result of :func:`tridiag_newton`: the mode ``x̂`` and the negative Hessian
+    ``H = Q + diag(½ q e^{−x̂})`` there (tridiagonal: ``diag``, ``off[t] = H[t+1, t]``), the
+    proposal ``N(x̂, H⁻¹)`` of the CommonSV ``h`` block (P3 §5.4)."""
+
+    mode: Array  # f64[m]; 0 on masked slots
+    diag: Array  # f64[m]; 1 on masked slots
+    off: Array  # f64[m−1]; 0 next to masked slots
+    iterations: Array  # i32[]: Newton steps taken
+    converged: Array  # bool[]: ‖Δ‖∞ < tol reached (False: the iteration cap or a stalled search)
+    info: StepInfo  # factorisation of H at the mode (ok iff H is PD and x̂ finite)
+
+
+def tridiag_newton(
+    log_q: Array,
+    n: Array,
+    diag: Array,
+    off: Array,
+    lin: Array,
+    mask: Array,
+    x0: Array | None = None,
+    *,
+    max_iter: int = NEWTON_MAX_ITER,
+    max_halvings: int = NEWTON_MAX_HALVINGS,
+    tol: float = NEWTON_TOL,
+) -> TridiagNewton:
+    """Damped Newton maximiser of the strictly concave block log density (P3 §5.4, N08 §A5.2)
+
+        ``φ(x) = Σ_{t: mask} [−(n/2) x_t − ½ exp(log q_t − x_t)] − ½ xᵀQx + linᵀx``,
+
+    ``Q`` tridiagonal SPD (``diag`` (m,), ``off`` (m−1,), ``off[t] = Q[t+1, t]``; the CommonSV
+    prior block ``K_BB``), ``lin`` the coupling to the fixed neighbours (``−K_{B,B^c} h_{B^c}``,
+    nonzero at the block's edges). Slots with ``mask = 0`` are decoupled (unit diagonal, zero
+    off-diagonals, no likelihood or ``lin`` term) and stay at 0, so a block of any length lives
+    in a window of static length ``m`` (D-15).
+
+    Start ``x0`` (default ``log q − log n``, the maximiser of the likelihood terms alone, which
+    depends on ``q`` only: with it, the result is a function of ``(q, Q, lin)``, i.e. of ``q``,
+    the neighbours and ``(ρ, σ_h)``, never of the current block, so the proposal built from it is
+    an independence proposal). Each iteration solves ``HΔ = g`` (:func:`tridiag_precision_sample`
+    with ``z = 0``), ``g = ∇φ(x)``, ``H = Q + diag(e)``, ``e = ½ q e^{−x}``, and takes the step
+    ``2^{−j}Δ`` with the smallest ``j ≤ max_halvings`` that satisfies the Armijo condition
+    ``φ(x + αΔ) − φ(x) ≥ 10⁻⁴·α gᵀΔ`` (all ``max_halvings + 1`` candidates are evaluated at
+    once). The change is computed directly, ``α gᵀΔ − Σ e_t(expm1(−αΔ_t) + αΔ_t) −
+    ½α²ΔᵀQΔ``, not as a difference of two values of ``φ``, so its sign is reliable down to
+    steps far below ``tol`` (a difference of ``φ`` values is rounding noise once
+    ``½ΔᵀHΔ < ε|φ|``, which would stall the iteration short of ``tol``). It stops when
+    ``‖Δ‖∞ < tol`` (after taking that step), when no candidate qualifies, or after ``max_iter``
+    iterations. The result carries ``H`` at the returned mode; ``converged`` is False when the
+    cap was hit or the search stalled (the proposal is still exact, only less efficient).
+    """
+    on = mask > 0
+    pair = on[1:] & on[:-1]
+    m = on.shape[0]
+    dtype = jnp.float64
+    n = jnp.asarray(n, dtype)
+    d_e = jnp.where(on, diag, 1.0)
+    o_e = jnp.where(pair, off, 0.0)
+    lin_e = jnp.where(on, lin, 0.0)
+    half_n = jnp.where(on, 0.5 * n, 0.0)
+    lq = jnp.where(on, log_q, -jnp.inf)
+    x0 = jnp.where(on, log_q - jnp.log(n), 0.0) if x0 is None else jnp.where(on, x0, 0.0)
+    zeros = jnp.zeros((m,), dtype)
+    alphas = jnp.exp2(-jnp.arange(max_halvings + 1, dtype=dtype))
+
+    def qx(x: Array) -> Array:  # Q x for the tridiagonal Q
+        lo = jnp.concatenate([jnp.zeros((1,), dtype), o_e * x[:-1]])
+        up = jnp.concatenate([o_e * x[1:], jnp.zeros((1,), dtype)])
+        return d_e * x + lo + up
+
+    def cond(st):
+        it, _, done, _ = st
+        return (it < max_iter) & ~done
+
+    def body(st):
+        it, x, _, _ = st
+        e = jnp.where(on, 0.5 * jnp.exp(lq - x), 0.0)
+        g = -half_n + e - qx(x) + lin_e
+        delta, _, _ = tridiag_precision_sample(d_e + e, o_e, g, zeros)
+        small = jnp.max(jnp.abs(delta)) < tol
+        gd = jnp.sum(g * delta)  # gᵀH⁻¹g > 0
+        dqd = jnp.sum(delta * qx(delta))
+        y = alphas[:, None] * delta[None, :]
+        curv = jnp.sum(jnp.where(on, e * (jnp.expm1(-y) + y), 0.0), axis=1)  # ≥ 0
+        dphi = alphas * gd - curv - 0.5 * alphas * alphas * dqd
+        good = jnp.isfinite(dphi) & (dphi >= 1e-4 * alphas * gd)
+        alpha = jnp.where(jnp.any(good), alphas[jnp.argmax(good)], 0.0)
+        return it + 1, x + alpha * delta, small | (alpha == 0.0), small
+
+    it, mode, _, converged = lax.while_loop(
+        cond, body, (jnp.zeros((), jnp.int32), x0, jnp.zeros((), bool), jnp.zeros((), bool))
+    )
+    hd = d_e + jnp.where(on, 0.5 * jnp.exp(lq - mode), 0.0)
+    _, _, piv = tridiag_precision_sample(hd, o_e, zeros, zeros)
+    ok = (piv > 0.0) & jnp.isfinite(piv) & jnp.all(jnp.isfinite(mode))
+    return TridiagNewton(mode, hd, o_e, it, converged, StepInfo(ok, piv))

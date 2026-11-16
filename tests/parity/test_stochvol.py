@@ -35,7 +35,8 @@ term only matters for the larger families of ``test_bayesianvars.py``.
 on which our fold fraction (sweeps with an accepted non-centred ``σ' < 0``) exceeds 0.5% is
 excluded: it is still compared, and a failure there is reported as a skip, not an error.
 
-**SV-t** (``stochvol_v_t5``). stochvol 3.2.1's Student-t sampler does not target the
+**SV-t** (``stochvol_v_t5``, regenerated with stochvol 3.2.9 in Phase 3; the other fixtures are
+from 3.2.1). The Student-t sampler of stochvol 3.2.1 and 3.2.9 does not target the
 standardized-t SV posterior that its own simulator ``svsim`` and the fixture's DGP use: on a
 four-observation problem whose posterior is computed exactly by importance sampling, stochvol's
 ``τ`` and ``h`` quantiles miss the exact ones (with and without ASIS), while ours match them
@@ -173,8 +174,8 @@ FIXTURE_RUNS = {  # fixture: (dataset, run)
     "stochvol_iv_exact": ("iv", "exact"),
 }
 T_DEVIATION = (
-    "stochvol 3.2.1's Student-t sampler misses the exact standardized-t SV posterior "
-    "(SV_PARAMETRIZATION.md §3.2); replaced by the exact importance-sampling oracle"
+    "the Student-t sampler of stochvol 3.2.1 and 3.2.9 misses the exact standardized-t SV "
+    "posterior (SV_PARAMETRIZATION.md §3.2, §7.4); replaced by the exact importance-sampling oracle"
 )
 
 

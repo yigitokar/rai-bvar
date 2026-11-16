@@ -42,6 +42,10 @@ def test_enum_values_are_frozen():
         "S": 0, "H": 1, "H_ACC": 2, "C_GP": 3, "C_GP_ACC": 4, "C_S2": 5, "C_S2_ACC": 6,
         "NC_PHI": 7, "NC_PHI_ACC": 8, "NC_MS": 9, "NC_MS_ACC": 10, "O": 11, "P": 12, "NU": 13,
         "TAU": 14,
+        # Phase 3 (P3 DESIGN §2.4), appended
+        "GL_LOCAL": 15, "GL_LOCAL_AUX": 16, "GL_GROUP": 17, "GL_GROUP_AUX": 18, "GL_A": 19,
+        "CSV_OFFSET": 20, "CSV_H": 21, "CSV_H_ACC": 22, "CSV_RHO": 23, "CSV_RHO_ACC": 24,
+        "CSV_S2": 25,
     }  # fmt: skip
     assert int(K.Sub.Z) == 0  # mean, contemp and CCCM sub-draw
     assert {m.name: int(m) for m in K.Ahead} == {"VOL": 0, "SHOCK": 1, "MEAN": 2, "GLOBAL": 3}

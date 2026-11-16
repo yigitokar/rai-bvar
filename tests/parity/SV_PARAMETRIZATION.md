@@ -11,7 +11,8 @@ were not read for this note; every statement about their behaviour below comes f
 from N02/N04 (which cite them), or from experiments with the installed package.
 
 Versions: R 4.1.2 (x86_64-apple-darwin17.0), stochvol 3.2.1 (DESIGN §9.9 names 3.2.9; 3.2.1 is
-the installed version). bayesianVARs 0.1.8 is **not installed** (§4).
+the installed version). bayesianVARs 0.1.8 is **not installed** (§4). Phase 3 (§7): R 4.5.3,
+stochvol 3.2.9, bayesianVARs 0.1.8 and bvars 1.1, from the dispatch-only CI job `r-fixtures`.
 
 ## 1. The SV model and the parameter mapping (DESIGN §6.3; N02 §1, §10.2, §13.6)
 
@@ -150,10 +151,11 @@ Measured values of the DGP guard: posterior ranks of the truth 0.58, 0.55 and 0.
 therefore fail the test. An unexpected pass fails it too, since that would mean the oracle or our
 sampler changed. Each of these four outcomes was checked with a mutated scratch copy.
 
-**Version caveat.** Every statement in this section is about stochvol **3.2.1**, the version that
-produced the committed fixtures. DESIGN §9.9 names 3.2.9; whether 3.2.9 (or later) still deviates
-was not checked, because R is not available where this phase was finished. The finding is a
-property of one fixture, not of stochvol in general.
+**Version caveat.** The statements above are about stochvol **3.2.1**, the version that produced
+the Phase 2 fixtures; the five Gaussian fixtures (i)–(iv) still come from 3.2.1. The SV-t fixture
+`stochvol_v_t5` is regenerated with stochvol **3.2.9** in Phase 3, and 3.2.9 still deviates on the
+four-observation problem: §7.4 holds that check (step 3 below). The finding is a property of the
+SV-t sampler on these problems, not of stochvol in general.
 
 **Unblock path for the SV-t row.** The strict `xfail` is meant to be removed, not kept:
 
@@ -167,11 +169,15 @@ property of one fixture, not of stochvol in general.
    in the same change; the row then gates like the other fixtures.
 3. If stochvol still deviates, keep the `xfail`, update the version and the table here, and report
    the four-observation example upstream; the exact importance-sampling test stays the SV-t exit
-   criterion.
+   criterion. Done in Phase 3 for stochvol 3.2.9 (§7.4: it still deviates, the `xfail` stays; the
+   upstream report is not filed yet).
 
-## 4. bayesianVARs: blocked
+## 4. bayesianVARs: blocked in Phase 2 (superseded by §7)
 
-**Status: bayesianVARs parity is blocked.** bayesianVARs 0.1.8 (first CRAN release 2023) has no
+**Phase 2 record.** Phase 3 installed bayesianVARs 0.1.8 and decided P1–P5; their outcomes are
+in §7.1. The rest of this section describes the Phase 2 state.
+
+**Status in Phase 2: bayesianVARs parity was blocked.** bayesianVARs 0.1.8 (first CRAN release 2023) has no
 CRAN macOS binary for R 4.1, and a source build links its RcppArmadillo code against R's `FLIBS`,
 i.e. against gfortran, which is not installed (`R CMD config FC` names `gfortran`; the `FLIBS`
 directories `/usr/local/gfortran/lib…` do not exist). `fixtures/probe_bayesianvars.nc` records this
@@ -179,11 +185,11 @@ evidence (`bayesianvars_available = 0`). Without the package the probes cannot r
 
 | probe | question | documented | status |
 | :--- | :--- | :--- | :--- |
-| P1 | are `normal_sds` and `cholesky_normal_sds` variances (documented) or standard deviations (named)? | variances | unresolved |
-| P2 | is `U` stored as `U` or `U⁻¹`, and with which sign (`A = Uᵀ` or `2I − Uᵀ`)? | `Σ_t = U'⁻¹ D_t U⁻¹`, hence `A = Uᵀ`; GK App. B prints the U step without the minus sign | unresolved |
-| P3 | which row of the returned `PHI` draws holds the intercept? | undocumented | unresolved |
-| P4 | what is the layout of the returned `sv_para` draws? | undocumented | unresolved |
-| P5 | is `cholesky_priorhomoscedastic = cbind(shape, scale)` the IG scale `β₀` of `λ^{−α₀−1}e^{−β₀/λ}`, and what replaces `NA`? | (shape, scale), default `NA` with an undocumented substitute | unresolved |
+| P1 | are `normal_sds` and `cholesky_normal_sds` variances (documented) or standard deviations (named)? | variances | unresolved (Phase 2) |
+| P2 | is `U` stored as `U` or `U⁻¹`, and with which sign (`A = Uᵀ` or `2I − Uᵀ`)? | `Σ_t = U'⁻¹ D_t U⁻¹`, hence `A = Uᵀ`; GK App. B prints the U step without the minus sign | unresolved (Phase 2) |
+| P3 | which row of the returned `PHI` draws holds the intercept? | undocumented | unresolved (Phase 2) |
+| P4 | what is the layout of the returned `sv_para` draws? | undocumented | unresolved (Phase 2) |
+| P5 | is `cholesky_priorhomoscedastic = cbind(shape, scale)` the IG scale `β₀` of `λ^{−α₀−1}e^{−β₀/λ}`, and what replaces `NA`? | (shape, scale), default `NA` with an undocumented substitute | unresolved (Phase 2) |
 
 **Derived calls** (E11; recorded in the probe fixture's `parity_calls` and checked by
 `test_bayesianvars_calls_derive_from_the_parameter_set`). From the one parameter set of §5 below:
@@ -276,3 +282,226 @@ form matches on all three fixtures.
 The same Student-t program compiled at `T_pad = 32` takes about 28 s, against 6 s at
 `T_pad = 320`, so the exact-oracle test uses the larger padding. The nightly tier takes about
 6 minutes.
+
+## 7. Phase 3: bayesianVARs 0.1.8 and bvars 1.1 (work package WP29)
+
+Phase 3 DESIGN §9.8 runs the two GPL oracles that Phase 2 could not install. The fixtures come from
+the dispatch-only job `r-fixtures` of `.github/workflows/ci.yml` (D-54): R 4.5.3 on `ubuntu-latest`
+(Ubuntu 24.04, `noble`) with the Linux binaries of the Posit Package Manager snapshot
+**2026-10-20** (`https://packagemanager.posit.co/cran/__linux__/noble/2026-10-20`), every
+package installed as a binary: bayesianVARs 0.1.8, bvars 1.1, bsvars 4.0, stochvol 3.2.9,
+factorstochvol 1.1.2, GIGrvg 0.8, RcppArmadillo 15.6.2-1, Rcpp 1.1.2, RcppProgress 0.4.2,
+RcppTN 0.2-2, R6 2.6.1, generics 0.1.4, lpSolveAPI 5.5.2.0-17.15, mvtnorm 1.4-2, jsonlite 2.0.0,
+coda 0.19-4.1. Every fixture of this section records them (`packages`, `repos`, `ppm_snapshot`,
+`r_version`, `ci_run`); `stochvol_v_t5` does so beside its Phase 2 attributes (§7.4), and the
+fixtures regenerated after `d281276` also record the commit that ran (`git_commit`). The jobs'
+artifacts were downloaded with `gh run download` and committed unchanged.
+
+Clean room. The packages were run as black boxes. `tools/make_r_fixtures.R` records only the data
+they return (numbers, dimensions, dimnames, field names): `as_data()` drops every function, R6
+method, call or formula before anything is described or staged, and warnings and errors are
+reported by their message only. Build logs are filtered of compiler diagnostics that would quote
+package source (none was needed: every package came as a binary).
+
+**Rules first.** The decision rule of every probe was fixed before any comparison on the rai-bvar
+side, after discovery runs of the R side only (their run ids and what they changed are in the WP29
+PR) and carried into the design by the errata PR (E117+). A probe that cannot be decided is
+recorded as `unresolved` with its evidence, and the runs that depend on it are **not met**
+(D-59). P8 and P16 need rai-bvar-side code that does not exist yet (WP30, WP38): their R data are
+committed and their status is `pending`.
+
+The rules themselves are in `docs/phase3/DESIGN.md` §9.8 as amended by the errata PR #16
+(Amendment 1, on `main` since `05757c1`), which pins them to `tools/make_r_fixtures.R` at
+`d281276`; DESIGN Amendment 3 (PR #26: E172, E173) moves the pin to `73e3211` and to the commit
+that implements E173, **`56fcc5c`**. After `d281276` the script changed in the fixture extraction
+and its records (`73e3211`, the merge-gate review of the WP29 PR: C1–C3) and in the R-side SV
+predictive at h ≥ 2 (`56fcc5c`, E173, below); no probe or decision function changed. If a later
+review changes a rule, the affected probes are rerun and this section is updated. Here each
+probe's outcome under its rule is recorded.
+
+The fixtures come from three runs of the job, downloaded with `gh run download` and committed
+unchanged (the sha256 of every fixture and each artifact's digest are in the commit messages of
+`7d5aef0` and of the fixture commit after `56fcc5c`):
+- **run 40243289623 (commit `d281276`)**, the final run at the first pin: the four probe
+  fixtures, R2 (`bvars_bayesianvars_n3p2_const`), the seven P8 fixtures and the two bvars runs
+  (14 fixtures). It replaces the fixtures of the first final run (40234562983, at `83c13b4`), as
+  PR #16 §9.8 states. Every probe's status and answer, and the gating comparison, are the same in
+  both runs; the WP29 PR lists the numbers that differ. It ended with exit status 1 for three
+  recorded reasons, the hard mixing checks of the bvars runs (§7.3): split R-hat − 1 of
+  `wbvars_csv` (0.0125) and of `wbvars_ncsv` (0.0278), each above 0.01, and the minimum ESS of
+  `wbvars_ncsv` (198, below 400).
+- **run 40261716464 (commit `73e3211`)**: `stochvol_v_t5` (§7.4). This run also regenerated the
+  eight n = 7 SV fixtures after the review found that run 40243289623 had applied P4's equation
+  order, decided at n = 3, at n = 7 (C1, E172): `matrix()` recycled the first three equations'
+  draws over seven columns, so those fixtures' `sv_*` blocks were wrong (their Π, A, h_t and
+  predictive were not). Those eight are now replaced by the next run.
+- **run 40351238342 (commit `56fcc5c`)**: the 14 bayesianVARs SV fixtures (R1 `n3p2_sv` and
+  `n7p4_sv`, R3–R7 at n = 3 and 7, R8, R9), regenerated with `--sections=bvars
+  --only=bvars_bayesianvars_*_sv,bvars_gl_*` at unchanged draw counts for E173 (below). Its probes
+  gave the same status and answer for P1–P10, which each fixture records (`probe_answers`). Apart
+  from the predictive at h ≥ 2, its numbers are bit-identical to run 40243289623's: in the six
+  n = 3 fixtures and `n3p2_sv` every other variable, and in the n = 7 fixtures everything outside
+  the `sv_*` block that C1 corrected. The n = 7 fixtures therefore differ from those of run
+  40261716464 at Monte Carlo level: runs 40234562983 and 40261716464 reproduce each other bit for
+  bit, and so do runs 40243289623 and 40351238342. The two pairs differ, presumably by runner
+  (E165, E172; not explained). In this run R9's `a` never left 0.05, as in run 40243289623. The
+  run ended with exit status 1 for one recorded reason, the hard mixing check of R9's `a` (§7.1).
+
+Every fixture of every run was staged and packed.
+
+**The SV predictive at h ≥ 2 (E173; Q42, owner 2026-10-26).** The Phase 2 weekly test found that
+bayesianVARs' `predict(…, simulate_predictive = TRUE)` disagrees at h ≥ 2 with the exact SWA
+oracle on the same data and prior, while every parameter block agrees. That `predict()` does not
+return the joint-path predictive there is an inference from its outputs, not confirmed. For every
+bayesianVARs SV run the compared predictive (`forecast_*`) is therefore built as follows:
+- h = 1 comes from `predict()`, as before.
+- h ≥ 2 is computed from bayesianVARs' own kept draws by the joint path, with the structure of
+  Phase 2's `swa_forecast`, one path per kept draw. Per draw: Π, A, μ, φ, σ and h_T; then
+  h_{T+s} = μ + φ(h_{T+s−1} − μ) + ση; e ~ N(0, diag(exp(h))); u solves A u = e (P2); and
+  y = Π′x + u with the lags rolled forward (P3).
+
+`predict()`'s own predictive at every horizon is kept as `forecast_predict_*`: evidence only,
+outside the mixing record, never compared. Each fixture records its sources (`forecast_source`:
+"h1: predict(); h>=2: path recursion from own draws (E173, Q42)") and the path's seeds
+(`forecast_path_seeds`). It also records a hard check that the recursion's own h = 1 agrees with
+`predict()`'s (`forecast_h1_check_*`: max |z| 1.37–2.75, all pass). The evidence comparison of
+`predict()`'s h ≥ 2 quantiles with the path's gives max |z| 6.3–7.6 in the n = 3 runs and 2.7–4.9
+in the n = 7 runs (`forecast_predict_vs_path_*`). R2 (constant variances) keeps `predict()` at
+every horizon.
+
+Merging these fixtures makes the Phase 2 weekly test `test_bayesianvars_parity` run on the three
+`bvars_bayesianvars_*` fixtures (it skipped while they were missing and P1–P5 unresolved); its
+outcome there is recorded in the WP29 PR, and the R1/R2 comparison of record is WP38's. The
+owner decided Q35 and Q39 on 2026-10-25 (E167 in DESIGN Amendment 2): the bvars branch-2
+comparison is evidence and does not gate (§7.2), and a fixture whose hard mixing check fails is
+not met for the quantities that check covers (`mixing_covers`, `mixing_failed`); no run is
+lengthened.
+
+### 7.1 bayesianVARs 0.1.8: probes P1–P10
+
+| probe | question | outcome under its rule | status |
+| :--- | :--- | :--- | :--- |
+| P1 | `normal_sds`, `cholesky_normal_sds`: variance or s.d.; fill order | both are **prior standard deviations** (the manual calls `cholesky_normal_sds` variances); `normal_sds` fills **column-major** over (PHI lag rows × equations). Slot numbers as s.d. 0.99, 1.99, 2.97, 4.01 (as variance 0.001–0.016); free-U posterior variance 1.0e-6; `V_prior` = (1e-6, 4e-6, 9e-6, 1.6e-5) and 1e6 for the intercept | answered |
+| P2 | U vs U⁻¹, layout, sign | U is the **vector of its free elements** (names `yi~yj`: (2,1), (3,1), (3,2), …), **A = t(U)** (A u_t = e_t): (a) relative error of Σ_t against `vcov()` 1.6e-16 for this reading (and its identical lower-row-major twin), ≥ 0.39 for every other; (b) `probe_corr3`: 0.001 for A = U′ against 1.51 for 2I − U′ and (U′)⁻¹; (c) corr(u1, u2) = 0.806 by `vcov()` and by the mapping | answered |
+| P3 | intercept row, lag order | PHI row r is X column r; the **intercept is the last row**; the lag rows follow rai-bvar's order (lag 1 of y1..yM, …); OLS check 0.015 (probe_corr) and 0.0035 (var_sv_n3), limit 0.05 | answered |
+| P4 | `sv_para` layout | (parameter, equation, draw), equations in data order: slice 1 = μ, 2 = φ, 3 = **σ (the s.d.)**, **no h_0 slice**; 1 of 12 (orientation, permutation) pairs satisfies the rule | answered |
+| P5 | `cholesky_priorhomoscedastic` | column 2 is the **inverse-gamma scale** (posterior mean λ = 2.01 against 100/49 = 2.04); the NA default substitutes `cbind(0.01, 0.01)` (the prior object's field) | answered |
+| P6 | internal standardisation | **none**: the scaled fit matches the image of the raw-unit-prior fit (max \|z\| 2.91, bound 4.00) and neither the equivariant image (956) nor the unchanged fit (604); both sides use the data as committed and the SWA fixtures stand | answered |
+| P7 | grouping matrices | the field `general_settings$i_mat` holds the group ids; global (1 group), equation-wise (3), covariate-wise (6), olcl-lagwise (4 at p = 2) all **equal D-38** as partitions (`probe_bayesianvars_p3.nc` `p7_groups`) | answered |
+| P8 | meaning of the GL hyperparameters | data committed (`probe_bvars_p8_*.nc`, all mixed: max R-hat 1.001, min ESS 7,074); the decision is WP30's | pending |
+| P9 | SSVS semi-automatic τ | **differs from D-44** and from every variant tried (τ₀/(c₀ ŝ) ranges 7.4–24 across coefficients); the runs use `SSVS_semiautomatic = FALSE` with explicit τ (R7) | answered |
+| P10 | intercept, `prior_intercept`, floors | `prior_intercept` is an **s.d.** (max \|z\| 1.95 against N(0, s²), 5,421 against the variance reading); the intercept is **outside the shrinkage** (HS: 1.38); **every tolerance accepts 0** (no draw at a floor in any family; in every parity run `floor_fraction_phi = floor_fraction_u = 0`) | answered |
+
+The **derived calls** of the R1 and R2 fixtures follow from these answers. They are
+`normal_sds = bv_normal_sds`, the prior s.d.s in P1's column-major order and P3's rows (stored as
+the variable `bv_normal_sds`), plus `priormean = 0.5`, `prior_intercept = 10`,
+`cholesky_normal_sds = 1` and, for the constant run, `cholesky_priorhomoscedastic = cbind(rep(3, M), rep(2, M))`.
+The draws are mapped by A = t(U), the PHI rows by P3, and `sv_para` by P4. Each fixture's `call`
+attribute is the code that ran.
+
+**Parity fixtures** (4 independent `bvar()` runs × 50,000 draws after 10,000, seeds in
+`chain_seeds`; quantiles, MCSE (the larger of Vehtari et al. §4.3 and the batch MCSE), ESS, R-hat
+of Π, A, h_t (t ≥ 1), μ, φ, σ or λ and the 1–4-step predictive). The mixing record covers Π, A,
+h_t, μ, φ, σ or λ and the predictive (for the SV runs, the compared one: E173). In the GL fixtures
+it also covers the compared hyperparameters: the global scales (`hypersel`), the SSVS indicators
+and R9's grid parameter. Each regenerated fixture names what the record covers (`mixing_covers`)
+and what fails (`mixing_failed`); R2 and the P8 fixtures of run 40243289623 predate that record.
+
+| run | fixture | mixing (max R-hat / min ESS): n = 3; n = 7 (SV runs: run 40351238342; R2: run 40243289623) |
+| :--- | :--- | :--- |
+| R1 | `bvars_bayesianvars_n3p2_sv`, `bvars_bayesianvars_n7p4_sv` | 1.001 / 4,631; 1.001 / 3,818 |
+| R2 | `bvars_bayesianvars_n3p2_const` | 1.000 / 155,657 |
+| R3 HS | `bvars_gl_r3_hs_global_n{3,7}p2` | 1.001 / 4,849; 1.002 / 3,732 |
+| R4 NG (0.1, 1, 1) | `bvars_gl_r4_ng_global_n{3,7}p2` | 1.001 / 4,816; 1.002 / 3,829 |
+| R5 R2D2 (0.1, 0.5) | `bvars_gl_r5_r2d2_global_n{3,7}p2` | 1.001 / 4,595; 1.003 / 3,971 |
+| R6 DL (0.5) | `bvars_gl_r6_dl_global_n{3,7}p2` | 1.001 / 4,638; 1.002 / 3,588 |
+| R7 SSVS (0.01, 1, fixed p = 0.5) | `bvars_gl_r7_ssvs_global_n{3,7}p2` | 1.001 / 4,601 (indicators 1.0004 / 11,624); 1.002 / 2,554 (indicators 1.0027 / 2,772) |
+| R8 HS olcl-lagwise | `bvars_gl_r8_hs_olcl_n7p4` | 1.002 / 2,605 |
+| R9 NG, grid on a | `bvars_gl_r9_nggrid_global_n7p2` | 1.003 / 1,694; **`a` does not mix** (below) |
+
+The SV parameters are each equation's own at every n. The minimum ESS is that of the SV parameters in R1 and
+R3–R6 at n = 7, of Π in R7 and R9, and of the HS group scales in R8. bayesianVARs' μ means in
+`bvars_bayesianvars_n7p4_sv` agree with the independent SWA oracle on the same data
+(`bvars_swa_n7p4_sv`): −1.303 … 0.979 against −1.302 … 0.981, with max |z| of the means 1.99 (μ),
+1.48 (φ) and 1.18 (σ).
+
+The GL fixtures also hold:
+- the thinned draws of every `phi_hyperparameter` column (`hyper_draws`, 500 per run);
+- summaries of the global scales (`hypersel`: HS ζ_g, NG and R2D2 ξ_g);
+- the SSVS inclusion probabilities (`incl_prob`, all lags·M² indicators, MCSE sd/√ESS, with
+  each indicator's ESS and split R-hat);
+- R9's posterior of a on its grid (`grid_prob`, with each indicator's MCSE, ESS and split R-hat):
+  in this run a never left 0.05 (probability 1 there, no ESS).
+
+**R9's `a` does not meet the mixing requirement.** In run 40351238342, as in run 40243289623, `a`
+never left 0.05 in 4 × 50,000 draws. In runs 40234562983 and 40261716464 it visited 0.1
+(0.9915 / 0.0085) with indicator ESS 239 and split R-hat 1.015. The fixture records
+`mixing_ok = 0`, with `mixing_failed` naming only `grid_prob a1 (never left 0.05 …)`; its other
+summaries mix. Under Q39(b) the comparison of R9's `a` is not met at these draw counts (D-59,
+E167). WP38 reads Q39(b) per entry of `mixing_failed` (E172), so R9's Π, A, SV parameters, h_t
+and predictive are still compared.
+
+R7 uses c1 = 1 (raw s.d.), not bayesianVARs' default 100, which mixed badly with
+`semiautomatic = FALSE` in a discovery run. That choice was made before any comparison.
+
+### 7.2 bvars 1.1: probes P11–P16
+
+Data: `data/qd3_growth.csv` (the FRED-QD small set as 400 Δlog GDPC1, 400 Δlog GDPCTPI and
+FEDFUNDS, 1960Q2–2019Q4), p = 4. On the levels data bvars' ncSV sampler stopped with an
+`iwishrnd` error (E146).
+
+| probe | question | outcome under its rule | status |
+| :--- | :--- | :--- | :--- |
+| P11 | defaults | recorded as data (`p11_*` variables): A0 = 1 on the own first lags, S0 = I₃, ν₀ = 6, Ψ, Γ (K × K), λ = 4, sv_a = 1, sv_s = 0.1; starting values ρ = 0.5, ω = 0.1, σ_v² = 0.01, σ_ω² = 1, s_ = 0.05, h a T-vector, V the Minnesota V (K × K) | answered |
+| P12 | can V be held fixed? | **holds, trivially**: the V draws equal the starting value exactly (sd 0) under every concentrated matrix-GIG setting and under the default prior; a starting V of 2Ω stays at 2Ω, so bvars 1.1 never moves V. The runs keep the default starting V and record it (`V_mean`, `V_sd` = 0) | answered |
+| P13 | E h = 0, initial condition | **undecided**: h has T entries (no h_0 state); the scale experiment passes for ncSV (max \|z\| 2.52) but **fails for cSV** (10.46, bound 4.08); cSV's ρ conditional fits ρ ~ U(−1, 1) with **h_0 = 0** (PIT p = 0.058; stationary p = 3e-62; flat rejected: 0 draws outside (−1, 1) against 25,552 expected); for ncSV no candidate fits (below) | unresolved |
+| P14 | ρ, ω / σ_ω² priors; fixing σ_ω² | **undecided**: cSV ρ ~ U(−1, 1); **ncSV ρ is not confined to (−1, 1)** (0.87% of draws with \|ρ\| > 1, 0.15% > 10, max 4,661), yet a flat prior predicts far more draws outside (25,361 expected, 349 observed), so no candidate fits; ncSV σ_ω² \| ω, s_ fits σ_ω² ~ G(sv_a, scale s_) with s_ a sampled state (p = 0.655); cSV σ_v²'s prior matches none of the candidates; no setting fixes the variance that drives h: for ncSV σ_ω² keeps CV 0.015 and 0.195, and three settings stopped with a GIG parameter error; for cSV σ_v² keeps CV > 1 in every setting that ran (sv_a × 1e6, sv_s × 1e6 stopped with an `iwishrnd` error), although cSV's σ_ω² reaches CV 2e-4 at sv_a × 1e8 | unresolved |
+| P15 | Σ, prior mean, intercept | Σ is the **error covariance** (posterior mean within 1.0% of the residual covariance); stationary = FALSE gives A0 = 1 on every own first lag, TRUE gives 0; the **intercept is the last row of X** (column K of A; posterior mean (3.72, −3.05) on probe_corr) | answered |
+| P16 | is bvars' h sampler exact? | data committed (`probe_wbvars_p16.nc`): 4 runs × 10,000 chained `estimate(post, S = 2)` calls per volatility (bvars refuses S = 1), h_1, h_2, ρ, ω, σ_v², σ_ω², s_ and S after each; the extraction check passes (max \|z\| 2.74 cSV, 3.02 ncSV, bound 4.08); the decision is WP38's, which must first establish that the T = 2 posterior is proper under ncSV's untruncated ρ | pending |
+
+**Gating comparison** (§9.8, per volatility): both cSV and ncSV take **branch 2**. P12 holds and P15
+is decided, but P13 and P14 do not map bvars' SV prior onto a CommonSV option. The initial
+condition is h_0 = 0 (cSV) or undecided (ncSV), and the ρ and σ² priors do not map. Branch 2
+compares the 1- and 4-step predictive quantiles under the Phase 2 rule. Its role was pending
+Q35 when the fixtures were made (the `gating_comparison` text says so). The owner has since decided
+it (2026-10-25, E167): branch 2 is reported as evidence and does not gate, so "bvars parity for
+CommonSV" is not met for want of an exact mapping.
+
+### 7.3 bvars parity fixtures
+
+`wbvars_csv`, `wbvars_ncsv`: 4 runs, each a 10,000-draw `estimate()` and then a 50,000-draw
+`estimate()` restarted from its `last_draw`, followed by `forecast(post, horizon = 4)`. They hold:
+- quantiles, MCSE, ESS and R-hat of B (= t(A), rai-bvar regressor order), Σ (unique entries) and
+  the 1–4-step predictive;
+- the prior arrays: B0, S0, ν₀, V (`V_mean`, `V_sd`);
+- from 4 separate state runs (1,000 chained calls of S = 50 each), h_t at t_sel and the SV
+  states, with a check that their B and Σ agree with the main runs (max |z| 2.09 cSV and 2.96 ncSV,
+  pass). These summaries carry dotted prefixes, `h.h_*` and `state.state_*` (`h.h_q`, …).
+
+Mixing: **neither run meets the mixing requirement in Σ** (split R-hat − 1 ≤ 0.01 and ESS ≥ 400).
+In `wbvars_csv` Σ has max split R-hat 1.013 (min ESS 570); in `wbvars_ncsv` it has 1.028 and
+min ESS 198. The draw counts are the design's, and both fixtures record `mixing_ok = 0`. That
+flag covers B, Σ and the predictive, but only Σ fails; each summary's R-hat and ESS are in the
+fixture (`Sigma_rhat`, `Sigma_ess`, …). B (min ESS 11,765 cSV, 6,244 ncSV) and the predictive
+(163,760; 198,170) mix. Under Q39(b) a comparison that needs Σ is not met at these draw counts
+(D-59, E167); the branch-2 predictive comparison is evidence (Q35). In the first final run
+`wbvars_csv` met the requirement (1.005 / 484) and `wbvars_ncsv` did not (1.013 / 190).
+
+### 7.4 stochvol 3.2.9: the SV-t row
+
+`stochvol_v_t5.nc` is regenerated with stochvol 3.2.9 (same seed, dataset (v); P2 §2.10 Stage 4
+amendment 1). The committed file is from run 40261716464. Its numbers are bit-identical to those of
+runs 40234562983 and 40243289623, and it adds the Phase 3 provenance (`repos`, `ppm_snapshot`,
+`packages`, `os`, `ci_run`, `git_commit`). It keeps the Phase 2 attribute set: `design` names
+Phase 2, and `design_p3` the regeneration. It also records stochvol's posterior on the
+four-observation SV-t problem of §3.2, 2 × 200,000 draws:
+
+| | μ | h_2 | τ_2 |
+| :--- | :--- | :--- | :--- |
+| exact (importance sampling, §3.2) | −1.495, −1.042, −0.732, −0.425, 0.017 | −1.291, −0.759, −0.353, 0.124, 1.022 | 0.681, 1.361, 2.263, 3.888, 9.171 |
+| stochvol 3.2.9 | −1.545, −1.068, −0.743, −0.422, 0.028 | −1.618, −0.822, −0.335, 0.172, 1.036 | 0.692, 1.244, 1.962, 3.250, 7.577 |
+
+stochvol 3.2.9 still misses the standardized-t posterior, as 3.2.1 did (§3.2): its quantiles
+are those of 3.2.1 within Monte Carlo error. Step 3 of §3.2's unblock path therefore applies. The
+strict `xfail` of `test_stochvol_parity[stochvol_v_t5]` stays, and the exact importance-sampling
+test remains the SV-t criterion; the fixture now records 3.2.9.

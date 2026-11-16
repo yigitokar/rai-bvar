@@ -52,6 +52,36 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.skip(reason=f"{name} test: select with -m {name}"))
 
 
+#: the Phase 3 validation records (``record_property("p3_record", json)``, P3 DESIGN §9.4–§9.6;
+#: WP35) of this session: each is written to the terminal as soon as its test ends (so a job cut
+#: short by its timeout still logs every finished test) and again in the terminal summary, so the
+#: job log carries the evidence beside the validation-record artifact
+_P3_RECORDS: list[tuple[str, str]] = []
+_CONFIG: list[pytest.Config] = []
+
+
+def pytest_configure(config):
+    _CONFIG[:] = [config]
+
+
+def pytest_runtest_logreport(report):
+    if report.when != "call":
+        return
+    new = [(report.nodeid, v) for k, v in report.user_properties if k == "p3_record"]
+    _P3_RECORDS.extend(new)
+    reporter = _CONFIG[0].pluginmanager.get_plugin("terminalreporter") if _CONFIG else None
+    if reporter is not None:
+        for nodeid, value in new:
+            reporter.write_line(f"\n[p3_record] {nodeid} {value}")
+
+
+def pytest_terminal_summary(terminalreporter):
+    if _P3_RECORDS:
+        terminalreporter.section("Phase 3 validation records")
+        for nodeid, value in _P3_RECORDS:
+            terminalreporter.write_line(f"{nodeid} {value}")
+
+
 @dataclass(frozen=True)
 class VARTruth:
     """Parameters of the simulated VAR(1) on the transformed scale."""

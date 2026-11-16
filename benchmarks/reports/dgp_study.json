@@ -1,0 +1,1256 @@
+{
+ "title": "DGP study of the verdict engine: full",
+ "registered": true,
+ "not_registered_because": [],
+ "preregistration": "benchmarks/reports/dgp_study_preregistration.md",
+ "config": {
+  "name": "full",
+  "reps": 200,
+  "design": {
+   "T": 200,
+   "window": 120,
+   "lags": 2,
+   "horizons": [
+    1,
+    4
+   ],
+   "draws": 1000,
+   "origin_step": 1,
+   "seed": 20261025,
+   "mcmc": null
+  }
+ },
+ "design_key": "81f067e0cefaaea5",
+ "dgps": {
+  "linear-homoskedastic": {
+   "name": "linear-homoskedastic",
+   "intercept": [
+    0.3,
+    0.2,
+    0.1
+   ],
+   "lag_coefs": [
+    [
+     [
+      0.5,
+      0.1,
+      0.0
+     ],
+     [
+      0.2,
+      0.4,
+      0.1
+     ],
+     [
+      0.0,
+      0.2,
+      0.3
+     ]
+    ],
+    [
+     [
+      0.2,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.1,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.1
+     ]
+    ]
+   ],
+   "contemp": [
+    [
+     1.0,
+     0.0,
+     0.0
+    ],
+    [
+     -0.4,
+     1.0,
+     0.0
+    ],
+    [
+     0.2,
+     -0.3,
+     1.0
+    ]
+   ],
+   "log_var": [
+    0.0,
+    -0.6931471805599453,
+    -1.3862943611198906
+   ],
+   "vol": "constant",
+   "phi": 0.95,
+   "sigma": 0.2,
+   "outlier_prob": 0.0,
+   "outlier_max": 20,
+   "burn": 100,
+   "start": "1950Q1",
+   "variables": [
+    "y1",
+    "y2",
+    "y3"
+   ]
+  },
+  "linear-sv": {
+   "name": "linear-sv",
+   "intercept": [
+    0.3,
+    0.2,
+    0.1
+   ],
+   "lag_coefs": [
+    [
+     [
+      0.5,
+      0.1,
+      0.0
+     ],
+     [
+      0.2,
+      0.4,
+      0.1
+     ],
+     [
+      0.0,
+      0.2,
+      0.3
+     ]
+    ],
+    [
+     [
+      0.2,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.1,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.1
+     ]
+    ]
+   ],
+   "contemp": [
+    [
+     1.0,
+     0.0,
+     0.0
+    ],
+    [
+     -0.4,
+     1.0,
+     0.0
+    ],
+    [
+     0.2,
+     -0.3,
+     1.0
+    ]
+   ],
+   "log_var": [
+    0.0,
+    -0.6931471805599453,
+    -1.3862943611198906
+   ],
+   "vol": "sv",
+   "phi": 0.95,
+   "sigma": 0.2,
+   "outlier_prob": 0.0,
+   "outlier_max": 20,
+   "burn": 100,
+   "start": "1950Q1",
+   "variables": [
+    "y1",
+    "y2",
+    "y3"
+   ]
+  },
+  "linear-sv-outliers": {
+   "name": "linear-sv-outliers",
+   "intercept": [
+    0.3,
+    0.2,
+    0.1
+   ],
+   "lag_coefs": [
+    [
+     [
+      0.5,
+      0.1,
+      0.0
+     ],
+     [
+      0.2,
+      0.4,
+      0.1
+     ],
+     [
+      0.0,
+      0.2,
+      0.3
+     ]
+    ],
+    [
+     [
+      0.2,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.1,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      0.1
+     ]
+    ]
+   ],
+   "contemp": [
+    [
+     1.0,
+     0.0,
+     0.0
+    ],
+    [
+     -0.4,
+     1.0,
+     0.0
+    ],
+    [
+     0.2,
+     -0.3,
+     1.0
+    ]
+   ],
+   "log_var": [
+    0.0,
+    -0.6931471805599453,
+    -1.3862943611198906
+   ],
+   "vol": "sv",
+   "phi": 0.95,
+   "sigma": 0.2,
+   "outlier_prob": 0.0625,
+   "outlier_max": 20,
+   "burn": 100,
+   "start": "1950Q1",
+   "variables": [
+    "y1",
+    "y2",
+    "y3"
+   ]
+  }
+ },
+ "rows": [
+  {
+   "name": "linear-homoskedastic",
+   "dgp": "linear-homoskedastic",
+   "spec": "Linear, homoskedastic: nothing beats Linear \u00d7 Constant",
+   "arms": [
+    "Linear \u00d7 Constant",
+    "Linear \u00d7 SV",
+    "Linear \u00d7 SV(outliers)"
+   ],
+   "baseline": "Linear \u00d7 Constant",
+   "pairs": [
+    {
+     "model": "Linear \u00d7 SV",
+     "reference": "Linear \u00d7 Constant",
+     "axis": "vol",
+     "expect": "not_better"
+    },
+    {
+     "model": "Linear \u00d7 SV(outliers)",
+     "reference": "Linear \u00d7 Constant",
+     "axis": "vol",
+     "expect": "not_better"
+    }
+   ]
+  },
+  {
+   "name": "linear-sv",
+   "dgp": "linear-sv",
+   "spec": "Linear, SV: SV beats Constant",
+   "arms": [
+    "Linear \u00d7 Constant",
+    "Linear \u00d7 SV"
+   ],
+   "baseline": "Linear \u00d7 Constant",
+   "pairs": [
+    {
+     "model": "Linear \u00d7 SV",
+     "reference": "Linear \u00d7 Constant",
+     "axis": "vol",
+     "expect": "better"
+    }
+   ]
+  },
+  {
+   "name": "linear-sv-outliers",
+   "dgp": "linear-sv-outliers",
+   "spec": "Linear, SV + outliers: SV(outliers=True) \u2265 SV",
+   "arms": [
+    "Linear \u00d7 SV",
+    "Linear \u00d7 SV(outliers)"
+   ],
+   "baseline": "Linear \u00d7 SV",
+   "pairs": [
+    {
+     "model": "Linear \u00d7 SV(outliers)",
+     "reference": "Linear \u00d7 SV",
+     "axis": "vol",
+     "expect": "not_worse"
+    }
+   ]
+  }
+ ],
+ "pending": [
+  {
+   "name": "linear-sv-bart",
+   "spec": "Linear, SV: BART \u00d7 SV does not beat Linear \u00d7 SV (false-positive rate \u2264 nominal)",
+   "status": "pending (Phase 4): needs BART"
+  },
+  {
+   "name": "threshold-sv-bart",
+   "spec": "Threshold, SV: BART \u00d7 SV beats Linear \u00d7 SV (power)",
+   "status": "pending (Phase 4): needs BART, the 'threshold-sv' DGP simulator"
+  },
+  {
+   "name": "threshold-sv-threshold",
+   "spec": "Threshold, SV: Threshold \u00d7 SV beats Linear \u00d7 SV (power)",
+   "status": "pending (Phase 5): needs Threshold, the 'threshold-sv' DGP simulator"
+  },
+  {
+   "name": "tvp-sv",
+   "spec": "TVP with sizeable drift, SV: TVP \u00d7 SV beats Linear \u00d7 SV",
+   "status": "pending (Phase 5): needs TVP, the 'tvp-sv' DGP simulator"
+  }
+ ],
+ "nominal": 0.1,
+ "verdict_defaults": {
+  "test_level": 0.1,
+  "mcs_alpha": 0.25,
+  "mc_multiple": 3.0,
+  "min_converged": 0.95
+ },
+ "summary": [
+  {
+   "row": "linear-homoskedastic",
+   "model": "Linear \u00d7 SV",
+   "reference": "Linear \u00d7 Constant",
+   "horizon": 1,
+   "expect": "not_better",
+   "target": "better",
+   "n": 200,
+   "rate": 0.0,
+   "se": 0.0,
+   "lo": 1.734723475976807e-18,
+   "hi": 0.018845326377266575,
+   "reading": "not above nominal",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "worse": {
+     "k": 95,
+     "rate": 0.475,
+     "se": 0.035311117229563836,
+     "lo": 0.4069162264657108,
+     "hi": 0.5440260398531525
+    },
+    "inconclusive": {
+     "k": 105,
+     "rate": 0.525,
+     "se": 0.035311117229563836,
+     "lo": 0.4559739601468475,
+     "hi": 0.5930837735342891
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "worse": {
+     "k": 96,
+     "rate": 0.48,
+     "se": 0.03532704346531139,
+     "lo": 0.411791663783233,
+     "hi": 0.5489621492718576
+    },
+    "inconclusive": {
+     "k": 104,
+     "rate": 0.52,
+     "se": 0.03532704346531139,
+     "lo": 0.4510378507281424,
+     "hi": 0.588208336216767
+    }
+   },
+   "classes": {
+    "gate": 1,
+    "imprecise": 45,
+    "no_route": 59,
+    "worse:both": 78,
+    "worse:mcs": 17
+   },
+   "dlpd_mean": -0.9963930325024295,
+   "dlpd_median": -1.1299308859258537,
+   "dlpd_mcse_mean": 0.2218452332911309,
+   "origins_mean": 80.0,
+   "converged_mean": 0.9943125,
+   "gate_pass": 0.99
+  },
+  {
+   "row": "linear-homoskedastic",
+   "model": "Linear \u00d7 SV",
+   "reference": "Linear \u00d7 Constant",
+   "horizon": 4,
+   "expect": "not_better",
+   "target": "better",
+   "n": 200,
+   "rate": 0.03,
+   "se": 0.012062338081814818,
+   "lo": 0.013820314340111346,
+   "hi": 0.06389429245451925,
+   "reading": "not above nominal",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 6,
+     "rate": 0.03,
+     "se": 0.012062338081814818,
+     "lo": 0.013820314340111346,
+     "hi": 0.06389429245451925
+    },
+    "worse": {
+     "k": 39,
+     "rate": 0.195,
+     "se": 0.028015620642777128,
+     "lo": 0.1460552053440051,
+     "hi": 0.25544044374612745
+    },
+    "inconclusive": {
+     "k": 155,
+     "rate": 0.775,
+     "se": 0.02952752952754429,
+     "lo": 0.7122587676433947,
+     "hi": 0.8273763028491088
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 6,
+     "rate": 0.03,
+     "se": 0.012062338081814818,
+     "lo": 0.013820314340111346,
+     "hi": 0.06389429245451925
+    },
+    "worse": {
+     "k": 39,
+     "rate": 0.195,
+     "se": 0.028015620642777128,
+     "lo": 0.1460552053440051,
+     "hi": 0.25544044374612745
+    },
+    "inconclusive": {
+     "k": 155,
+     "rate": 0.775,
+     "se": 0.02952752952754429,
+     "lo": 0.7122587676433947,
+     "hi": 0.8273763028491088
+    }
+   },
+   "classes": {
+    "better:both": 3,
+    "better:mcs": 2,
+    "better:test": 1,
+    "imprecise": 144,
+    "no_route": 11,
+    "worse:both": 30,
+    "worse:mcs": 9
+   },
+   "dlpd_mean": -0.4914269291399653,
+   "dlpd_median": -0.6733809140270064,
+   "dlpd_mcse_mean": 0.5876232511363539,
+   "origins_mean": 77.0,
+   "converged_mean": 0.9943506493506493,
+   "gate_pass": 0.98
+  },
+  {
+   "row": "linear-homoskedastic",
+   "model": "Linear \u00d7 SV(outliers)",
+   "reference": "Linear \u00d7 Constant",
+   "horizon": 1,
+   "expect": "not_better",
+   "target": "better",
+   "n": 200,
+   "rate": 0.0,
+   "se": 0.0,
+   "lo": 1.734723475976807e-18,
+   "hi": 0.018845326377266575,
+   "reading": "not above nominal",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "worse": {
+     "k": 190,
+     "rate": 0.95,
+     "se": 0.015411035007422448,
+     "lo": 0.9104218518612239,
+     "hi": 0.972617354399236
+    },
+    "inconclusive": {
+     "k": 10,
+     "rate": 0.05,
+     "se": 0.015411035007422441,
+     "lo": 0.02738264560076393,
+     "hi": 0.08957814813877599
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "worse": {
+     "k": 193,
+     "rate": 0.965,
+     "se": 0.012995191418367032,
+     "lo": 0.9295293884777092,
+     "hi": 0.9829444579914328
+    },
+    "inconclusive": {
+     "k": 7,
+     "rate": 0.035,
+     "se": 0.012995191418367026,
+     "lo": 0.017055542008567192,
+     "hi": 0.07047061152229073
+    }
+   },
+   "classes": {
+    "gate": 3,
+    "imprecise": 5,
+    "no_route": 2,
+    "worse:both": 179,
+    "worse:mcs": 11
+   },
+   "dlpd_mean": -4.418821471141899,
+   "dlpd_median": -4.600138053215656,
+   "dlpd_mcse_mean": 0.2388074879137462,
+   "origins_mean": 80.0,
+   "converged_mean": 0.9942500000000001,
+   "gate_pass": 0.985
+  },
+  {
+   "row": "linear-homoskedastic",
+   "model": "Linear \u00d7 SV(outliers)",
+   "reference": "Linear \u00d7 Constant",
+   "horizon": 4,
+   "expect": "not_better",
+   "target": "better",
+   "n": 200,
+   "rate": 0.005,
+   "se": 0.004987484335815001,
+   "lo": 0.0008831687156009814,
+   "hi": 0.02777370439789293,
+   "reading": "not above nominal",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 1,
+     "rate": 0.005,
+     "se": 0.004987484335815001,
+     "lo": 0.0008831687156009814,
+     "hi": 0.02777370439789293
+    },
+    "worse": {
+     "k": 177,
+     "rate": 0.885,
+     "se": 0.022558257911461158,
+     "lo": 0.8333528310151243,
+     "hi": 0.9221362676743804
+    },
+    "inconclusive": {
+     "k": 22,
+     "rate": 0.11,
+     "se": 0.022124646889837587,
+     "lo": 0.07377244460125303,
+     "hi": 0.1609269099730149
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 1,
+     "rate": 0.005,
+     "se": 0.004987484335815001,
+     "lo": 0.0008831687156009814,
+     "hi": 0.02777370439789293
+    },
+    "worse": {
+     "k": 180,
+     "rate": 0.9,
+     "se": 0.021213203435596423,
+     "lo": 0.8505941875672826,
+     "hi": 0.9343295513309041
+    },
+    "inconclusive": {
+     "k": 19,
+     "rate": 0.095,
+     "se": 0.020733427116615334,
+     "lo": 0.06166310271738653,
+     "hi": 0.1436016116481994
+    }
+   },
+   "classes": {
+    "better:mcs": 1,
+    "gate": 3,
+    "imprecise": 9,
+    "no_route": 10,
+    "worse:both": 164,
+    "worse:mcs": 10,
+    "worse:test": 3
+   },
+   "dlpd_mean": -6.481209550066929,
+   "dlpd_median": -6.890577987378088,
+   "dlpd_mcse_mean": 0.6546752475563121,
+   "origins_mean": 77.0,
+   "converged_mean": 0.9943506493506493,
+   "gate_pass": 0.985
+  },
+  {
+   "row": "linear-sv",
+   "model": "Linear \u00d7 SV",
+   "reference": "Linear \u00d7 Constant",
+   "horizon": 1,
+   "expect": "better",
+   "target": "better",
+   "n": 200,
+   "rate": 0.675,
+   "se": 0.03311910324872942,
+   "lo": 0.6073198511602996,
+   "hi": 0.7360842846076571,
+   "reading": "descriptive (power)",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 135,
+     "rate": 0.675,
+     "se": 0.03311910324872942,
+     "lo": 0.6073198511602996,
+     "hi": 0.7360842846076571
+    },
+    "worse": {
+     "k": 2,
+     "rate": 0.01,
+     "se": 0.007035623639735145,
+     "lo": 0.0027466581335444384,
+     "hi": 0.0357217617161768
+    },
+    "inconclusive": {
+     "k": 63,
+     "rate": 0.315,
+     "se": 0.032846232660687286,
+     "lo": 0.2546232099022851,
+     "hi": 0.3823495608573036
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 142,
+     "rate": 0.71,
+     "se": 0.03208582241426889,
+     "lo": 0.6436252189922268,
+     "hi": 0.7684597439293211
+    },
+    "worse": {
+     "k": 2,
+     "rate": 0.01,
+     "se": 0.007035623639735145,
+     "lo": 0.0027466581335444384,
+     "hi": 0.0357217617161768
+    },
+    "inconclusive": {
+     "k": 56,
+     "rate": 0.28,
+     "se": 0.03174901573277509,
+     "lo": 0.22236889773949026,
+     "hi": 0.3459230458665071
+    }
+   },
+   "classes": {
+    "better:both": 111,
+    "better:mcs": 22,
+    "better:test": 2,
+    "gate": 7,
+    "imprecise": 10,
+    "no_route": 46,
+    "worse:both": 1,
+    "worse:mcs": 1
+   },
+   "dlpd_mean": 8.271110173559173,
+   "dlpd_median": 6.8856680151686644,
+   "dlpd_mcse_mean": 0.31020495661747804,
+   "origins_mean": 80.0,
+   "converged_mean": 0.9865625,
+   "gate_pass": 0.965
+  },
+  {
+   "row": "linear-sv",
+   "model": "Linear \u00d7 SV",
+   "reference": "Linear \u00d7 Constant",
+   "horizon": 4,
+   "expect": "better",
+   "target": "better",
+   "n": 200,
+   "rate": 0.51,
+   "se": 0.03534826728426727,
+   "lo": 0.44118587678458643,
+   "hi": 0.5784372166878682,
+   "reading": "descriptive (power)",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 102,
+     "rate": 0.51,
+     "se": 0.03534826728426727,
+     "lo": 0.44118587678458643,
+     "hi": 0.5784372166878682
+    },
+    "worse": {
+     "k": 7,
+     "rate": 0.035,
+     "se": 0.012995191418367026,
+     "lo": 0.017055542008567192,
+     "hi": 0.07047061152229073
+    },
+    "inconclusive": {
+     "k": 91,
+     "rate": 0.455,
+     "se": 0.035211858797853886,
+     "lo": 0.387482193098835,
+     "hi": 0.524213886275119
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 108,
+     "rate": 0.54,
+     "se": 0.035242020373412196,
+     "lo": 0.4708228918895333,
+     "hi": 0.6076694820002854
+    },
+    "worse": {
+     "k": 7,
+     "rate": 0.035,
+     "se": 0.012995191418367026,
+     "lo": 0.017055542008567192,
+     "hi": 0.07047061152229073
+    },
+    "inconclusive": {
+     "k": 85,
+     "rate": 0.425,
+     "se": 0.034955328635273904,
+     "lo": 0.3585361254351385,
+     "hi": 0.49429067352145145
+    }
+   },
+   "classes": {
+    "better:both": 76,
+    "better:mcs": 26,
+    "gate": 6,
+    "imprecise": 46,
+    "no_route": 39,
+    "worse:both": 5,
+    "worse:mcs": 2
+   },
+   "dlpd_mean": 6.58838764783327,
+   "dlpd_median": 5.168801356626831,
+   "dlpd_mcse_mean": 0.7317820907441345,
+   "origins_mean": 77.0,
+   "converged_mean": 0.9866233766233765,
+   "gate_pass": 0.95
+  },
+  {
+   "row": "linear-sv-outliers",
+   "model": "Linear \u00d7 SV(outliers)",
+   "reference": "Linear \u00d7 SV",
+   "horizon": 1,
+   "expect": "not_worse",
+   "target": "worse",
+   "n": 200,
+   "rate": 0.0,
+   "se": 0.0,
+   "lo": 1.734723475976807e-18,
+   "hi": 0.018845326377266575,
+   "reading": "not above nominal",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 81,
+     "rate": 0.405,
+     "se": 0.0347113093962184,
+     "lo": 0.3393777128250677,
+     "hi": 0.47420289918661307
+    },
+    "worse": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "inconclusive": {
+     "k": 119,
+     "rate": 0.595,
+     "se": 0.0347113093962184,
+     "lo": 0.525797100813387,
+     "hi": 0.6606222871749323
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 199,
+     "rate": 0.995,
+     "se": 0.004987484335815003,
+     "lo": 0.9722262956021069,
+     "hi": 0.9991168312843989
+    },
+    "worse": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "inconclusive": {
+     "k": 1,
+     "rate": 0.005,
+     "se": 0.004987484335815001,
+     "lo": 0.0008831687156009814,
+     "hi": 0.02777370439789293
+    }
+   },
+   "classes": {
+    "better:both": 81,
+    "gate": 118,
+    "no_route": 1
+   },
+   "dlpd_mean": 27.95851619648248,
+   "dlpd_median": 23.82780632418328,
+   "dlpd_mcse_mean": 1.5200790410267073,
+   "origins_mean": 80.0,
+   "converged_mean": 0.9069375000000001,
+   "gate_pass": 0.405
+  },
+  {
+   "row": "linear-sv-outliers",
+   "model": "Linear \u00d7 SV(outliers)",
+   "reference": "Linear \u00d7 SV",
+   "horizon": 4,
+   "expect": "not_worse",
+   "target": "worse",
+   "n": 200,
+   "rate": 0.0,
+   "se": 0.0,
+   "lo": 1.734723475976807e-18,
+   "hi": 0.018845326377266575,
+   "reading": "not above nominal",
+   "gate_on": {
+    "n": 200,
+    "better": {
+     "k": 39,
+     "rate": 0.195,
+     "se": 0.028015620642777128,
+     "lo": 0.1460552053440051,
+     "hi": 0.25544044374612745
+    },
+    "worse": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "inconclusive": {
+     "k": 161,
+     "rate": 0.805,
+     "se": 0.028015620642777128,
+     "lo": 0.7445595562538726,
+     "hi": 0.8539447946559949
+    }
+   },
+   "gate_off": {
+    "n": 200,
+    "better": {
+     "k": 102,
+     "rate": 0.51,
+     "se": 0.03534826728426727,
+     "lo": 0.44118587678458643,
+     "hi": 0.5784372166878682
+    },
+    "worse": {
+     "k": 0,
+     "rate": 0.0,
+     "se": 0.0,
+     "lo": 1.734723475976807e-18,
+     "hi": 0.018845326377266575
+    },
+    "inconclusive": {
+     "k": 98,
+     "rate": 0.49,
+     "se": 0.03534826728426727,
+     "lo": 0.42156278331213176,
+     "hi": 0.5588141232154135
+    }
+   },
+   "classes": {
+    "better:both": 30,
+    "better:mcs": 9,
+    "gate": 63,
+    "imprecise": 86,
+    "no_route": 12
+   },
+   "dlpd_mean": 13.480640892209195,
+   "dlpd_median": 9.161139529923801,
+   "dlpd_mcse_mean": 2.7317791510783294,
+   "origins_mean": 77.0,
+   "converged_mean": 0.9074025974025973,
+   "gate_pass": 0.35
+  }
+ ],
+ "family": [
+  {
+   "row": "linear-homoskedastic",
+   "horizon": 1,
+   "verdict": {
+    "k": 0,
+    "n": 200,
+    "rate": 0.0,
+    "se": 0.0,
+    "lo": 1.734723475976807e-18,
+    "hi": 0.018845326377266575
+   },
+   "verdict_gate_off": {
+    "k": 0,
+    "n": 200,
+    "rate": 0.0,
+    "se": 0.0,
+    "lo": 1.734723475976807e-18,
+    "hi": 0.018845326377266575
+   }
+  },
+  {
+   "row": "linear-homoskedastic",
+   "horizon": 4,
+   "verdict": {
+    "k": 6,
+    "n": 200,
+    "rate": 0.03,
+    "se": 0.012062338081814818,
+    "lo": 0.013820314340111346,
+    "hi": 0.06389429245451925
+   },
+   "verdict_gate_off": {
+    "k": 6,
+    "n": 200,
+    "rate": 0.03,
+    "se": 0.012062338081814818,
+    "lo": 0.013820314340111346,
+    "hi": 0.06389429245451925
+   }
+  }
+ ],
+ "convergence": [
+  {
+   "row": "linear-homoskedastic",
+   "arm": "Linear \u00d7 Constant",
+   "horizon": 1,
+   "n": 200,
+   "converged_mean": 1.0,
+   "converged_min": 1.0,
+   "gate_pass": 1.0,
+   "seconds_per_origin": 0.9796002085392888,
+   "worst": {}
+  },
+  {
+   "row": "linear-homoskedastic",
+   "arm": "Linear \u00d7 Constant",
+   "horizon": 4,
+   "n": 200,
+   "converged_mean": 1.0,
+   "converged_min": 1.0,
+   "gate_pass": 1.0,
+   "seconds_per_origin": 0.9796002085392888,
+   "worst": {}
+  },
+  {
+   "row": "linear-homoskedastic",
+   "arm": "Linear \u00d7 SV",
+   "horizon": 1,
+   "n": 200,
+   "converged_mean": 0.9943125,
+   "converged_min": 0.675,
+   "gate_pass": 0.99,
+   "seconds_per_origin": 11.373417712978938,
+   "worst": {
+    "sigma[y3]": 38,
+    "sigma[y2]": 36,
+    "sigma[y1]": 13
+   }
+  },
+  {
+   "row": "linear-homoskedastic",
+   "arm": "Linear \u00d7 SV",
+   "horizon": 4,
+   "n": 200,
+   "converged_mean": 0.9943506493506493,
+   "converged_min": 0.6623376623376623,
+   "gate_pass": 0.98,
+   "seconds_per_origin": 11.373417712978938,
+   "worst": {
+    "sigma[y3]": 38,
+    "sigma[y2]": 36,
+    "sigma[y1]": 13
+   }
+  },
+  {
+   "row": "linear-homoskedastic",
+   "arm": "Linear \u00d7 SV(outliers)",
+   "horizon": 1,
+   "n": 200,
+   "converged_mean": 0.9942500000000001,
+   "converged_min": 0.7,
+   "gate_pass": 0.985,
+   "seconds_per_origin": 22.234729287285464,
+   "worst": {
+    "sigma[y2]": 43,
+    "sigma[y3]": 29,
+    "sigma[y1]": 17
+   }
+  },
+  {
+   "row": "linear-homoskedastic",
+   "arm": "Linear \u00d7 SV(outliers)",
+   "horizon": 4,
+   "n": 200,
+   "converged_mean": 0.9943506493506493,
+   "converged_min": 0.6883116883116883,
+   "gate_pass": 0.985,
+   "seconds_per_origin": 22.234729287285464,
+   "worst": {
+    "sigma[y2]": 43,
+    "sigma[y3]": 29,
+    "sigma[y1]": 17
+   }
+  },
+  {
+   "row": "linear-sv",
+   "arm": "Linear \u00d7 Constant",
+   "horizon": 1,
+   "n": 200,
+   "converged_mean": 1.0,
+   "converged_min": 1.0,
+   "gate_pass": 1.0,
+   "seconds_per_origin": 0.9882738169380274,
+   "worst": {}
+  },
+  {
+   "row": "linear-sv",
+   "arm": "Linear \u00d7 Constant",
+   "horizon": 4,
+   "n": 200,
+   "converged_mean": 1.0,
+   "converged_min": 1.0,
+   "gate_pass": 1.0,
+   "seconds_per_origin": 0.9882738169380274,
+   "worst": {}
+  },
+  {
+   "row": "linear-sv",
+   "arm": "Linear \u00d7 SV",
+   "horizon": 1,
+   "n": 200,
+   "converged_mean": 0.9865625,
+   "converged_min": 0.875,
+   "gate_pass": 0.965,
+   "seconds_per_origin": 11.362114684009436,
+   "worst": {
+    "sigma[y1]": 75,
+    "sigma[y3]": 72,
+    "sigma[y2]": 66
+   }
+  },
+  {
+   "row": "linear-sv",
+   "arm": "Linear \u00d7 SV",
+   "horizon": 4,
+   "n": 200,
+   "converged_mean": 0.9866233766233765,
+   "converged_min": 0.8701298701298701,
+   "gate_pass": 0.95,
+   "seconds_per_origin": 11.362114684009436,
+   "worst": {
+    "sigma[y1]": 75,
+    "sigma[y3]": 72,
+    "sigma[y2]": 66
+   }
+  },
+  {
+   "row": "linear-sv-outliers",
+   "arm": "Linear \u00d7 SV",
+   "horizon": 1,
+   "n": 200,
+   "converged_mean": 0.9704375000000001,
+   "converged_min": 0.6875,
+   "gate_pass": 0.85,
+   "seconds_per_origin": 11.271792539021734,
+   "worst": {
+    "phi[y1]": 120,
+    "phi[y2]": 105,
+    "phi[y3]": 97
+   }
+  },
+  {
+   "row": "linear-sv-outliers",
+   "arm": "Linear \u00d7 SV",
+   "horizon": 4,
+   "n": 200,
+   "converged_mean": 0.9707792207792206,
+   "converged_min": 0.6753246753246753,
+   "gate_pass": 0.805,
+   "seconds_per_origin": 11.271792539021734,
+   "worst": {
+    "phi[y1]": 120,
+    "phi[y2]": 105,
+    "phi[y3]": 97
+   }
+  },
+  {
+   "row": "linear-sv-outliers",
+   "arm": "Linear \u00d7 SV(outliers)",
+   "horizon": 1,
+   "n": 200,
+   "converged_mean": 0.9161875,
+   "converged_min": 0.4625,
+   "gate_pass": 0.47,
+   "seconds_per_origin": 22.214182982260272,
+   "worst": {
+    "sigma[y2]": 469,
+    "sigma[y1]": 431,
+    "sigma[y3]": 422
+   }
+  },
+  {
+   "row": "linear-sv-outliers",
+   "arm": "Linear \u00d7 SV(outliers)",
+   "horizon": 4,
+   "n": 200,
+   "converged_mean": 0.9167532467532468,
+   "converged_min": 0.44155844155844154,
+   "gate_pass": 0.425,
+   "seconds_per_origin": 22.214182982260272,
+   "worst": {
+    "sigma[y2]": 469,
+    "sigma[y1]": 431,
+    "sigma[y3]": 422
+   }
+  }
+ ],
+ "estimate": {
+  "workers": 12,
+  "rows": {
+   "linear-sv": {
+    "replications_timed": 198,
+    "seconds_mean": 983.9642917443551,
+    "missing": 0
+   },
+   "linear-homoskedastic": {
+    "replications_timed": 195,
+    "seconds_mean": 2754.4762447313788,
+    "missing": 0
+   },
+   "linear-sv-outliers": {
+    "replications_timed": 195,
+    "seconds_mean": 2666.8356482105078,
+    "missing": 0
+   }
+  },
+  "remaining_hours": 0.0,
+  "full_hours": 29.65405641058445,
+  "single_process_full_hours": 355.8486769270134,
+  "this_run_wall_hours": 24.52569239616394
+ },
+ "meta": {
+  "git": {
+   "git_commit": "58ab09f99012f825eccda604abd39d6bc942fbae",
+   "git_dirty": false,
+   "git_diff_sha256": null,
+   "preregistration_in_commit": true
+  },
+  "machine": {
+   "platform": "Darwin arm64",
+   "python": "3.12.13",
+   "cpus": 18,
+   "cpu": "Apple M5 Max",
+   "performance_cores": "6",
+   "efficiency_cores": "12"
+  },
+  "versions": {
+   "rai_bvar": "0.2.0",
+   "jax": "0.12.0.1"
+  },
+  "workers": 12,
+  "load_start": "4.40 4.75 4.04",
+  "cache": "/Users/yigitokar/.cache/rai-bvar-dgp-58ab09f",
+  "notes": [
+   "Started on the owner's approval of 2026-10-25, given after the pre-pilot estimate of about 10 h and before the pilot finished. The pre-registration's 4-hour limit for a local run was waived by that approval (the pilot extrapolated 28 h remaining at its load); every study setting is the pre-registered one.",
+   "Replications 0-23 of every row are the pilot's records (same commit, design and seeds), copied into this run's records before it started.",
+   "Paused on 2026-10-25 at 18:11 EDT on the owner's decision (about 28 h remained at the machine's load), after 20 of the 528 replications beyond the pilot (92 of 600 recorded). The 12 replications in flight were stopped; on resume they rerun, with their finished origins served from the score cache. Resumed with the same command, settings and worker count, from the same checkout at 58ab09f (moved during the pause to ~/.cache/rai-bvar-dgp-58ab09f/checkout; clean, same commit).",
+   "Resumed on 2026-10-26 at 09:25 EDT on the owner's word, with load averages 4.32 4.76 4.03 (1, 5, 15 min) and 86% of memory free; the Mac is shared with another session's test runs. The wall time below is this invocation's (from 92 of 600 recorded); the paused run's 20 replications took about 1.6 h."
+  ],
+  "skipped": 92,
+  "wall_seconds": 88292.49262619019,
+  "ran": 508,
+  "load_end": "3.99 10.60 44.61"
+ }
+}

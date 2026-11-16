@@ -398,6 +398,12 @@ class HostStore:
                         coords={"pair": list(names.pairs), "pair_i": ("pair", rows), "pair_j": ("pair", cols)},
                     )  # fmt: skip
                 continue
+            if path == "glob.coef.incl":  # SSVS indicators γ, int8 (P3 E123 as amended)
+                data_vars["ssvs_gamma"] = xr.DataArray(arr, dims=(*base, "variable", "regressor"))
+                continue
+            if path in _COMMON_SV_POSTERIOR:  # glob.vol leaves mapped explicitly (P3 §2.2, E98)
+                data_vars[_COMMON_SV_POSTERIOR[path]] = xr.DataArray(arr, dims=base)
+                continue
             if key == "log1m_p":
                 continue
             if key == "log_p":
@@ -472,6 +478,9 @@ class HostStore:
             if key in ("h_mean", "h_sd"):
                 arr = arr[..., : names.T1] if names.T1 else arr
                 data_vars[key] = xr.DataArray(arr, dims=(*lead, "variable", "h_index"))
+            elif key in ("common_h_mean", "common_h_sd"):  # CommonSV h by data row (P3 §2.2)
+                arr = arr[..., : names.T] if names.T else arr
+                data_vars[key] = xr.DataArray(arr, dims=(*lead, "time"))
             elif key == "p_outlier":
                 arr = arr[..., : names.T] if names.T else arr
                 data_vars[key] = xr.DataArray(arr, dims=(*lead, "variable", "time"))
@@ -514,6 +523,15 @@ class HostStore:
 
 _POSTERIOR_NAMES = frozenset({"gamma", "Pi", "mu", "phi", "sigma", "h_T", "log_lam", "nu"})
 
+_COMMON_SV_POSTERIOR = {
+    "glob.vol.h_T": "common_h_T",
+    "glob.vol.rho": "rho",
+    "glob.vol.sigma": "sigma",
+}
+"""The ``CommonSVDraw`` leaves (``GlobDraw.vol``) and their names in ``posterior`` (P3 §2.2): scalar
+per draw, never mapped onto P2's per-equation ``h_T`` and ``sigma`` (a CommonSV composition has a
+Constant core, so the names are free)."""
+
 
 def _paths(record: Any) -> list[str]:
     return [leaf_path(p) for p, _ in jax.tree_util.tree_flatten_with_path(record)[0]]
@@ -550,6 +568,7 @@ class _Names:
     T: int | None  # real rows (None with a fit axis: ragged windows are not trimmed)
     periods: tuple[str, ...] | None
     nu: tuple[int, ...] = ()  # the static ν grid (coordinate of the ν prior weights)
+    G: int = 0  # coefficient groups of a global-local prior (P3 D-38; 0 for a fixed prior)
 
     @classmethod
     def of(cls, store: HostStore, meta: FitMeta) -> _Names:
@@ -576,7 +595,8 @@ class _Names:
             else:
                 periods = tuple(str(t) for t in range(T))
         nu = tuple(static.vol.nu_grid) if static is not None else ()
-        return cls(lead_dims, n, k, variables, regs, pairs, T, periods, nu)
+        G = static.coef.n_groups if static is not None else 0
+        return cls(lead_dims, n, k, variables, regs, pairs, T, periods, nu, G)
 
     @property
     def T1(self) -> int | None:
@@ -592,6 +612,8 @@ class _Names:
             out["regressor"] = list(self.regressors)
         if self.nu:
             out["nu"] = list(self.nu)
+        if self.G:
+            out["group"] = list(range(self.G))
         return out
 
     @property
@@ -606,6 +628,7 @@ class _Names:
             "variable_": self.n - 1,
             "regressor": self.k,
             "nu": len(self.nu),
+            "group": self.G,
         }
 
     def dims(
@@ -666,6 +689,18 @@ _NAMED_DIMS: dict[str, tuple[str, ...]] = {
     "prior_eq_contemp_cmask": ("variable", "variable_"),
     "prior_shared_Mc": ("regressor", "variable_"),
     "prior_eq_transitory_log_nu_w": ("variable", "nu"),
+    # Phase 3 global-local and SSVS priors (P3 §2.3, §3.7, D-52)
+    "prior_eq_coef_gl_mask": ("variable", "regressor"),
+    "prior_eq_coef_gl_group": ("variable", "regressor"),
+    "prior_eq_coef_gl_log_r": ("variable", "regressor"),
+    "prior_eq_coef_gl_ssvs_log_tau0": ("variable", "regressor"),
+    "prior_eq_coef_gl_ssvs_log_tau1": ("variable", "regressor"),
+    "gl_log_zeta": ("group",),
+    "gl_log_tau": ("group",),
+    "gl_log_xi": ("group",),
+    "gl_a_idx": ("group",),
+    "gl_p": ("group",),
+    "incl_prob": ("variable", "regressor"),
 }
 """Layouts of the leaves whose shape alone can be ambiguous (``k = n``, ``k = |ν grid|``); keys
 are a leaf's full underscored path or its last path component."""

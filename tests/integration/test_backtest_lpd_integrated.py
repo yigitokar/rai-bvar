@@ -17,8 +17,12 @@
 * ``ordering_sensitivity`` in backtest mode (its cache keys differ from the default's and a
   direct integrated backtest of an ordering is served from its cache) and in forecast mode.
 
-Models without ``lag_coefs`` (analytic, benchmark) are legal at ``h = 1`` only, which keeps the
-forwarding tests of ``compare`` and ``ordering_sensitivity`` cheap.
+Models without ``lag_coefs`` (benchmarks) are legal at ``h = 1`` only, which keeps the
+forwarding tests of ``compare`` and ``ordering_sensitivity`` cheap. Analytic forecasts carry
+``lag_coefs`` on request only (P3 DESIGN D-49, E120; amended in WP33 as P3 §1.3 states): a default
+analytic forecast still raises for the integrated estimator at ``h > 1``, and the backtest asks
+for ``forecast(..., lag_coefs=True)`` —
+:func:`test_integrated_analytic_backtest_requests_lag_coefs`.
 """
 
 from __future__ import annotations
@@ -288,10 +292,33 @@ def test_unknown_or_unsupported_estimators_raise(data2):
         ordering_sensitivity(analytic(), data2, mode="prior", lpd_method="integrated")
     # models without lag_coefs: integrated at h > 1 raises at the first origin (no fallback)
     with pytest.raises(ValueError, match="lag_coefs"):
-        backtest(analytic(), data2, origins=origins, horizon=2, draws=50, lpd_method="integrated")
+        backtest(OLSVAR(1), data2, origins=origins, horizon=2, draws=50, lpd_method="integrated")
+    # a default analytic forecast still carries none (E120)
+    fc = analytic().fit(data2).forecast(2, 50, seed=1)
+    with pytest.raises(ValueError, match="lag_coefs"):
+        fc.log_pred_density(data2.values[-1], 2, lpd_method="integrated")
 
 
-@pytest.mark.parametrize("make", [analytic, lambda: OLSVAR(1)], ids=["analytic", "ols"])
+def test_integrated_analytic_backtest_requests_lag_coefs(data2):
+    """P3 D-49/E120: with ``"integrated"`` at ``h > 1`` the backtest makes every analytic forecast
+    with ``lag_coefs=True``. That adds no random numbers, so every non-LPD score and the ``h = 1``
+    LPD equal the default run's bitwise, and the ``h = 2`` LPD is the direct integrated call on
+    ``forecast(..., lag_coefs=True)``."""
+    model, origins = analytic(), origins_of(data2, 40, 42)
+    kw = dict(origins=origins, horizon=2, draws=80, seed=3)
+    default = backtest(model, data2, **kw).scores
+    integ = backtest(model, data2, lpd_method="integrated", **kw).scores
+    assert_integrated_matches_default(integ, default)
+    origin = origins[1]
+    rng = np.random.default_rng([3, zlib.crc32(origin.encode())])
+    fc = model.fit(data2.upto(origin)).forecast(2, 80, seed=rng, lag_coefs=True)
+    truth = data2.realized(origin, 2)
+    lpd, mcse = fc.log_pred_density(truth[1], 2, return_mcse=True, lpd_method="integrated")
+    cell = integ.sel(origin=origin, horizon=2)
+    assert cell["lpd"].item() == lpd and cell["lpd_mcse"].item() == mcse
+
+
+@pytest.mark.parametrize("make", [lambda: OLSVAR(1)], ids=["ols"])
 def test_scoring_errors_name_the_model_and_the_origin(data2, make):
     """Review finding contract-2: in ``compare`` the failing model is not the last one fitted,
     so the error says which model and origin it came from (the cause is kept)."""

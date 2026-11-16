@@ -685,7 +685,10 @@ def test_step_writes_only_declared_paths():
     assert changed == {"glob.mean.Pi"}
     assert kernel.block is Block.G_CCCM and kernel.phase == "pre"
     assert kernel.writes == frozenset({"glob.mean.Pi"})
-    assert kernel.reads == frozenset({"glob.mean.Pi", "eq.struct.a", "eq.vol"})
+    # P3 §2.4, E70/E128: the step reads the coefficient prior's state through its moments
+    assert kernel.reads == frozenset(
+        {"glob.mean.Pi", "eq.struct.a", "eq.vol", "eq.coef", "glob.coef"}
+    )
     assert kernel.marginal_of_indicators is True
     assert isinstance(kernel, GlobalStep)
 

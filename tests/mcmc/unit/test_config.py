@@ -109,7 +109,8 @@ def test_static_config_is_a_value():
         (lambda: MeanStatic("linear_structural", gram="packed_tiled"), "gram_tile"),
         (lambda: MeanStatic("linear_structural", gram_tile=512), "gram_tile"),
         (lambda: MeanStatic("linear_structural", cccm_precompute=1), "cccm_precompute"),
-        (lambda: CoefPriorStatic(kind="horseshoe"), "CoefPriorStatic.kind"),
+        (lambda: CoefPriorStatic(kind="cauchy_prior"), "CoefPriorStatic.kind"),
+        (lambda: CoefPriorStatic(kind="horseshoe"), "n_groups"),  # Phase 3: G must be resolved
         (lambda: VolStatic("garch"), "persistent"),
         (lambda: VolStatic("sv", transitory="cauchy"), "transitory"),
         (lambda: VolStatic("sv", mixture="ksc10"), "mixture"),
@@ -229,7 +230,10 @@ def test_illegal_compositions(name):
 
 def test_capability_tables_and_varying_coefficient_priors(monkeypatch):
     assert cfg.SUPPORTS_REDUCED_MEAN == {"recursive": True}
-    assert cfg.COEF_VARIES == {"fixed_diagonal": False}
+    assert cfg.COEF_VARIES == {  # Phase 3 adds the global-local and SSVS priors (P3 D-43)
+        "fixed_diagonal": False,
+        **dict.fromkeys(("horseshoe", "normal_gamma", "r2d2", "dirichlet_laplace", "ssvs"), True),
+    }
     monkeypatch.setitem(cfg.SUPPORTS_REDUCED_MEAN, "recursive", False)
     with pytest.raises(ValueError, match="does not support a reduced-form mean"):
         validate_composition(S0, MeanStatic(RED), CoefPriorStatic(), SV)
@@ -241,9 +245,15 @@ def test_capability_tables_and_varying_coefficient_priors(monkeypatch):
         validate_composition(
             SL, MeanStatic(LIN, "lambda", "fixed_factor"), CoefPriorStatic(), CONST_C
         )
-    validate_composition(
-        SL, MeanStatic(LIN, "lambda", "cholesky_const"), CoefPriorStatic(), CONST_C
-    )
+    # Phase 3 rule (11): a varying prior needs the weighted path (P3 §2.1), so the Phase 2
+    # expectation "cholesky_const stays legal" no longer holds
+    with pytest.raises(ValueError, match="needs a fixed prior"):
+        validate_composition(
+            SL,
+            MeanStatic(LIN, "lambda", "cholesky_const", coef_log=True),
+            CoefPriorStatic(),
+            CONST_C,
+        )
 
 
 def test_scaling_mode():
@@ -276,8 +286,11 @@ def test_slot_kinds():
         "transitory": "t",
         "vol": "vol_block",
         "global_pre": ("cccm",),
+        "global_vol": (),
     }
     assert registry.slot_kinds(make())["global_pre"] == ()
+    common = make(vol=VolStatic("constant", common=True))
+    assert registry.slot_kinds(common)["global_vol"] == ("common_sv",)
 
 
 def test_load(monkeypatch, tmp_path):

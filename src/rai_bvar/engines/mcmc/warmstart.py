@@ -11,7 +11,13 @@ metadata. :func:`remap` moves it onto a new estimation window:
   copied ``(μ, φ, σ)`` (``h' = μ + φ(h − μ) + ση``; random walk ``h' = h + ση``); ``h_0`` is the old
   state just before the new first period when it exists, else ``μ`` (random walk: the old ``h_0``);
 * the result is padded to the new ``T_pad`` (padded rows inert), accumulators are zero and the
-  status is reset.
+  status is reset;
+* CommonSV (P3 §5.5, E109): the common ``glob.vol.h`` (index ``t`` = data row ``t``, no presample
+  state, exactly 0 on padded rows) is aligned by period in the same way, with every new row
+  simulated forward with the copied ``(ρ, σ_h)``: ``h_t = ρh_{t−1} + σ_hη_t`` from the old state
+  just before it (for a new first row, the old row of the previous period when it exists, else a
+  stationary ``N(0, σ_h²/(1 − ρ²))`` draw); the normals come from ``eq_key(eq_key(key, c), n)``,
+  a slot beyond the equations. ``ρ``, ``log σ_h`` and the ``λ_i`` are copied.
 
 A warm start changes only the initialisation: burn-in still runs (``MCMCSettings.warm_burn``) and
 the PRNG starts at ``it = 0`` with the new fit's own seed and data salt, so streams never repeat
@@ -42,7 +48,7 @@ __all__ = ["TIME_INDEXED", "FinalState", "incompatibility", "remap", "warm_state
 Key = jax.Array
 
 TIME_INDEXED: frozenset[str] = frozenset(
-    {"eq.vol.core.h", "eq.vol.trans.o_idx", "eq.vol.trans.log_tau"}
+    {"eq.vol.core.h", "eq.vol.trans.o_idx", "eq.vol.trans.log_tau", "glob.vol.h"}
 )
 """Leaves aligned by period label (every other non-accumulator leaf is copied)."""
 
@@ -126,6 +132,51 @@ def _remap_latents(
     return out
 
 
+def _remap_common_h(
+    prev: dict[str, np.ndarray], tmpl: dict[str, np.ndarray], rows: np.ndarray, T_new: int,
+    before: int, key: Key,
+) -> np.ndarray:  # fmt: skip
+    """The new ``glob.vol.h`` (``(C, T_pad)``) of every chain (module docstring). ``before`` is the
+    old row of the period just before the new first period (−1 when the old window lacks it)."""
+    old_h = prev["glob.vol.h"]
+    C = old_h.shape[0]
+    n = int(prev["eq.vol.core.log_lam"].shape[1])
+    rho = prev["glob.vol.rho"]
+    sigma = np.exp(prev["glob.vol.log_sigma"])
+    new_h = np.zeros_like(tmpl["glob.vol.h"])
+    for c in range(C):
+        kc = keys.eq_key(key, c)
+        eta = np.asarray(random.normal(keys.eq_key(kc, n), (max(T_new, 1) + 1,)), np.float64)
+        r, s = float(rho[c]), float(sigma[c])
+        if before >= 0:
+            h_prev = float(old_h[c, before])
+        else:  # no old state before the window: the stationary law, scaled by the last normal
+            h_prev = None
+        for t in range(T_new):
+            if rows[t] >= 0:
+                h_t = float(old_h[c, rows[t]])
+            elif h_prev is None:  # the new first row: h_0 ~ N(0, σ_h²/(1 − ρ²))
+                h_t = s / np.sqrt((1.0 - r) * (1.0 + r)) * eta[-1]
+            else:
+                h_t = r * h_prev + s * eta[t]
+            new_h[c, t] = h_t
+            h_prev = h_t
+    return new_h
+
+
+def _period_before(old: pd.Index, new: pd.Index) -> int:
+    """The old row of the period immediately before ``new[0]``, or −1."""
+    if not len(new):
+        return -1
+    try:
+        first = new[0]
+        prev_period = first - 1
+        loc = pd.Index(old).get_indexer(pd.Index([prev_period]))
+        return int(loc[0])
+    except (TypeError, ValueError, AttributeError):
+        return -1
+
+
 def remap(
     prev: FinalState,
     new_data: EngineData,
@@ -156,6 +207,9 @@ def remap(
         raise ValueError("the final state does not have the structure of the new StaticConfig")
     rows = _row_map(prev.periods, new_periods)
     latents = _remap_latents(prev_flat, tmpl, rows, T_new, static_new.vol.rw, key)
+    if "glob.vol.h" in tmpl:  # CommonSV (P3 §5.5, E109)
+        before = _period_before(prev.periods, new_periods)
+        latents["glob.vol.h"] = _remap_common_h(prev_flat, tmpl, rows, T_new, before, key)
     leaves = []
     for p, _ in flat_t:
         name = leaf_path(p)

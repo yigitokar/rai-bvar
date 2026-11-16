@@ -25,7 +25,8 @@ data)`` always resolves the same way, E14):
     const_path "auto" → structural Linear × Constant without a transitory scale and with a
                non-varying coefficient prior: Mode I "eigen" (with SOC/SUR dummy rows on the
                dense prior precision; N05 §7.7, WP25), Mode II "fixed_factor", iw_equivalent
-               "cholesky_const"; anything else "weighted" (§3.7.2).
+               "cholesky_const"; Mode II × CommonSV (the conjugate prior, P3 §5.3)
+               "shared_factor"; anything else "weighted" (§3.7.2).
                "cholesky" → "cholesky_const" where weights are time-constant, else "weighted"
                (the general Cholesky path): the fast paths are off either way
     cccm_precompute ⇔ n·k²·8·C ≤ 512 MiB
@@ -47,7 +48,7 @@ import numpy as np
 import pandas as pd
 from jax import random
 
-from rai_bvar.components import SV
+from rai_bvar.components import SV, CommonSV
 from rai_bvar.data import transforms
 from rai_bvar.data.dataset import VARData
 from rai_bvar.data.design import n_deterministic
@@ -71,11 +72,14 @@ from rai_bvar.engines.mcmc.state import (
     PriorArrays,
 )
 from rai_bvar.priors.dummies import dummy_arrays, dummy_hyper
+from rai_bvar.priors.global_local import DiscreteGrid, GlobalLocalPrior
+from rai_bvar.priors.global_local_arrays import gl_arrays
 from rai_bvar.priors.reduced import reduced_arrays
 from rai_bvar.priors.scales import WindowScales, window_scales
 from rai_bvar.priors.structural import contemp_arrays, structural_arrays
 from rai_bvar.priors.sv_arrays import (
     C_REL,
+    common_sv_prior,
     constant_prior,
     outlier_beta,
     sv_prior_arrays,
@@ -90,6 +94,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Resolved",
+    "check_coef_groups",
+    "check_shared_precision",
     "fit_bvar",
     "resolve",
     "resolve_cccm_precompute",
@@ -165,18 +171,68 @@ def resolve_const_path(setting: str, static_parts: Any) -> str:
     path: with them the Mode I prior precision is dense and ``eigen`` factors it
     (``linalg.eigen_prepare_dense``, N05 §7.7; 0.46 vs 1.53 ms/sweep for ``cholesky_const`` at
     ``n = 20, p = 4, T = 300``), and Mode II's ``fixed_factor`` holds the λ-free rows.
+
+    P3 §2.1, §5.3: Mode II × ``CommonSV`` (the conjugate Minnesota prior, ``cross = contemp = 1``)
+    takes ``"shared_factor"``, selected before the constant-weights test (common weights are
+    time-varying); ``"cholesky"`` sends it to the weighted path (row 323, A8's twin). The varying
+    coefficient-prior check comes first (E65).
     """
     if setting not in ("auto", "cholesky"):
         raise ValueError(f"unknown const_path setting {setting!r}")
-    if static_parts.mean_kind != "linear_structural" or not static_parts.vol.constant_weights:
+    if static_parts.mean_kind != "linear_structural":
+        return "weighted"
+    if COEF_VARIES[static_parts.coef.kind]:  # before an explicit "cholesky" (P3 E65)
+        return "weighted"
+    if static_parts.vol.common:  # before the constant-weights test (P3 §2.1)
+        mode_ii = static_parts.coef_scaling == "lambda"
+        return "shared_factor" if mode_ii and setting == "auto" else "weighted"
+    if not static_parts.vol.constant_weights:
         return "weighted"
     if setting == "cholesky":
         return "cholesky_const"
-    if COEF_VARIES[static_parts.coef.kind]:
-        return "weighted"
     mean = MeanStatic(kind=static_parts.mean_kind, coef_scaling=static_parts.coef_scaling)
     mode = scaling_mode(static_parts.struct, mean)
     return {"I": "eigen", "II": "fixed_factor", "iw_equivalent": "cholesky_const"}[mode]
+
+
+def check_coef_groups(model: BVAR, n: int) -> int:
+    """``G`` of the model's global-local prior for ``n`` variables (P3 §2.1: only the value of
+    ``G`` depends on ``n``), raising E-13 for a custom ``groups`` array of the wrong shape; 0 for a
+    Minnesota prior."""
+    prior = model.mean.prior
+    if not isinstance(prior, GlobalLocalPrior):
+        return 0
+    return prior.n_groups(n, model.lags)
+
+
+def check_shared_precision(coef: Any, contemp: Any, dummy_w: Any = None) -> np.ndarray:
+    """``SharedPrior.shared_prec`` of the shared-factor path (P3 §2.1 rule (14), §5.3): the λ-free
+    Mode II precision ``P̃ = [prec0 | contemp prec0]`` of the last equation (every slot active),
+    after checking on the arrays that every equation's active slots carry exactly the same values
+    and that the SOC/SUR rows' λ-free weight is the same for every equation. Raises a
+    ``ValueError`` naming ``cross``/``contemp`` otherwise (the composition needs ``cross =
+    contemp = 1``, which the conjugate form guarantees)."""
+    prec_d = np.asarray(coef.prec0, dtype=np.float64)
+    prec_a = np.asarray(contemp.prec0, dtype=np.float64)
+    cmask = np.asarray(contemp.cmask, dtype=np.float64)
+    n = prec_d.shape[0]
+    ref_a = prec_a[n - 1]
+    same_d = all(np.array_equal(prec_d[i], prec_d[n - 1]) for i in range(n))
+    same_a = all(np.array_equal(prec_a[i][cmask[i] > 0], ref_a[cmask[i] > 0]) for i in range(n))
+    if not (same_d and same_a):
+        raise ValueError(
+            "the shared-factor path (Minnesota(form='conjugate') × CommonSV()) needs a λ-free "
+            "prior precision equal across equations, i.e. cross = 1 and contemp = 1; the prior "
+            "arrays differ between equations"
+        )
+    if dummy_w is not None:
+        w = np.asarray(dummy_w, dtype=np.float64)
+        if w.size and not np.all(w == w[0]):
+            raise ValueError(
+                "the shared-factor path needs the SOC/SUR rows' λ-free weight to be equal across "
+                f"equations (Mode II weight 1), got {w}"
+            )
+    return np.ascontiguousarray(np.concatenate([prec_d[n - 1], ref_a]))
 
 
 def resolve_cccm_precompute(n: int, k: int, chains: int) -> bool:
@@ -209,14 +265,19 @@ def resolve(
     settings: MCMCSettings = model.mcmc
     prior, vol = model.mean.prior, model.vol
     lags, det = model.lags, model.deterministic
-    parts = static_parts(model)
+    check_coef_groups(model, data.n_vars)  # E-13 at fit (P3 §7.3)
+    parts = static_parts(model, n=data.n_vars)  # G of a global-local prior needs n (P3 §2.1)
+    gl_prior = isinstance(prior, GlobalLocalPrior)
+    # a global-local prior has no hierarchy, EB or dummy rows: ψ, means, the deterministic and
+    # a_i priors come from its internal Minnesota adapter (P3 §3.6)
+    mn = prior.minnesota() if gl_prior else prior
 
     # hyperparameters: EB plug-in (DESIGN §6.5) or the fixed values
-    outcome = eb.eb_hyper(model, data) if prior.hierarchy == "eb" else None
-    psi = outcome.hyper["psi"] if outcome is not None and "psi" in prior.free else None
-    scales = window_scales(data, prior, lags, det, psi=psi)
+    outcome = eb.eb_hyper(model, data) if mn.hierarchy == "eb" else None
+    psi = outcome.hyper["psi"] if outcome is not None and "psi" in mn.free else None
+    scales = window_scales(data, mn, lags, det, psi=psi)
     if outcome is None:
-        lam, alpha = prior.lambda_, prior.alpha
+        lam, alpha = mn.lambda_, mn.alpha
     else:
         lam, alpha = outcome.hyper["lambda"], outcome.hyper["alpha"]
 
@@ -228,9 +289,11 @@ def resolve(
         parts.struct, MeanStatic(kind=parts.mean_kind, coef_scaling=parts.coef_scaling)
     )
     dummies, dummy_w = dummy_arrays(
-        data.values, scales, prior, None if outcome is None else outcome.hyper,
+        data.values, scales, mn, None if outcome is None else outcome.hyper,
         lags=lags, n_det=n_det, mode=mode if structural else "reduced",
     )  # fmt: skip
+    if gl_prior and not isinstance(dummies, Empty):  # pragma: no cover - mn has no soc/sur
+        raise ValueError("global-local priors carry no SOC/SUR dummy rows (P3 D-36)")
     n_dummy = 0 if isinstance(dummies, Empty) else int(dummies.Y.shape[0])
     T_eff = int(np.asarray(engine_data.T_eff))
     shapes = Shapes.of(n, lags, n_det, bucket(T_eff, settings.t_bucket))
@@ -243,6 +306,7 @@ def resolve(
         gram_tile=tile,
         cccm_precompute=resolve_cccm_precompute(n, shapes.k, settings.chains),
         n_dummy=n_dummy,
+        coef_log=parts.coef_log,
     )
     static = StaticConfig(
         shapes=shapes,
@@ -261,14 +325,27 @@ def resolve(
     values = {"lambda": lam, "alpha": alpha}
     if structural:
         coef, shared = structural_arrays(
-            scales, prior, values, n=n, lags=lags, n_det=n_det, mode="II" if mode == "II" else "I"
+            scales, mn, values, n=n, lags=lags, n_det=n_det, mode="II" if mode == "II" else "I"
         )
     else:
-        coef, shared = reduced_arrays(scales, prior, values, n=n, lags=lags, n_det=n_det)
+        coef, shared = reduced_arrays(scales, mn, values, n=n, lags=lags, n_det=n_det)
     if n_dummy:  # SOC/SUR prior rows (WP25)
         coef = dataclasses.replace(coef, dummy_w=dummy_w)
         shared = dataclasses.replace(shared, dummies=dummies)
-    contemp = contemp_arrays(scales, prior, n, scaling=parts.struct.contemp_scaling)
+    if gl_prior:  # P3 §2.3, §3.6: the GL arrays on top of the adapter's
+        gl_arr, gl_shared, G = gl_arrays(
+            prior, scales, n=n, lags=lags, n_det=n_det, form=parts.mean_kind, data=engine_data
+        )
+        if G != parts.coef.n_groups:  # pragma: no cover - both come from prior.group_ids
+            raise ValueError(f"group count {G} differs from the static n_groups")
+        coef = dataclasses.replace(coef, gl=gl_arr)
+        shared = dataclasses.replace(shared, gl=gl_shared)
+    contemp = contemp_arrays(scales, mn, n, scaling=parts.struct.contemp_scaling)
+    if parts.vol.common:  # P3 §5: the CommonSV priors, and the shared-factor precision
+        shared = dataclasses.replace(shared, csv=common_sv_prior(vol, n))
+        if mean_static.const_path == "shared_factor":
+            prec = check_shared_precision(coef, contemp, dummy_w if n_dummy else None)
+            shared = dataclasses.replace(shared, shared_prec=prec)
     if parts.vol.persistent == "constant":
         core, trans = constant_prior(scales, n), Empty()
     else:
@@ -279,6 +356,8 @@ def resolve(
     )
 
     hyper = _hyper(model, scales, lam, alpha, outcome, core)
+    if gl_prior:
+        hyper["n_groups"] = parts.coef.n_groups
     if n_dummy:  # the SOC/SUR weights in use (EB values when free) and the row count (WP25)
         hyper.update(dummy_hyper(prior, None if outcome is None else outcome.hyper))
         hyper["n_dummy"] = n_dummy
@@ -298,16 +377,36 @@ def resolve(
             "tcode_clash": _tcode_clash(model, data, scales),
             "eb_warnings": tuple(dict.fromkeys(messages)),
             "sv_budget": _sv_budget(model),
+            **_order_invariant(mn, parts, mode),
         },
     )
 
 
+def _order_invariant(mn: Any, parts: Any, mode: str) -> dict[str, bool]:
+    """``{"order_invariant": True}`` for Mode II at ``cross = contemp = 1`` with ``Constant`` or
+    ``CommonSV`` volatility (the NIW prior with a common scalar volatility: exactly
+    order-invariant, so no R8 note; P3 E99, E130), else ``{}`` (the static rule of
+    ``monitor.is_order_invariant`` decides). ``cross`` and ``contemp`` are data, not static
+    (D-23), which is why the resolution step passes this."""
+    vol = parts.vol
+    if (
+        mode == "II"
+        and vol.persistent == "constant"
+        and vol.transitory == "none"
+        and float(mn.cross) == 1.0
+        and float(mn.contemp) == 1.0
+    ):
+        return {"order_invariant": True}
+    return {}
+
+
 def _sv_budget(model: BVAR) -> tuple[int, int] | None:
-    """``(chains, draws)`` of a stochastic-volatility composition fitted with fewer kept draws per
-    chain than ``SV_DEFAULT_DRAWS`` (the D-35 warning), else ``None``: never for ``Constant``
-    volatility, nor for an explicit budget at or above the default."""
+    """``(chains, draws)`` of a stochastic-volatility composition (``SV`` or ``CommonSV``, P3
+    D-51) fitted with fewer kept draws per chain than ``SV_DEFAULT_DRAWS`` (the D-35 warning),
+    else ``None``: never for ``Constant`` volatility, nor for an explicit budget at or above the
+    default."""
     settings: MCMCSettings = model.mcmc
-    if isinstance(model.vol, SV) and settings.draws < SV_DEFAULT_DRAWS:
+    if isinstance(model.vol, SV | CommonSV) and settings.draws < SV_DEFAULT_DRAWS:
         return settings.chains, settings.draws
     return None
 
@@ -320,18 +419,36 @@ def _hyper(
     outcome: eb.EBOutcome | None,
     core: Any,
 ) -> dict[str, Any]:
-    """The hyperparameters in use (``MCMCFit.hyper``; DESIGN §11.3)."""
+    """The hyperparameters in use (``MCMCFit.hyper``; DESIGN §11.3). A global-local prior reports
+    its own settings (P3 §3.2) instead of the Minnesota hierarchy, λ, α and cross."""
     prior, vol = model.mean.prior, model.vol
-    hyper: dict[str, Any] = {
-        "hierarchy": prior.hierarchy,
-        "lambda": float(lam),
-        "alpha": float(alpha),
-        "cross": prior.cross,
-        "contemp": prior.contemp,
-        "var_const": prior.var_const,
-        "psi": scales.psi.copy(),
-        "own_means": scales.own_means.copy(),
-    }
+    if isinstance(prior, GlobalLocalPrior):
+        hyper: dict[str, Any] = {
+            "prior": prior.label,
+            "groups": prior.groups_label,
+            "scale": prior.scale,
+            "contemp": prior.contemp,
+            "var_const": prior.var_const,
+            "psi": scales.psi.copy(),
+            "own_means": scales.own_means.copy(),
+        }
+        for name in prior._OWN:
+            value = getattr(prior, name)
+            if isinstance(value, DiscreteGrid):
+                spec = value.to_spec()
+                value = spec.get("name", f"DiscreteGrid({value.size} points)")
+            hyper[name] = value if isinstance(value, float | int | str | bool) else str(value)
+    else:
+        hyper = {
+            "hierarchy": prior.hierarchy,
+            "lambda": float(lam),
+            "alpha": float(alpha),
+            "cross": prior.cross,
+            "contemp": prior.contemp,
+            "var_const": prior.var_const,
+            "psi": scales.psi.copy(),
+            "own_means": scales.own_means.copy(),
+        }
     if outcome is not None:
         hyper["eb_method"] = outcome.hyper["eb_method"]
         hyper["eb_free"] = outcome.hyper["eb_free"]

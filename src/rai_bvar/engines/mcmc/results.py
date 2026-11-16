@@ -360,6 +360,8 @@ class MCMCFit:
 
     def vol_mean_label(self) -> str:
         """How :meth:`prior_vol_mean` sets ``λ_i`` (the ``vol_mean`` field of ``summary()``)."""
+        if self.static.vol.common:  # P3 §5: Σ_t = e^{h_t}Σ; the moments are those of Σ (h = 0)
+            return "C/(c-1) prior mean (CommonSV: the base Σ at h = 0)"
         if self.static.vol.persistent == "constant":
             return "C/(c-1) prior mean (Constant)"
         return "exp(m0) plug-in (SV, RW)" if self.static.vol.rw else "exp(b_mu) plug-in (SV)"
@@ -368,8 +370,10 @@ class MCMCFit:
         """Implied reduced-form prior moments of ``B = (A⁻¹Γ)'`` and ``Σ`` (R8; N05 §4.3, DESIGN
         §6.1): ``priors.structural.implied_reduced_form_moments`` of the fit's prior arrays at the
         composition's scaling mode with ``E[λ_i]`` from :meth:`prior_vol_mean`. ``None`` unless
-        the mean is structural (the reduced-form coefficient prior is already on ``B``, §6.2)."""
-        if self.static.mean.kind != "linear_structural":
+        the mean is structural (the reduced-form coefficient prior is already on ``B``, §6.2) and
+        the coefficient prior fixed: under a global-local prior they are not applicable (P3 D-62:
+        the horseshoe has no finite prior variance)."""
+        if self.static.mean.kind != "linear_structural" or self.static.coef.varies:
             return None
         from rai_bvar.priors.structural import implied_reduced_form_moments
 
@@ -380,6 +384,11 @@ class MCMCFit:
         )
 
     def _implied_summary(self) -> dict[str, Any] | str:
+        if self.static.coef.varies:
+            return (
+                f"not applicable: the {self.static.coef.kind} global-local prior has no fixed "
+                "prior variances (the horseshoe's are infinite; P3 D-62)"
+            )
         if self.static.mean.kind != "linear_structural":
             return (
                 "not applicable: the reduced-form coefficient prior is already a prior on B "
@@ -447,9 +456,28 @@ class MCMCFit:
         return frame
 
     # ------------------------------------------------------------------ delegation (WP17)
-    def forecast(self, horizon: int, draws: int = 1000, seed: SeedLike = None) -> ForecastResult:
-        """Predictive paths and conditional moments (DESIGN §7); ``engines.mcmc.forecast``."""
+    def forecast(
+        self, horizon: int, draws: int = 1000, seed: SeedLike = None, *, lag_coefs: bool = True
+    ) -> ForecastResult:
+        """Predictive paths and conditional moments (DESIGN §7); ``engines.mcmc.forecast``.
+
+        MCMC forecasts always attach the accelerator variable ``lag_coefs`` (P2 D-34); the
+        keyword-only ``lag_coefs`` is accepted for symmetry with the analytic forecasts'
+        ``forecast(..., lag_coefs=True)`` protocol (P3 D-49, E162(a)) and changes nothing."""
+        if not isinstance(lag_coefs, bool):
+            raise TypeError(f"lag_coefs must be a bool, got {lag_coefs!r}")
         return _forecast_fn("forecast")(self, horizon, draws, seed)
+
+    def conditional_forecast(
+        self, horizon: int, conditions: Any, draws: int = 1000, seed: SeedLike = None
+    ) -> Any:
+        """Hard-condition scenarios (P3 DESIGN §6, D-50; WP34): each ``(chain, draw)`` slice of
+        ``forecast(horizon, draws, seed)`` conditioned exactly given its parameter draw and its
+        drawn volatility path (SV, CommonSV). Returns a ``ConditionalForecastResult``;
+        ``rai_bvar.forecast.conditional`` (NumPy-only, P3 §1.1)."""
+        from rai_bvar.forecast.conditional import conditional_forecast
+
+        return conditional_forecast(self, horizon, conditions, draws=draws, seed=seed)
 
     def irf(
         self,
@@ -505,8 +533,10 @@ def fit_mcmc(
     never passes it. ``settings.draws=None`` (the composition default) is resolved from
     ``static.vol`` as ``BVAR`` resolves it (D-35).
     """
-    if getattr(settings, "draws", 0) is None:
-        settings = settings.with_default_draws(sv=static.vol.persistent == "sv")
+    if getattr(settings, "draws", 0) is None:  # CommonSV counts as SV (P3 D-51)
+        settings = settings.with_default_draws(
+            sv=static.vol.persistent == "sv" or static.vol.common
+        )
     with _jax.x64():
         fns = make_runner(static, overrides=_overrides)
         if init is not None:

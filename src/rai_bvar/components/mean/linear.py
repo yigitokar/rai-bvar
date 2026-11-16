@@ -44,6 +44,44 @@ N05 §7.7); the weight is the fixed ``w_d = dummy_w_i = 1/σ̄_i²`` in Mode I a
 are like data rows and the coupling counts them: ``n_active += m``,
 ``quad += ½ dummy_w_i Σ_d (y_{d,i} − F_dθ_i)²``. Without rows (``m = 0``) none of this is traced.
 
+Deviation path (P3 §3.4, D-41; ``MeanStatic.coef_log``): a varying coefficient prior returns
+``GaussianLogDiag`` moments, and the draw is taken in deviation coordinates ``θ_i = c_θ + d`` about
+the prior mean ``c_θ = [pm.mean | cm.mean]`` with the Jacobi scaling in log space
+(``linalg.precision_draw_log``)::
+
+    K = diag(P) + G,   log P = [pm.log_prec | log cm.prec],   G = (cθ ⊗ cθ) ⊙ Fᵀ diag(w) F
+    b̃ = cθ ⊙ Fᵀ(w ⊙ (y_i − F c_θ)),   d ~ N(K⁻¹b̃, K⁻¹),   dev_log = log|d|
+
+This is the same law as the weighted path (it is D-14's draw with ``b̃ = b − K c_θ``), and it
+returns ``LinearEq.dev_log = log|δ_i − m_i|`` exactly even when ``d`` underflows. The cold start
+(:meth:`init_eq`) takes it too, so ``dev_log`` is finite from the first state on. GL priors carry
+no SOC/SUR rows (D-36). The internal ``gl_deviation(mean) -> centre`` returns the centre of the
+deviation (the prior mean; mutant M26 centres at 0). With ``GaussianDiag`` moments nothing of this
+is traced: the Phase 2 paths are unchanged.
+
+Shared-factor path (P3 §5.3, D-47; ``const_path="shared_factor"``: the conjugate Minnesota prior
+× ``CommonSV``, structural Mode II at ``cross = contemp = 1``). The λ-free prior precision ``P̃``
+(``SharedPrior.shared_prec``) is the same for every equation on its active (leading) slots, the
+weights ``W = diag(m_t e^{−h_t})`` (``EqContext.common_w``) do not depend on ``i`` and the SOC/SUR
+rows have the λ-free Mode II weight, so ``K̃_i = P̃ + F_iᵀWF_i + F_{d,i}ᵀF_{d,i}`` is the leading
+``q_i × q_i`` block of one matrix and its Jacobi-scaled Cholesky factor the leading block of one
+factor (``linalg.shared_factor_*``)::
+
+    G = (√w ⊙ F)ᵀ(√w ⊙ F) + F_dᵀF_d,   s = diag(P̃ + G)^{−½},   L = chol(s(P̃ + G)s)   once per chain
+    b_i = c_i ⊙ (P̃μ_i + Fᵀ(w ⊙ y_i) + F_dᵀy_{d,i})                                     per equation
+    θ_i = c_i ⊙ s ⊙ L⁻ᵀ(c_i ⊙ L⁻¹(s ⊙ b_i) + √λ_i·(c_i ⊙ z_i))    ~ N(K̃_i⁻¹b_i, λ_i K̃_i⁻¹)
+
+``common_w``, ``F``, the rows and ``P̃`` are closed over by the vmapped equation body (unbatched,
+E87), so ``G``, ``s`` and ``L`` are computed once per chain and sweep. This is the weighted
+path's law (``K = K̃_i/λ_i``, ``b = b_i/λ_i``) and the same function of ``z`` up to rounding. The
+SOC/SUR rows are prior rows: weight 1, **not** weighted by ``h`` (E83, E88; internal
+``shared_factor_rows``, mutant M32). The coupling is the Mode II one with the rows (E88:
+``n_active = q_i + m``, the rows' sum of squares in ``quad``); for the coupled common core it is
+formed by the internal ``csv_lambda_conditional(θ part, row part) -> Coupling`` (mutants M31, M36;
+the ``Coupling`` contract carries totals only, so the parts are separated here). The exposed
+conditional (``linear_conditional``, ``conditional_eq``) takes the weighted branch (E95), and an
+overridden internal sends the draw there as well.
+
 Overridable internals (DESIGN §4.9): ``structural_gamma(δ, a, M_c) -> γ`` and
 ``linear_conditional(ctx, pm, cm, cache, shared) -> GaussianPrec``. Overriding either switches the
 draw to the Cholesky path through ``linear_conditional``; overriding ``structural_gamma`` (which must
@@ -56,7 +94,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -73,6 +111,11 @@ from rai_bvar.engines.mcmc.linalg import (
     fixed_factor_draw,
     fixed_factor_prepare,
     precision_draw,
+    precision_draw_log,
+    shared_factor_draw,
+    shared_factor_gram,
+    shared_factor_prepare,
+    shared_factor_rhs,
     weighted_gram,
 )
 from rai_bvar.engines.mcmc.protocols import Batching, KernelBase
@@ -84,6 +127,7 @@ from rai_bvar.engines.mcmc.state import (
     EqPrior,
     FitCache,
     GaussianDiag,
+    GaussianLogDiag,
     GaussianPrec,
     GlobalState,
     GlobDraw,
@@ -101,7 +145,7 @@ _HIGHEST = lax.Precision.HIGHEST  # full float64 products on every backend (CPU 
 _LOG_2PI = 1.8378770664093453
 _FAST_PATHS = frozenset({"eigen", "fixed_factor"})
 
-__all__ = ["LinearStructural", "theta_prior_arrays"]
+__all__ = ["DeviationConditional", "LinearStructural", "theta_prior_arrays"]
 
 
 def theta_prior_arrays(prior_i: EqPrior, i: Array, n: int) -> GaussianDiag:
@@ -120,6 +164,17 @@ def theta_prior_arrays(prior_i: EqPrior, i: Array, n: int) -> GaussianDiag:
     )
 
 
+class DeviationConditional(NamedTuple):
+    """The exact conditional of ``θ_i`` on the deviation path (P3 §3.4): ``θ_i = centre + d``,
+    ``d ~ N(K⁻¹b, K⁻¹)``, ``K = diag(exp(log_prec)) + G`` (``G`` masked, ``b = b̃`` masked)."""
+
+    centre: Array
+    log_prec: Array
+    G: Array
+    b: Array
+    cmask: Array
+
+
 @dataclass(frozen=True)
 class LinearStructural(KernelBase):
     """``MeanBlock`` of the structural Linear mean with D3 centring (DESIGN §3.7.2).
@@ -132,6 +187,7 @@ class LinearStructural(KernelBase):
     static: MeanStatic
     contemp_scaling: Scaling
     n: int
+    common: bool = False  # CommonSV volatility (VolStatic.common; P3 §5): the coupled common core
 
     fuses_contemp: ClassVar[bool] = True
     batching: ClassVar[Batching] = Batching.VMAP
@@ -157,9 +213,14 @@ class LinearStructural(KernelBase):
 
     @classmethod
     def from_static(cls, static: StaticConfig) -> LinearStructural:
-        """The mean of a composition: ``static.mean``, ``static.struct.contemp_scaling`` and
-        ``static.shapes.n``."""
-        return cls(static.mean, contemp_scaling=static.struct.contemp_scaling, n=static.shapes.n)
+        """The mean of a composition: ``static.mean``, ``static.struct.contemp_scaling``,
+        ``static.shapes.n`` and whether the volatility is ``CommonSV`` (``static.vol.common``)."""
+        return cls(
+            static.mean,
+            contemp_scaling=static.struct.contemp_scaling,
+            n=static.shapes.n,
+            common=bool(static.vol.common),
+        )
 
     # ----------------------------------------------------------------- static helpers
 
@@ -184,6 +245,8 @@ class LinearStructural(KernelBase):
         custom = self._overridden("structural_gamma") or self._overridden("linear_conditional")
         if path in _FAST_PATHS and custom:
             return "cholesky_const"
+        if path == "shared_factor" and custom:  # P3 E95: the general (weighted) conditional
+            return "weighted"
         return path
 
     # ----------------------------------------------------------------- prior and conditional
@@ -241,13 +304,14 @@ class LinearStructural(KernelBase):
         pr = self.theta_prior(ctx, pm, cm)
         c = pr.cmask
         w = ctx.weights
-        const = self.static.const_path != "weighted" and not batched
+        shared_factor = self.static.const_path == "shared_factor"  # P3 E95: the weighted branch
+        const = self.static.const_path != "weighted" and not batched and not shared_factor
         if const and not self._overridden("structural_gamma"):
             inv_lam = w[0]  # weights m_t/λ_i: row 0 is always real (T_eff ≥ 1)
             G = cache.G_const * inv_lam
             fty = jnp.take(cache.FtY, ctx.i, axis=1) * inv_lam
-        else:
-            F, FF, mode, tile = self._design(ctx, cache, shared, batched=batched)
+        else:  # the shared-factor cache has no packed products FF: the Gram is formed from F
+            F, FF, mode, tile = self._design(ctx, cache, shared, batched=batched or shared_factor)
             G = weighted_gram(w, F=F, FF=FF, mode=mode, q=F.shape[1], tile=tile)
             fty = jnp.matmul(F.T, w * ctx.target, precision=_HIGHEST)
         if self.static.n_dummy:  # SOC/SUR prior rows (WP25); closed path without dummies
@@ -382,6 +446,10 @@ class LinearStructural(KernelBase):
     ) -> tuple[LinearEq, Array]:
         """One exact draw of ``(δ_i, a_i)`` with the weights of ``ctx`` (the runner passes
         ``m_t·ι/ψ_ι``, DESIGN §5.4), on any path: Gram ``Fᵀ(w ⊙ F)`` from ``cache.F``."""
+        if isinstance(pm, GaussianLogDiag):  # deviation path (P3 §3.4): sets dev_log
+            dc = self.deviation_conditional(ctx, pm, cm, cache, shared, batched=True)
+            ms, a, _, _ = self._draw_log(self._noise(key, pm, cm), dc, pm, cm)
+            return ms, a
         cond = self._conditional(ctx, pm, cm, cache, shared, batched=True)
         theta, _ = precision_draw(cond.K, cond.b, self._noise(key, pm, cm))
         return self._split(theta, pm, cm)
@@ -414,8 +482,70 @@ class LinearStructural(KernelBase):
         if path == "fixed_factor":
             theta = fixed_factor_draw(cache_i, jnp.exp(ctx.log_scale), z)
             return theta, StepInfo(jnp.all(jnp.isfinite(theta)), jnp.full((), jnp.inf))
+        if path == "shared_factor":
+            return self.shared_factor_eq(z, ctx, pm, cm, cache, shared)
         cond = self.impl("linear_conditional")(ctx, pm, cm, cache, shared)
         return precision_draw(cond.K, cond.b, z)
+
+    # ----------------------------------------------------------------- shared factor (P3 §5.3)
+
+    def shared_factor_rows(self, w: Array, Fd: Array, Yd: Array) -> tuple[Array, Array]:
+        """The SOC/SUR rows ``(F_d, Y_d)`` that join the shared factor: unchanged, i.e. weight 1
+        and not weighted by ``h`` (P3 E83, E88; overridable, mutant M32 weights them by
+        ``e^{−h_0}`` = ``w[0]``). ``w`` is ``EqContext.common_w``."""
+        del w
+        return Fd, Yd
+
+    def shared_factor_parts(
+        self, ctx: EqContext, cache: FitCache, shared: SharedPrior
+    ) -> tuple[Array, Array, Array | None, Array | None]:
+        """``(L, s, F_d, Y_d)``: the factor shared by every equation (unbatched inside the
+        equation body: it reads only ``common_w``, ``F``, the rows and ``P̃``) and the rows
+        (``None`` without SOC/SUR rows), scaled by the square root of their λ-free weight
+        (``dummy_w``, equal across equations and 1 in Mode II; ``resolve.py`` checks it)."""
+        w = ctx.common_w
+        if isinstance(w, Empty) or isinstance(shared.shared_prec, Empty):
+            raise ValueError(
+                "const_path='shared_factor' needs EqContext.common_w (CommonSV) and "
+                "SharedPrior.shared_prec (the equation-invariant λ-free precision)"
+            )
+        Fd = Yd = None
+        if self.static.n_dummy:
+            d = cache.dummy
+            if isinstance(d, Empty) or isinstance(shared.dummies, Empty):
+                raise ValueError("MeanStatic.n_dummy > 0 needs FitCache.dummy and the rows")
+            sw = jnp.sqrt(d.w[0])
+            Fd, Yd = self.impl("shared_factor_rows")(w, sw * d.F, sw * shared.dummies.Y)
+        G = shared_factor_gram(w, cache.F, Fd)
+        L, s, _ = shared_factor_prepare(shared.shared_prec, G)
+        return L, s, Fd, Yd
+
+    def shared_factor_eq(
+        self,
+        z: Array,
+        ctx: EqContext,
+        pm: GaussianDiag,
+        cm: GaussianDiag,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> tuple[Array, StepInfo]:
+        """Unmasked ``θ_i`` of the shared-factor path for injected ``z`` (module docstring):
+        ``θ_i ~ N(K̃_i⁻¹b_i, λ_i K̃_i⁻¹)`` with ``λ_i = exp(log_scale)`` (Mode II, coupled)."""
+        L, s, Fd, Yd = self.shared_factor_parts(ctx, cache, shared)
+        cmask = jnp.concatenate([pm.cmask, cm.cmask])
+        on = cmask > 0
+        mean = jnp.where(on, jnp.concatenate([pm.mean, cm.mean]), 0.0)
+        yd = None if Yd is None else jnp.take(Yd, ctx.i, axis=1)
+        prec = shared.shared_prec
+        b = shared_factor_rhs(prec, mean, cache.F, ctx.common_w, ctx.target, cmask, Fd, yd)
+        return shared_factor_draw(L, s, b, cmask, jnp.exp(ctx.log_scale), z)
+
+    def csv_lambda_conditional(self, theta: Coupling, dummy: Coupling) -> Coupling:
+        """The coefficient-side terms of the coupled common core's ``λ_i | θ_i, e_i, h``
+        (P3 §5.3): ``(n_active, quad)`` of the θ block plus those of the SOC/SUR rows
+        (``n_active = q_i + m``; E88). Overridable (mutants M31: no ``n_active/2`` shape term,
+        M36: no rows); production code returns the sum."""
+        return theta + dummy
 
     def sample_eq(
         self,
@@ -434,6 +564,8 @@ class LinearStructural(KernelBase):
         draw and a positive factorisation (eigen: ``g ≥ −1e-10·max g``)."""
         if cm is None:
             raise ValueError("LinearStructural fuses the contemporaneous step: cm is required")
+        if isinstance(pm, GaussianLogDiag):  # deviation path (P3 §3.4)
+            return self._sample_eq_log(key, ctx, pm, cm, cache, shared)
         theta, info = self.draw_core(self._noise(key, pm, cm), ctx, pm, cm, cache_i, cache, shared)
         new, a = self._split(theta, pm, cm)
         return new, a, self.coupling(new.delta, a, ctx, pm, cm, cache=cache, shared=shared), info
@@ -452,6 +584,10 @@ class LinearStructural(KernelBase):
         """The exposed exact conditional of ``θ_i = [δ_i | a_i]`` (DESIGN §3.1 rule 3)."""
         if cm is None:
             raise ValueError("LinearStructural fuses the contemporaneous step: cm is required")
+        if isinstance(pm, GaussianLogDiag):  # θ coordinates of the deviation path's conditional
+            dc = self.deviation_conditional(ctx, pm, cm, cache, shared, batched=False)
+            K = jnp.diag(jnp.exp(dc.log_prec)) + dc.G
+            return GaussianPrec(K=K, b=dc.b + jnp.matmul(K, dc.centre, precision=_HIGHEST))
         return self.impl("linear_conditional")(ctx, pm, cm, cache, shared)
 
     def coupling(
@@ -475,6 +611,20 @@ class LinearStructural(KernelBase):
         prec_a = cm.prec * jnp.exp(ctx.log_scale)  # λ-free P̃ of the a-slots
         quad = jnp.sum(jnp.where(cm.cmask > 0, prec_a * (a - cm.mean) ** 2, 0.0))
         n_active = jnp.sum(cm.cmask)
+        if self.coef_scaled and self.common:  # the coupled common core (P3 §5.3): parts apart
+            quad = quad + jnp.sum(jnp.where(pm.cmask > 0, pm.prec * (delta - pm.mean) ** 2, 0.0))
+            theta = Coupling(n_active=n_active + jnp.sum(pm.cmask), quad=0.5 * quad)
+            rows = Coupling.zeros()
+            if self.static.n_dummy:
+                if cache is None or shared is None:
+                    raise ValueError("Mode II coupling with dummy rows needs cache and shared")
+                Fd, yd, _ = self._dummy_rows(ctx, cache, shared)
+                r = yd - jnp.matmul(Fd, jnp.concatenate([delta, a]), precision=_HIGHEST)
+                rows = Coupling(
+                    n_active=jnp.asarray(float(self.static.n_dummy), jnp.float64),
+                    quad=0.5 * jnp.take(cache.dummy.w, ctx.i) * jnp.sum(r * r),
+                )
+            return self.impl("csv_lambda_conditional")(theta, rows)
         if self.coef_scaled:
             quad = quad + jnp.sum(jnp.where(pm.cmask > 0, pm.prec * (delta - pm.mean) ** 2, 0.0))
             n_active = n_active + jnp.sum(pm.cmask)
@@ -486,6 +636,73 @@ class LinearStructural(KernelBase):
                 quad = quad + jnp.take(cache.dummy.w, ctx.i) * jnp.sum(r * r)
                 n_active = n_active + self.static.n_dummy
         return Coupling(n_active=n_active, quad=0.5 * quad)
+
+    # ----------------------------------------------------------------- deviation path (P3 §3.4)
+
+    def gl_deviation(self, mean: Array) -> Array:
+        """The centre of the deviation coordinates: the prior mean (overridable; mutant M26)."""
+        return mean
+
+    def theta_prior_log(self, pm: GaussianLogDiag, cm: GaussianDiag) -> GaussianLogDiag:
+        """Prior of ``θ_i`` in log precisions: ``[pm.log_prec | log cm.prec]`` on the active slots
+        (``cm`` carries its λ-scaling), mean 0 and log precision 0 on the inactive ones."""
+        cmask = jnp.concatenate([pm.cmask, cm.cmask])
+        on = cmask > 0
+        log_pa = jnp.log(jnp.where(cm.cmask > 0, cm.prec, 1.0))
+        return GaussianLogDiag(
+            mean=jnp.where(on, jnp.concatenate([pm.mean, cm.mean]), 0.0),
+            log_prec=jnp.where(on, jnp.concatenate([pm.log_prec, log_pa]), 0.0),
+            cmask=cmask,
+        )
+
+    def deviation_conditional(
+        self,
+        ctx: EqContext,
+        pm: GaussianLogDiag,
+        cm: GaussianDiag,
+        cache: FitCache,
+        shared: SharedPrior,
+        *,
+        batched: bool,
+    ) -> DeviationConditional:
+        """``(centre, log P, G, b̃)`` of the deviation draw (module docstring): the weighted Gram
+        ``(cθ ⊗ cθ) ⊙ Fᵀdiag(w)F`` (``batched``: from ``F``, the cold start) and
+        ``b̃ = cθ ⊙ Fᵀ(w ⊙ (y_i − F centre))``."""
+        if self.static.n_dummy:
+            raise ValueError("global-local priors carry no SOC/SUR dummy rows (P3 D-36)")
+        pr = self.theta_prior_log(pm, cm)
+        c = pr.cmask
+        centre = self.impl("gl_deviation")(pr.mean)
+        F, FF, mode, tile = self._design(ctx, cache, shared, batched=batched)
+        w = ctx.weights
+        G = weighted_gram(w, F=F, FF=FF, mode=mode, q=F.shape[1], tile=tile)
+        resid = ctx.target - jnp.matmul(F, centre, precision=_HIGHEST)
+        b = c * jnp.matmul(F.T, w * resid, precision=_HIGHEST)
+        return DeviationConditional(
+            centre=centre, log_prec=pr.log_prec, G=c[:, None] * G * c[None, :], b=b, cmask=c
+        )
+
+    def _draw_log(
+        self, z: Array, dc: DeviationConditional, pm: GaussianLogDiag, cm: GaussianDiag
+    ) -> tuple[LinearEq, Array, Array, StepInfo]:
+        """``θ_i = centre + d`` for injected ``z``: ``(LinearEq(δ, dev_log), a, d, info)``."""
+        d, dev_log, info = precision_draw_log(dc.log_prec, dc.G, dc.b, z)
+        new, a = self._split(dc.centre + d, pm, cm)
+        k = pm.mean.shape[-1]
+        return LinearEq(delta=new.delta, dev_log=dev_log[:k]), a, d, info
+
+    def _sample_eq_log(
+        self,
+        key: Key,
+        ctx: EqContext,
+        pm: GaussianLogDiag,
+        cm: GaussianDiag,
+        cache: FitCache,
+        shared: SharedPrior,
+    ) -> tuple[LinearEq, Array, Coupling, StepInfo]:
+        dc = self.deviation_conditional(ctx, pm, cm, cache, shared, batched=False)
+        new, a, _, info = self._draw_log(self._noise(key, pm, cm), dc, pm, cm)
+        return new, a, self.coupling(new.delta, a, ctx, pm, cm, cache=cache, shared=shared), info
 
     # ----------------------------------------------------------------- views and densities
 
@@ -514,6 +731,13 @@ class LinearStructural(KernelBase):
         """``Σ_active log N(θ; meanθ, 1/precθ)``: ``pm`` λ-free (divided by ``exp(log_scale)`` in
         Mode II, as in :meth:`sample_eq`), ``cm`` as the structure returns it (scaled); ``cm=None``
         gives the δ part only."""
+        if isinstance(pm, GaussianLogDiag):  # from dev_log (P3 §3.7): exact at any scale
+            lp = 0.5 * (pm.log_prec - _LOG_2PI) - 0.5 * jnp.exp(2.0 * ms.dev_log + pm.log_prec)
+            out = jnp.sum(jnp.where(pm.cmask > 0, lp, 0.0))
+            if cm is not None:
+                la = 0.5 * (jnp.log(cm.prec) - _LOG_2PI - cm.prec * (a_i - cm.mean) ** 2)
+                out = out + jnp.sum(jnp.where(cm.cmask > 0, la, 0.0))
+            return out
         prec_d = (
             pm.prec * jnp.exp(-jnp.asarray(log_scale, jnp.float64)) if self.coef_scaled else pm.prec
         )

@@ -776,17 +776,20 @@ def test_reduced_iw_equivalent_is_order_invariant_within_mcse():
 # =========================================================================== item 5 (weekly)
 
 
-def cky_dgp(T: int = 500, seed: int = 0, sv: bool = True) -> VARData:
+def cky_dgp(T: int = 500, seed: int = 0, sv: bool = True, common: bool = False) -> VARData:
     """CKY (2024) §6.1: ``B₀ y_t = c + B₁ y_{t−1} + ε_t``, non-triangular ``B₀ =
     [[1, −.8, −.8], [.8, 1, −.8], [.8, .8, 1]]``, ``ε_i,t ~ N(0, e^{h_i,t})``, ``h_i,t =
-    0.95 h_i,t−1 + √0.05 η``; ``sv=False`` keeps ``h ≡ 0`` (homoskedastic control)."""
+    0.95 h_i,t−1 + √0.05 η``; ``sv=False`` keeps ``h ≡ 0`` (homoskedastic control); ``common=True``
+    draws one ``h_t`` shared by every shock (the CommonSV control, P3 §0.2 row 26)."""
     rng = np.random.default_rng(seed)
     B0 = np.array([[1.0, -0.8, -0.8], [0.8, 1.0, -0.8], [0.8, 0.8, 1.0]])
     A1 = 0.5 * np.eye(3)
     h = np.zeros(3)
     y = np.zeros((T + 100, 3))
     for t in range(1, T + 100):
-        if sv:
+        if sv and common:
+            h = np.full(3, 0.95 * h[0] + math.sqrt(0.05) * rng.standard_normal())
+        elif sv:
             h = 0.95 * h + math.sqrt(0.05) * rng.standard_normal(3)
         eps = np.exp(0.5 * h) * rng.standard_normal(3)
         y[t] = A1 @ y[t - 1] + np.linalg.solve(B0, eps)
@@ -801,13 +804,15 @@ def cky_dgp(T: int = 500, seed: int = 0, sv: bool = True) -> VARData:
 @pytest.mark.filterwarnings("ignore::UserWarning")
 def test_detection_power_and_false_alarm_control():
     """N08 §B5 item 5: ``Linear × SV`` on CKY's SV DGP is flagged; the order-invariant
-    ``reduced × Constant("iw_equivalent")`` on the homoskedastic DGP is not (Phase 2 stand-in for
-    the ``CommonSV`` control, which ships in Phase 3).
+    ``CommonSV`` composition, ``Minnesota(form="conjugate") × CommonSV()`` (the NIW prior with a
+    common scalar volatility, exactly order-invariant, P3 §5.3), on CKY's DGP with one common
+    ``h_t`` is not. This control replaces the Phase 2 stand-in (``reduced ×
+    Constant("iw_equivalent")`` on the homoskedastic DGP; P3 §0.2 row 26, E140, E159).
 
     Backtest mode over 10 origins: with ``n = 3`` and constant ``A`` the predictive sd moves by
     only ~5% across orderings at one origin (below the 1.10 threshold, as N08 §B3 expects for
     constant ``A``), but the joint log score moves by ~0.14 nats per origin, far above the noise
-    floor (calibration run: signal-to-noise ≈ 10; control: range 0.004, signal-to-noise ≈ 0.7)."""
+    floor (calibration run: signal-to-noise ≈ 10)."""
     settings_ = MCMCSettings(chains=4, draws=1000, burn=500)
     kw = {"n_perm": 6, "noise_reps": 3, "draws": 1000, "horizons": (1,), "mode": "backtest"}
     data = cky_dgp(sv=True)
@@ -815,9 +820,9 @@ def test_detection_power_and_false_alarm_control():
     res = ordering_sensitivity(BVAR(vol=SV(), lags=1, mcmc=settings_), data, origins=origins, **kw)
     assert res.material, res.summary()
     assert bool(res.metrics()["lpd_range_joint_flag"].values.any())
-    inv = BVAR(mean=Linear(prior=Minnesota(form="reduced")), vol=Constant("iw_equivalent"),
-               lags=1, mcmc=settings_)  # fmt: skip
-    ctrl_data = cky_dgp(sv=False, seed=1)
+    inv = BVAR(mean=Linear(prior=Minnesota(form="conjugate")), vol=rb.CommonSV(), lags=1,
+               mcmc=settings_)  # fmt: skip
+    ctrl_data = cky_dgp(sv=True, common=True, seed=1)
     ctrl_origins = [str(p) for p in ctrl_data.index[-60:-1:6]]
     ctrl = ordering_sensitivity(inv, ctrl_data, origins=ctrl_origins, **kw)
     assert not ctrl.material, ctrl.summary()

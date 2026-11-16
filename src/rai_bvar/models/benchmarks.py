@@ -144,7 +144,12 @@ class LinearGaussianFit:
         self.data, self.lags, self.deterministic = data, lags, deterministic
         self._sampler, self.name, self.spec, self.engine = sampler, name, spec, engine
 
-    def forecast(self, horizon: int, draws: int = 1000, seed: SeedLike = None) -> ForecastResult:
+    def forecast(
+        self, horizon: int, draws: int = 1000, seed: SeedLike = None, *, lag_coefs: bool = False
+    ) -> ForecastResult:
+        """Predictive paths and conditional moments. ``lag_coefs`` (the forecast protocol's
+        keyword, P3 DESIGN D-49) is accepted and ignored: benchmark forecasts carry no
+        ``lag_coefs``, so the integrated LPD raises for them at ``h > 1``."""
         if horizon < 1 or draws < 1:
             raise ValueError("horizon and draws must be positive")
         rng = np.random.default_rng(seed)

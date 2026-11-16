@@ -20,11 +20,18 @@ keys (``keys.py``); a function that needs several streams derives them from its 
   ``jax.random.truncated_normal`` returns ``1.797e308``. ``log Φ`` is ``log_ndtr`` with
   ``series_order = 10``: the default order 3 of its ``x ≤ −20`` asymptotic series is off by
   ``4e-9`` at ``x = −20`` (``2e-11`` at ``−40``), order 10 by less than the rounding error.
+* :func:`bernoulli_logit` (P3 §3.2, SSVS): ``γ = 1{log u < log σ(logit)}`` with one uniform per
+  element, ``log σ(x) = −softplus(−x)``, so ``|logit|`` in the hundreds is exact.
+* :func:`log_gig` (P3 D-42, §3.5): ``log X``, ``X ~ GIG(λ, ψ, χ)``, by Devroye (2014) §6 on the
+  log scale, with the gamma and inverse-gamma limits exact; one problem, batched by ``vmap``.
 
-Gamma is shape–rate ``Gamma(a, 1)``; ``IG(a, b)`` has density ``∝ x^{−a−1}e^{−b/x}``.
+Gamma is shape–rate ``Gamma(a, 1)``; ``IG(a, b)`` has density ``∝ x^{−a−1}e^{−b/x}``;
+``GIG(λ, ψ, χ)`` has density ``∝ x^{λ−1}exp(−(ψx + χ/x)/2)`` on ``x > 0`` (P3 conventions).
 """
 
 from __future__ import annotations
+
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -46,12 +53,30 @@ _MT_MAX_ROUNDS = 1000  # loop guard: P(an element needs it) < 0.05^1000; such el
 _NEWTON_STEPS = 4  # log-space inverse normal CDF (N07 §9.3)
 _LOG_NDTR_ORDER = 10  # asymptotic-series order of log_ndtr for x ≤ −20 (the default 3 is ~4e-9 off)
 
+GIG_MAX_ATTEMPTS = 512  # P3 D-42: P(ok = False) ≤ (1 − 1/3.46)^512 ≈ 1.6e-76 per call
+_LOG_2 = float(np.log(2.0))
+_LOG_4 = float(np.log(4.0))
+_LOG_HALF_F = float(np.log(0.5))  # log ½ and log 2: the bounds of Devroye's design interval
+_LOG_COSH1 = float(np.log(np.cosh(1.0)))
+_LOG_COSH1_M1 = float(np.log(np.cosh(1.0) - 1.0))
+_LOG_E_M2 = float(np.log(np.e - 2.0))
+_ASINH_SWITCH = float(np.log(1e8))  # asinh(e^r) = log 2 + r to rounding beyond r = log 1e8
+_LE_SERIES = 1e-3  # le(x) by its Taylor series below |x| = 1e-3
+_LE_LARGE = 30.0  # le(x) = x + log1p(−(1 + x)e^{−x}) above x = 30
+
 __all__ = [
+    "GIG_MAX_ATTEMPTS",
     "TINY",
+    "GIGHat",
+    "bernoulli_logit",
+    "bernoulli_logit_core",
     "categorical",
     "categorical_inverse_cdf",
     "categorical_inverse_cdf_lse",
+    "gig_hat",
     "log_beta",
+    "log_gig",
+    "log_gig_attempts",
     "log_inv_gamma",
     "loggamma",
     "truncated_std_normal",
@@ -221,3 +246,226 @@ def truncated_std_normal(u: Array, lo: Array, hi: Array) -> Array:
     lower = lp < _LOG_HALF
     y = _log_ndtri(jnp.minimum(jnp.where(lower, lp, lq), _LOG_HALF))
     return jnp.clip(jnp.where(lower, y, -y), lo, hi)
+
+
+# --------------------------------------------------------------------------- Bernoulli (P3 §3.2)
+
+
+def bernoulli_logit_core(u: Array, logit: Array) -> Array:
+    """``γ = 1{log u < log σ(logit)}`` (int32; pure core, ``u ∈ (0, 1)``, e.g. from
+    :func:`uniform_tiny`), so ``P(γ = 1) = σ(logit)``. ``log σ(x) = −softplus(−x)`` is formed in
+    log space, so a logit of ±700 is exact (``σ`` is never exponentiated); ``+inf`` gives 1 and
+    ``−inf`` gives 0."""
+    u, logit = jnp.broadcast_arrays(*(jnp.asarray(v, dtype=jnp.float64) for v in (u, logit)))
+    return (jnp.log(u) < -jnp.logaddexp(0.0, -logit)).astype(jnp.int32)
+
+
+def bernoulli_logit(key: Key, logit: Array) -> Array:
+    """One Bernoulli draw per element of ``logit`` (int32 0/1) with one float64 uniform per
+    element (P3 §3.2: the SSVS indicator ``γ_j``)."""
+    logit = jnp.asarray(logit, dtype=jnp.float64)
+    return bernoulli_logit_core(uniform_tiny(key, logit.shape), logit)
+
+
+# --------------------------------------------------------------------------- GIG (P3 D-42, §3.5)
+
+
+class GIGHat(NamedTuple):
+    """Devroye's (2014, §4, §6) three-piece hat of the transformed density ``exp(f)`` (P3 §3.5
+    step 3), for ``λ ≥ 0``. ``f(x) = −α(cosh x − 1) − λ(eˣ − x − 1)``; flat on ``[−s', t']``,
+    ``exp(−η_D − ζ(x − t))`` right of ``t'``, ``exp(−θ + ξ(x + s))`` left of ``−s'``; masses
+    ``p = 1/ξ`` (left), ``q = t' + s'`` (centre), ``r = 1/ζ`` (right)."""
+
+    lam: Array  # λ ≥ 0
+    log_lam: Array  # log λ (−inf at λ = 0)
+    log_alpha: Array  # log α, α = √(ω² + λ²) − λ
+    mode: Array  # asinh(λ/ω): log y = mode + X
+    t: Array
+    s: Array
+    eta: Array  # −f(t)
+    zeta: Array  # −f'(t)
+    theta: Array  # −f(−s)
+    xi: Array  # f'(−s)
+    tp: Array  # t' = t − rη_D
+    sp: Array  # s' = s − pθ
+    p: Array
+    q: Array
+    r: Array
+
+
+def _lsh(y: Array) -> Array:
+    """``log sinh y`` for ``y ≥ 0`` (``−inf`` at 0): ``y − log 2 + log(−expm1(−2y))``."""
+    return y - _LOG_2 + jnp.log(-jnp.expm1(-2.0 * y))
+
+
+def _le(x: Array) -> Array:
+    """``log(eˣ − x − 1)`` (``−inf`` at 0): the series ``log(x²/2 + x³/6 + x⁴/24)`` for
+    ``|x| < 1e-3``, ``x + log1p(−(1 + x)e^{−x})`` for ``x > 30``, ``log(expm1(x) − x)`` otherwise
+    (P3 §3.5). Branches are selected elementwise; an unselected branch may be non-finite."""
+    x2 = x * x
+    series = jnp.log(x2 * (0.5 + x / 6.0 + x2 / 24.0))
+    large = x + jnp.log1p(-(1.0 + x) * jnp.exp(-jnp.maximum(x, _LE_LARGE)))
+    mid = jnp.log(jnp.expm1(jnp.minimum(x, _LE_LARGE)) - x)
+    return jnp.where(jnp.abs(x) < _LE_SERIES, series, jnp.where(x > _LE_LARGE, large, mid))
+
+
+def _gig_log_neg_f(x: Array, log_alpha: Array, log_lam: Array, lam_pos: Array) -> Array:
+    """``log(−f(x)) = log(α(cosh x − 1) + λ(eˣ − x − 1))`` in log space (P3 §3.5):
+    ``α(cosh x − 1) = exp(log α + log 2 + 2 lsh(|x|/2))``, ``λ(eˣ − x − 1) = exp(log λ + le(x))``,
+    the ``λ`` term only when ``λ > 0``. Never forms a product of an underflowed and an overflowed
+    factor; a result above ``log(max float)`` makes ``f = −∞``."""
+    a_term = log_alpha + _LOG_2 + 2.0 * _lsh(0.5 * jnp.abs(x))
+    l_term = jnp.where(lam_pos, log_lam + _le(x), -jnp.inf)
+    return jnp.logaddexp(a_term, l_term)
+
+
+def gig_hat(lam: Array, log_omega: Array) -> GIGHat:
+    """The hat of Devroye (2014) §6 for ``λ ≥ 0``, ``ω = exp(log ω) > 0``, set up entirely in logs
+    (P3 §3.5 step 3; E89):
+
+    * ``Λ = logaddexp(½·logaddexp(2 log ω, 2 log λ), log λ) = log(√(ω² + λ²) + λ)``,
+      ``log α = 2 log ω − Λ``; ``asinh(λ/ω) = log 2 + log λ − log ω`` beyond ``log 1e8``.
+    * ``t``: 1 if ``−f(1) ∈ [½, 2]``, ``√(2/(α + λ))`` if above, ``log 4 − logaddexp(log α,
+      log 2 + log λ)`` if below; ``s``: 1 if ``−f(−1) ∈ [½, 2]``, ``√(4/(α cosh 1 + λ))`` if
+      above, ``min(1/λ, logaddexp(0, log1p(√(1 + 2α)) − log α))`` if below (``1/λ = ∞`` at 0).
+    * ``(η_D, ζ, θ, ξ) = (−f(t), −f'(t), −f(−s), f'(−s))``, each from its log.
+    """
+    lam = jnp.asarray(lam, dtype=jnp.float64)
+    log_omega = jnp.asarray(log_omega, dtype=jnp.float64)
+    lam_pos = lam > 0.0
+    log_lam = jnp.log(lam)  # −inf at 0
+    lam_term = jnp.where(lam_pos, log_lam, -jnp.inf)
+    Lam = jnp.logaddexp(0.5 * jnp.logaddexp(2.0 * log_omega, 2.0 * lam_term), lam_term)
+    log_alpha = 2.0 * log_omega - Lam
+    ratio = lam_term - log_omega
+    mode = jnp.where(
+        ratio > _ASINH_SWITCH,
+        _LOG_2 + ratio,
+        jnp.arcsinh(jnp.exp(jnp.minimum(ratio, _ASINH_SWITCH))),
+    )
+
+    # t from −f(1) = α(cosh 1 − 1) + λ(e − 2); s from −f(−1) = α(cosh 1 − 1) + λ/e (in logs)
+    l_f1 = jnp.logaddexp(log_alpha + _LOG_COSH1_M1, lam_term + _LOG_E_M2)
+    l_fm1 = jnp.logaddexp(log_alpha + _LOG_COSH1_M1, lam_term - 1.0)
+    t_hi = jnp.exp(0.5 * (_LOG_2 - jnp.logaddexp(log_alpha, lam_term)))
+    t_lo = _LOG_4 - jnp.logaddexp(log_alpha, _LOG_2 + lam_term)
+    t = jnp.where(l_f1 > _LOG_2, t_hi, jnp.where(l_f1 < _LOG_HALF_F, t_lo, 1.0))
+    s_hi = jnp.exp(0.5 * (_LOG_4 - jnp.logaddexp(log_alpha + _LOG_COSH1, lam_term)))
+    alpha_lo = jnp.exp(jnp.minimum(log_alpha, 0.0))  # the s_lo branch needs −f(−1) < ½: α < 1
+    s_lo = jnp.minimum(
+        jnp.exp(-lam_term),
+        jnp.logaddexp(0.0, jnp.log1p(jnp.sqrt(1.0 + 2.0 * alpha_lo)) - log_alpha),
+    )
+    s = jnp.where(l_fm1 > _LOG_2, s_hi, jnp.where(l_fm1 < _LOG_HALF_F, s_lo, 1.0))
+
+    # the tangents at t and −s: η_D = −f(t), ζ = α sinh t + λ expm1(t), θ = −f(−s),
+    # ξ = α sinh s + λ(−expm1(−s))
+    log_eta = _gig_log_neg_f(t, log_alpha, log_lam, lam_pos)
+    log_zeta = jnp.logaddexp(
+        log_alpha + _lsh(t), jnp.where(lam_pos, log_lam + jnp.log(jnp.expm1(t)), -jnp.inf)
+    )
+    log_theta = _gig_log_neg_f(-s, log_alpha, log_lam, lam_pos)
+    log_xi = jnp.logaddexp(
+        log_alpha + _lsh(s), jnp.where(lam_pos, log_lam + jnp.log(-jnp.expm1(-s)), -jnp.inf)
+    )
+    p = jnp.exp(-log_xi)
+    r = jnp.exp(-log_zeta)
+    tp = t - jnp.exp(log_eta - log_zeta)
+    sp = s - jnp.exp(log_theta - log_xi)
+    return GIGHat(
+        lam=lam, log_lam=log_lam, log_alpha=log_alpha, mode=mode, t=t, s=s,
+        eta=jnp.exp(log_eta), zeta=jnp.exp(log_zeta), theta=jnp.exp(log_theta),
+        xi=jnp.exp(log_xi), tp=tp, sp=sp, p=p, q=tp + sp, r=r,
+    )  # fmt: skip
+
+
+def _gig_candidate(h: GIGHat, u: Array) -> tuple[Array, Array]:
+    """One rejection attempt with ``u = (U, V, W)`` uniform on ``(0, 1]``: ``(X, accepted)``.
+    Centre with probability ``q/(p + q + r)`` (``X = −s' + qV``), right with ``r/(p + q + r)``
+    (``X = t' − r log V``), left otherwise (``X = −s' + p log V``); accept iff
+    ``log W ≤ f(X) − log hat(X)``."""
+    U, V, W = u[0], u[1], u[2]
+    tot_u = U * (h.p + h.q + h.r)
+    log_v = jnp.log(V)
+    centre = tot_u < h.q
+    right = ~centre & (tot_u < h.q + h.r)
+    X = jnp.where(
+        centre, -h.sp + h.q * V, jnp.where(right, h.tp - h.r * log_v, -h.sp + h.p * log_v)
+    )
+    log_hat = jnp.where(
+        centre,
+        0.0,
+        jnp.where(right, -h.eta - h.zeta * (X - h.t), -h.theta + h.xi * (X + h.s)),
+    )
+    f = -jnp.exp(_gig_log_neg_f(X, h.log_alpha, h.log_lam, h.lam > 0.0))
+    return X, jnp.log(W) <= f - log_hat
+
+
+def log_gig_attempts(
+    key: Key, lam: Array, log_psi: Array, log_chi: Array, *, hat=gig_hat
+) -> tuple[Array, Array, Array]:
+    """:func:`log_gig` plus the number of rejection attempts it used (int32; 0 for the limits
+    and for improper input). ``hat`` builds the envelope from ``(|λ|, log ω)`` (the Devroye
+    hat by default; a test seam for mutant M34, P3 §9.6)."""
+    lam = jnp.asarray(lam, dtype=jnp.float64)
+    log_psi = jnp.asarray(log_psi, dtype=jnp.float64)
+    log_chi = jnp.asarray(log_chi, dtype=jnp.float64)
+    fin_lam = jnp.isfinite(lam)
+    regular = fin_lam & jnp.isfinite(log_psi) & jnp.isfinite(log_chi)
+    gamma_lim = fin_lam & (lam > 0.0) & (log_chi == -jnp.inf) & jnp.isfinite(log_psi)
+    invg_lim = fin_lam & (lam < 0.0) & (log_psi == -jnp.inf) & jnp.isfinite(log_chi)
+
+    # 1. limits: χ = 0, λ > 0: log x = LG(λ) − log(ψ/2); ψ = 0, λ < 0: log x = log(χ/2) − LG(−λ)
+    a = jnp.where(gamma_lim, lam, jnp.where(invg_lim, -lam, 1.0))
+    lg = loggamma(jr.fold_in(key, GIG_MAX_ATTEMPTS), a)
+    log_lim = jnp.where(gamma_lim, lg - (log_psi - _LOG_2), (log_chi - _LOG_2) - lg)
+
+    # 2. reduction: log η = ½(log χ − log ψ), log ω = ½(log ψ + log χ); |λ| and the sign
+    log_eta = 0.5 * (log_chi - log_psi)
+    log_omega = jnp.where(regular, 0.5 * (log_psi + log_chi), 0.0)
+    sign = jnp.where(lam < 0.0, -1.0, 1.0)
+    h = hat(jnp.where(regular, jnp.abs(lam), 1.0), log_omega)
+
+    # 3. rejection: attempt t uses fold_in(key, t); irregular lanes start done (no attempts)
+    def cond(st):
+        it, done, _ = st
+        return (it < GIG_MAX_ATTEMPTS) & ~done
+
+    def body(st):
+        it, done, x = st
+        u = 1.0 - jr.uniform(jr.fold_in(key, it), (3,), dtype=jnp.float64)  # (0, 1]
+        X, acc = _gig_candidate(h, u)
+        return it + 1, done | acc, jnp.where(done, x, X)
+
+    it, done, X = lax.while_loop(
+        cond, body, (jnp.zeros((), jnp.int32), ~regular, jnp.zeros((), jnp.float64))
+    )
+    # 4. log x = log η + sign·log y,  log y = asinh(λ/ω) + X
+    log_dev = log_eta + sign * (h.mode + X)
+    ok_dev = regular & done & jnp.isfinite(log_dev)
+    ok = ok_dev | gamma_lim | invg_lim
+    out = jnp.where(regular, log_dev, log_lim)
+    return jnp.where(ok & jnp.isfinite(out), out, jnp.nan), ok & jnp.isfinite(out), it
+
+
+def log_gig(key: Key, lam: Array, log_psi: Array, log_chi: Array) -> tuple[Array, Array]:
+    """``(log x, ok)`` for ``x ~ GIG(λ, ψ, χ)`` (density ``∝ x^{λ−1}exp(−(ψx + χ/x)/2)``) from
+    ``λ``, ``log ψ`` and ``log χ`` (P3 D-42, §3.5): one problem, batched by ``vmap``; float64.
+
+    1. **Limits.** ``log χ = −∞``, ``λ > 0``: ``log x = LG(λ) − log(ψ/2)`` (gamma);
+       ``log ψ = −∞``, ``λ < 0``: ``log x = log(χ/2) − LG(−λ)`` (inverse gamma), with
+       :func:`loggamma` (exact for tiny shapes) on the stream ``fold_in(key, 512)``. Any other
+       infinite or NaN input is improper: ``ok = False`` and ``log x = NaN`` (P2 D-18).
+    2. **Reduction.** ``log η = ½(log χ − log ψ)``, ``log ω = ½(log ψ + log χ)``; ``y = x/η`` has
+       density ``∝ y^{λ−1}exp(−ω(y + 1/y)/2)``; for ``λ < 0`` the draw uses ``|λ|`` and
+       ``sign = −1`` (``1/Y ~ GIG(−λ, ω)``), applied once in step 4.
+    3. **Devroye (2014) §6** for ``λ ≥ 0`` (:func:`gig_hat`): ``log y = asinh(λ/ω) + X``,
+       ``X ∝ exp(f(x))``, ``f(x) = −α(cosh x − 1) − λ(eˣ − x − 1)``, by rejection from the
+       three-piece hat; every term in logs. Attempt ``t`` draws ``(U, V, W)`` uniform on
+       ``(0, 1]`` from ``fold_in(key, t)``; a ``lax.while_loop`` runs until every lane accepts or
+       512 attempts pass (then ``ok = False``: probability ≤ 1.6e-76 per call, by Theorem 2's
+       uniform bound of 3.4597 expected attempts).
+    4. ``log x = log η + sign·log y``.
+    """
+    log_x, ok, _ = log_gig_attempts(key, lam, log_psi, log_chi)
+    return log_x, ok
