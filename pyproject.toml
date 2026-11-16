@@ -30,6 +30,8 @@ dependencies = [
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.8"]
+# Phase 4 week-1 spike only (docs/phase4/SPIKE.md): the prototype BART mean block, pinned
+bart = ["bartz==0.13.0"]
 
 [dependency-groups]
 dev = [

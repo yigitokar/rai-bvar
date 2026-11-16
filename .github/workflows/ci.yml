@@ -136,6 +136,22 @@ jobs:
           path: ${{ runner.temp }}/jax-xla
           key: ${{ steps.xla.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
 
+  # The BART adapter's suite (SPEC D6): the other jobs install the dev group only, so the tests
+  # that need bartz skip there. This job installs the pinned `bart` extra and checks the import.
+  bart:
+    if: github.event_name != 'workflow_dispatch' || !inputs.r_fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev --extra bart
+      - name: bartz is installed (the suite would skip without it)
+        run: uv run python -c "import bartz; print(bartz.__version__)"
+      - name: Adapter suite (bitwise against bartz's own init and step)
+        run: uv run pytest tests/mcmc/blocks/test_bart_spike.py -q
+
   macos:  # weekly: macOS minutes bill at 10x; local development runs on macOS anyway
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.bench && !inputs.r_fixtures)
     runs-on: macos-latest
