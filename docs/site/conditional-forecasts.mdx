@@ -1,0 +1,72 @@
+---
+title: "Conditional forecasts: scenarios with hard conditions"
+sidebarTitle: "Conditional forecasts"
+description: "Fix the future path of some variables and see how the others respond, with BVAR's per-draw hard-condition scenarios on either engine, and what they are not."
+icon: "route"
+keywords: ["conditional forecast", "scenario", "hard conditions", "Waggoner Zha", "policy path"]
+---
+
+A conditional forecast in BVAR fixes the future values of some variables, for example a policy rate path, and returns the joint distribution of the others given that path. It works for every linear model on both engines. It is available on `main` only.
+
+## Condition a forecast
+
+Pass the conditions on the model's transformed scale, either as a mapping from variable to a sequence of values, or as a `DataFrame` indexed by horizon `1..H` or by forecast period, with `NaN` for free cells:
+
+```python
+import pandas as pd
+import rai_bvar as rb
+
+fit = rb.BVAR(lags=4).fit(data)
+
+# The funds rate at 1.5 for the first four quarters, free afterwards
+scenario = fit.conditional_forecast(8, {"FEDFUNDS": [1.5, 1.5, 1.5, 1.5]}, draws=1000, seed=0)
+
+# The same, as a DataFrame indexed by horizon
+conditions = pd.DataFrame({"FEDFUNDS": [1.5, 1.5, 1.5, 1.5]}, index=[1, 2, 3, 4])
+scenario = rb.conditional_forecast(fit, horizon=8, conditions=conditions, draws=1000, seed=0)
+
+scenario.quantiles([0.05, 0.5, 0.95])
+scenario.to_dataframe(level=True)
+```
+
+The conditioned cells equal the condition exactly in every draw. The free cells move with them through the model's dynamics and the correlation of the shocks.
+
+## What the result is
+
+`conditional_forecast` imposes the conditions on each draw of an unconditional forecast separately. Given that draw's parameters and, under SV or `CommonSV`, its drawn volatility path, the joint path is Gaussian, and the draw is replaced by one exact draw from that Gaussian conditioned on the fixed cells (Waggoner and Zha 1999, per draw).
+
+The conditions update neither the parameters nor the volatilities, and draws are not reweighted by how likely they make the conditions. The equal-weight mixture over draws is therefore a **scenario**, not the predictive distribution given the data and the conditions. The log weights that would turn it into the latter are stored as `log_weight (chain, draw)`, and `scenario.dataset.attrs["weight_ess"]` is their Kish effective sample size.
+
+<Warning>
+  A scenario is not a forecast of the data. `rb.score_forecast` and the backtest refuse a `ConditionalForecastResult`.
+</Warning>
+
+## The result object
+
+A `ConditionalForecastResult` keeps the fields of a `ForecastResult` (`paths`, `paths_level`, `cond_mean`, `cond_chol`) and adds:
+
+| Field | Dims | Meaning |
+| --- | --- | --- |
+| `condition` | `(horizon, variable)` | The imposed values, `NaN` where free |
+| `conditioned` | `(horizon, variable)` | Which cells are fixed |
+| `log_weight` | `(chain, draw)` | Log density of the conditions under each draw |
+
+Here `cond_mean` and `cond_chol` are the mean and covariance factor of `y_(T+h)` given the draw, its volatility path and the conditions. They are not the one-step moments of an unconditional forecast. `scenario.dataset.attrs["conditional"]` is `"hard-per-draw-v1"`.
+
+## Reproducibility and limits
+
+- No new random numbers are drawn: the scenario is a deterministic function of the unconditional forecast, so the same seed reproduces it. Pass `base=` to `rb.conditional_forecast` with an existing unconditional forecast of the same fit and horizon to condition that one.
+- Conditions that are nearly linearly dependent raise a `ValueError` (`DependentConditionsError`) that names the draw that failed; nothing is jittered.
+- Only hard conditions are supported. Soft conditions (ranges) and conditioning that updates the parameters are not implemented.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="The predictive contract" icon="file-contract" href="/predictive-contract">
+    The unconditional forecast this builds on.
+  </Card>
+
+  <Card title="Fit and forecast" icon="chart-line" href="/fit-and-forecast">
+    Fitting the models you condition.
+  </Card>
+</Columns>

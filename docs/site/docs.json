@@ -1,0 +1,46 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "BVAR",
+  "colors": {
+    "primary": "#B4532A",
+    "light": "#E08A5B",
+    "dark": "#8F3F1E"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": [
+          "index",
+          "quickstart",
+          "installation"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "fit-and-forecast",
+          "stochastic-volatility",
+          "compare-models",
+          "conditional-forecasts"
+        ]
+      },
+      {
+        "group": "Concepts",
+        "pages": [
+          "components",
+          "engines",
+          "predictive-contract",
+          "verification"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "api"
+        ]
+      }
+    ]
+  }
+}

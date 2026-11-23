@@ -1,0 +1,77 @@
+---
+title: "Install the rai-bvar package"
+sidebarTitle: "Installation"
+description: "Install rai-bvar from GitHub with pip or uv, choose between the v0.2.0 release and main, add the plot extra, and know how it sets up JAX in float64."
+icon: "box"
+keywords: ["install", "pip", "uv", "Python 3.12", "JAX", "float64", "extras"]
+---
+
+BVAR is the Python package `rai-bvar`, imported as `rai_bvar`. It is not on PyPI: you install it from its public GitHub repository, either at the `v0.2.0` release tag or from `main`.
+
+## Requirements
+
+- **Python 3.12 or later.** The package is tested on Python 3.12, 3.13 and 3.14.
+- **Its dependencies**, installed automatically: `numpy`, `scipy`, `pandas`, `xarray`, `scoringrules` and `jax`.
+
+## Install it
+
+Install from `main` to get every feature these pages describe, including the Phase 3 priors, `CommonSV` and conditional forecasts:
+
+<CodeGroup>
+```bash pip
+pip install "rai-bvar @ git+https://github.com/yigitokar/rai-bvar.git"
+```
+
+```bash uv
+uv add "rai-bvar @ git+https://github.com/yigitokar/rai-bvar.git"
+```
+</CodeGroup>
+
+To pin the `v0.2.0` release instead, add `@v0.2.0` after `.git`. That release is Phase 2: it has the analytic and MCMC engines with `Minnesota`, `Constant` and the `SV` family, but not `Horseshoe`, `NormalGamma`, `R2D2`, `DirichletLaplace`, `SSVS`, `AsymmetricConjugate`, `CommonSV` or `conditional_forecast`.
+
+<Note>
+  The version string on `main` is still `0.2.0`, so `rb.__version__` does not tell the two apart.
+</Note>
+
+### Extras
+
+| Extra | Installs | What it is for |
+| --- | --- | --- |
+| `plot` | `matplotlib` | `CompareResult.plot_cumulative_lpd()` |
+
+Request it in the usual way, for example `pip install "rai-bvar[plot] @ git+https://github.com/yigitokar/rai-bvar.git"`.
+
+The repository also defines a `bart` extra that pins `bartz==0.13.0`. It exists for the Phase 4 prototype only; no BART mean is part of the public API yet.
+
+## JAX and float64
+
+`import rai_bvar` does not import JAX. The model specifications, the analytic engine and the evaluation code use NumPy only, and the MCMC engine is imported the first time you fit an MCMC composition.
+
+When the MCMC engine loads, it turns on JAX's `jax_enable_x64` flag for the whole process, because JAX computes in float32 by default and the samplers need float64. Every engine entry point also runs inside a float64 context, so turning the flag off afterwards does not change the fits. If your own JAX code in the same process relies on float32 defaults, expect it to see float64.
+
+Two process-level settings must be chosen before JAX starts, so call them right after `import rai_bvar`:
+
+```python
+import rai_bvar as rb
+
+rb.set_cpu_devices(4)                          # expose 4 CPU devices for sharded chains
+rb.enable_compilation_cache("~/.cache/jax")    # reuse compiled samplers across processes
+```
+
+`set_cpu_devices` changes no draw by itself: fits still run on one device unless you pass `runtime=rb.Runtime(devices=4)` (or `"auto"`) to `fit()`. A sharded fit equals the one-device fit only to rounding, so sharding is opt-in.
+
+## Reference datasets
+
+The FRED-MD and FRED-QD files are not bundled, because some of their series are copyrighted by third parties. `rb.datasets.load()` downloads a pinned vintage from the St. Louis Fed on first use and caches it under `cache_dir`, else the `RAI_BVAR_DATA` environment variable, else `~/.cache/rai-bvar`.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Fit, forecast and compare in a few lines.
+  </Card>
+
+  <Card title="Engines" icon="gears" href="/engines">
+    Which compositions run on which engine, and what each costs.
+  </Card>
+</Columns>

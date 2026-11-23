@@ -1,0 +1,119 @@
+---
+title: "Get started with BVAR"
+sidebarTitle: "Quickstart"
+description: "Load the FRED-QD reference dataset, fit a Minnesota BVAR, forecast with impulse responses, and ask the verdict engine whether a prior change helps."
+icon: "bolt"
+keywords: ["quickstart", "BVAR", "fit", "forecast", "compare", "verdict"]
+---
+
+This guide fits a three-variable quarterly BVAR with BVAR's analytic engine, forecasts eight quarters ahead, computes impulse responses, and then backtests two models against each other. Everything here runs on the analytic engine, so each step takes seconds, not minutes.
+
+## Before you start
+
+You need:
+
+- Python 3.12 or later, with `rai-bvar` installed. See [Installation](/installation).
+- Network access for the first `load()` call. The dataset is downloaded once from the St. Louis Fed and cached.
+
+## Fit, forecast and compare
+
+<Steps>
+  <Step title="Load the data">
+    `rb.datasets.load()` downloads a pinned vintage of FRED-QD, checks its SHA-256 checksum and returns a `VARData`. The `"small"` set is real GDP, the GDP price index and the federal funds rate, in that order. GDP and prices enter as log differences, the funds rate in levels.
+
+    ```python
+    import rai_bvar as rb
+
+    data = rb.datasets.load("fred-qd", vintage="2026-09", variables="small")
+    print(data)
+    ```
+
+    The column order is the variable ordering of recursive (Cholesky) models. Choose it on purpose: it changes IRFs and, for MCMC models, the posterior.
+  </Step>
+
+  <Step title="Fit a model">
+    A model is a composition. Here the mean is `Linear` with a Minnesota prior that adds sum-of-coefficients and single-unit-root dummies, and the volatility is left at its default, `Constant()`. That composition is conjugate, so it runs on the analytic engine.
+
+    ```python
+    bvar = rb.BVAR(
+        mean=rb.Linear(prior=rb.Minnesota(soc=1.0, sur=1.0, hierarchy="eb")),
+        lags=4,
+        outliers="lenza-primiceri",   # the sample covers 2020
+    )
+    fit = bvar.fit(data)
+    print(fit.engine)     # "analytic"
+    fit.summary()         # hyperparameter mode: lambda, soc, sur and the COVID scales
+    ```
+
+    `hierarchy="eb"` is the default: the overall tightness, and the dummy weights you switch on, are set to their posterior mode under the GLP (2015) hyperpriors. `outliers="lenza-primiceri"` scales the residual variance from March 2020 on. Without an outlier treatment, `fit()` warns when the sample covers 2020.
+  </Step>
+
+  <Step title="Forecast">
+    `forecast()` returns a `ForecastResult` of joint simulated paths. Quantiles are taken over the draws.
+
+    ```python
+    fc = fit.forecast(horizon=8, draws=2000, seed=0)
+    fc.quantiles([0.05, 0.5, 0.95])     # xarray: (quantile, horizon, variable)
+    fc.to_dataframe(level=True)         # rows (date, variable), one column per quantile
+    ```
+
+    `level=True` reads the paths that were transformed back to the original scale path by path, so GDP comes back as a level, not a growth rate.
+  </Step>
+
+  <Step title="Impulse responses">
+    Recursive impulse responses to one-standard-deviation shocks, and the forecast error variance decomposition:
+
+    ```python
+    irf = fit.irf(horizon=20, draws=1000, seed=0)
+    irf.median()        # (horizon, response, shock)
+    irf.fevd()          # shares per draw: (chain, draw, horizon, response, shock)
+    ```
+  </Step>
+
+  <Step title="Ask a question of the verdict engine">
+    Do the SOC/SUR dummies improve density forecasts? The two models below differ only in their prior, so the verdict engine can rule on it. `compare()` refits both at every origin on a rolling window of 120 quarters, and scores 1- and 4-step forecasts.
+
+    ```python
+    res = rb.compare(
+        {
+            "Minnesota": rb.BVAR(lags=4, outliers="lenza-primiceri"),
+            "Minnesota+SOC/SUR": bvar,
+        },
+        data,
+        origins=rb.Origins(start="2016Q1", step=4),
+        window=rb.Rolling(size=120),
+        horizons=[1, 4],
+    )
+    res.table()      # the ablation table: ΔLPD, CRPS, DM p-values, MCS membership
+    res.verdict()    # one row per horizon: verdict and reasons
+    ```
+
+    The first model is the baseline. Each verdict is `better`, `worse` or `inconclusive`, and its `reasons` column gives the log score difference with its Monte Carlo standard error, the Diebold-Mariano p-value and the Model Confidence Set membership.
+  </Step>
+</Steps>
+
+## What you built
+
+You used the analytic engine end to end: an empirical-Bayes Minnesota BVAR with COVID scaling, a joint predictive distribution on the model and level scales, impulse responses, and a fair backtest of one prior change.
+
+The verdict engine refuses to rule between models that differ along more than one axis. Comparing `rb.RandomWalk()` with a BVAR, for example, gives `not comparable`.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Stochastic volatility" icon="wave-square" href="/stochastic-volatility">
+    Fit `SV` models on the MCMC engine and check their convergence.
+  </Card>
+
+  <Card title="Compare models" icon="scale-balanced" href="/compare-models">
+    Grids, the verdict rule and the volatility-first comparison.
+  </Card>
+
+  <Card title="Fit and forecast" icon="chart-line" href="/fit-and-forecast">
+    Your own data, priors, hyperparameters and forecast output.
+  </Card>
+
+  <Card title="Components" icon="puzzle-piece" href="/components">
+    Every mean, volatility and prior you can compose.
+  </Card>
+</Columns>

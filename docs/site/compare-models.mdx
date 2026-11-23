@@ -1,0 +1,144 @@
+---
+title: "Compare models with a backtest and the verdict engine"
+sidebarTitle: "Compare models"
+description: "Backtest BVAR models on identical origins and windows with compare(), read the ablation table, and learn when verdict() says better, worse or inconclusive."
+icon: "scale-balanced"
+keywords: ["compare", "backtest", "verdict", "ablation", "log score", "Diebold-Mariano", "Model Confidence Set", "grid"]
+---
+
+`rb.compare()` backtests a set of BVAR models on the same forecast origins, windows and outcomes, and `verdict()` decides whether one model beats another. The verdict is the reason the library exists: it only rules between models that differ along exactly one axis, so a gain can be attributed to that axis.
+
+## Run a comparison
+
+This is the volatility question on FRED-QD: does stochastic volatility with outliers improve density forecasts over constant volatility?
+
+```python
+import rai_bvar as rb
+
+data = rb.datasets.load("fred-qd", vintage="2026-09", variables="small")
+mcmc = rb.MCMCSettings(draws=20_000)
+
+res = rb.compare(
+    {
+        "Constant": rb.BVAR(vol=rb.Constant("ig"), lags=4, mcmc=mcmc),
+        "SV(outliers)": rb.BVAR(vol=rb.SV(outliers=True), lags=4, mcmc=mcmc),
+    },
+    data,
+    origins=rb.Origins(start="2016Q1", step=4),
+    window=rb.Rolling(size=120),
+    horizons=[1, 4],
+)
+res.table()
+res.verdict()
+```
+
+On the 2026-09 vintage this returned `better` for `SV(outliers)` at both horizons, in about 3.5 minutes on an Apple M5 Max. MCMC draws are reproducible on one platform, not across platforms, so another machine can give other numbers.
+
+Two choices in this example matter:
+
+- **`Constant("ig")`, not `Constant()`.** `Constant()` with a Minnesota prior resolves to the conjugate model on the analytic engine, which changes the prior as well as the volatility. `Constant("ig")` keeps both arms on the MCMC engine with the same structural Minnesota prior, so they differ only in volatility.
+- **`draws=20_000`.** At the default 4 × 10,000, the SV arm converged at 10 of 11 origins, so the 1-step verdict was `inconclusive` on the convergence rule. At 4 × 20,000 it converged at all 11.
+
+## What `compare()` does at each origin
+
+For each model and each origin, it builds the data available at that origin, recomputes everything data-dependent (prior scales, dummy initial means, hyperparameter optimisation) inside the window, fits, forecasts `max(horizons)` steps, and scores the forecast against the realised values. Nothing after the origin is visible to the fit.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `models` | | A `{name: model}` mapping, a list of models, or the output of `rb.grid()` |
+| `origins` | | `rb.Origins(start, end=None, step=1)` or a list of periods |
+| `window` | `rb.Expanding()` | `rb.Expanding(min_size=None)` or `rb.Rolling(size)` |
+| `horizons` | `(1,)` | Horizons to score and judge |
+| `draws` | 1000 | Forecast draws per origin |
+| `seed` | 0 | Base seed; each origin gets its own fit and forecast seed |
+| `baseline` | first model | The reference for the table and for `verdict()` without `axis` |
+| `cache` | `None` | A directory or `rb.Cache(...)`: per-origin scores on disk |
+| `n_jobs` | 1 | Origins in parallel, in a process pool |
+| `lpd_method` | `"conditioned"` | The log score estimator, see [The predictive contract](/predictive-contract) |
+
+With a cache, results are keyed by the model spec, the data, the origin and the seed. A backtest that stops can resume, and adding a model to a comparison fits only that model.
+
+With an MCMC model, `n_jobs > 1` warns, because XLA is already multi-threaded, and starts its workers with the `spawn` method. A script that does this must guard its entry point with `if __name__ == "__main__":`.
+
+## Read the ablation table
+
+`res.table()` has one row per model and horizon, measured against the baseline on the origins where every model has a score:
+
+| Column | Meaning |
+| --- | --- |
+| `axis:*` | The model's value on each axis (mean, prior, vol, lags, deterministic, outliers) |
+| `origins` | Number of origins scored |
+| `lpd`, `dlpd`, `dlpd_mean`, `dlpd_mcse` | Total log predictive density, its difference from the baseline (total and mean per origin), and the Monte Carlo standard error of the difference |
+| `crps`, `crps_rel` | Mean CRPS, and relative to the baseline |
+| `qwcrps_left`, `qwcrps_right` | Quantile-weighted CRPS for the tails (absolute) |
+| `energy`, `variogram` | Joint scores |
+| `rmse_rel`, `mae_rel` | Point-forecast errors relative to the baseline |
+| `dm_stat`, `dm_pvalue` | Two-sided Diebold-Mariano test of the log score |
+| `tests_valid` | `True` for rolling windows only |
+| `mcs_pvalue`, `in_mcs_10`, `in_mcs_25` | Model Confidence Set p-value and membership at 10% and 25% |
+| `converged` | Share of origins at which the fit converged |
+
+`res.plot_cumulative_lpd(horizon=1)` plots the cumulative log score difference of every model against the baseline over the origins. It needs the `plot` extra.
+
+## How the verdict is decided
+
+`res.verdict()` compares every model with the baseline. `res.verdict(axis="vol")` instead compares every model with its neighbour that has the baseline's value on that axis and agrees on all others, so in a grid it measures the effect of one axis holding the others fixed.
+
+A model is `better` than its reference at a horizon only if all of these hold:
+
+1. **The two differ along exactly one axis.** Otherwise the verdict is `not comparable`, with the axes listed.
+2. **The log score gain is positive and precise.** The total ΔLPD over the common origins is above 0 and more than 3 times its Monte Carlo standard error.
+3. **The gain is significant.** A one-sided Diebold-Mariano test rejects at 10% on a rolling window, **or** the reference is outside the 25% Model Confidence Set while the model is inside.
+4. **Both models converged.** The smaller of the two converged shares is at least 95%. Otherwise the verdict is `inconclusive`, whatever the scores say.
+
+`worse` is the mirror image, and anything else is `inconclusive`. The `reasons` column states each check, for example:
+
+```text
+ΔLPD=-0.18 (MC s.e. 0.11, not precise enough); DM p=0.248 (valid: rolling window); MCS25: model in, reference in
+```
+
+The thresholds are arguments: `verdict(axis=None, horizons=None, *, test_level=0.10, mcs_alpha=0.25, mc_multiple=3.0, min_converged=0.95)`.
+
+<Note>
+  Diebold-Mariano p-values are flagged valid only for rolling windows. With nested models and expanding windows the statistic is not asymptotically standard, so `tests_valid` is `False`, the reasons call the p-value descriptive, and condition 3 can then only be met through the Model Confidence Set.
+</Note>
+
+## Build a grid
+
+`rb.grid(factory, **axes)` builds the Cartesian product of component choices:
+
+```python
+models = rb.grid(
+    rb.BVAR,
+    vol=[rb.Constant(), rb.SV(), rb.SV(outliers=True)],
+    lags=[4],
+)
+res = rb.compare(models, data, origins=rb.Origins(start="2016Q1", step=4),
+                 window=rb.Rolling(size=120), horizons=[1, 4])
+res.verdict(axis="vol")
+```
+
+A grid resolves `auto` components the same way in every arm. Because one arm here needs the MCMC engine, the `Constant()` arm becomes `Constant("ig")` with the structural Minnesota prior, and its entry is named `Constant(ig) × 4`. Every arm then differs along `vol` only. Settings you pass explicitly are never changed.
+
+## Volatility first
+
+Much of the apparent gain from a richer mean or prior can come from time-varying volatility. Compare a mean or prior change holding the volatility fixed: `Horseshoe × SV` against `Minnesota × SV`, not against `Minnesota × Constant`. For samples that include 2020, the natural reference volatility is `SV(outliers=True)`.
+
+## Lower-level tools
+
+- `rb.backtest(model, data, origins=..., window=..., horizon=8, draws=1000, ...)` runs one model and returns a `BacktestResult` whose `scores` dataset holds every score per origin and horizon. It also accepts `warm_start=True`, which starts each origin's MCMC chains from the previous origin's final state (origins then run sequentially; burn-in still applies, shorter by default).
+- `rb.estimate_cost(model, data, origins=...)` times one fit and scoring at the last origin and extrapolates to all origins. Cost a grid model by model.
+- `rb.score_forecast(forecast, realized)` scores a single `ForecastResult`.
+- `rb.diebold_mariano(loss_a, loss_b, horizon)` and `rb.model_confidence_set(losses)` are the tests `compare()` uses.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="The predictive contract" icon="file-contract" href="/predictive-contract">
+    What is scored, and how the log score is estimated.
+  </Card>
+
+  <Card title="What is verified" icon="circle-check" href="/verification">
+    How often the verdict engine says `better` when nothing is better.
+  </Card>
+</Columns>

@@ -1,0 +1,149 @@
+---
+title: "Fit and forecast a Minnesota BVAR on your own data"
+sidebarTitle: "Fit and forecast"
+description: "Build VARData from your own DataFrame, set the Minnesota prior and its hyperparameters, fit on the analytic engine, and read forecasts, IRFs and FEVDs."
+icon: "chart-line"
+keywords: ["VARData", "Minnesota", "empirical Bayes", "GLP", "forecast", "IRF", "FEVD", "transformation codes"]
+---
+
+This guide covers the analytic engine of BVAR: a conjugate Minnesota prior with constant volatility, whose posterior has a closed form and whose draws are exact and independent. It is the fastest model in the library and the baseline of most comparisons.
+
+## Bring your own data
+
+`VARData` holds the raw levels, a transformation code per variable and the transformed estimation sample. Build it from a `DataFrame` with a regular `PeriodIndex` or `DatetimeIndex`:
+
+```python
+import pandas as pd
+import rai_bvar as rb
+
+frame = pd.read_csv("macro.csv", index_col=0)
+frame.index = pd.PeriodIndex(frame.index, freq="Q")
+
+data = rb.VARData.from_frame(frame, {"GDPC1": 5, "GDPCTPI": 5, "FEDFUNDS": 1})
+```
+
+The codes are the FRED-MD transformation codes. Without `tcodes`, every variable gets code 1.
+
+| Code | Transform | Own-lag prior mean |
+| --- | --- | --- |
+| 1 | level | 1 |
+| 2 | Δx | 0 |
+| 3 | Δ²x | 0 |
+| 4 | log x | 1 |
+| 5 | Δ log x | 0 |
+| 6 | Δ² log x | 0 |
+| 7 | `Δ(x_t / x_(t−1) − 1)` | 0 |
+
+The third column is the default prior mean of each variable's own first lag: a random walk for persistent levels, white noise for differenced series. Override it per variable with `Minnesota(mean={"FEDFUNDS": 0.9})`.
+
+A few rules apply to the data:
+
+- **Column order is the variable ordering** of recursive models. It sets the Cholesky identification of IRFs and, on the MCMC engine, enters the posterior itself.
+- **No missing values inside the sample.** Leading and trailing periods with missing values are dropped with a warning; a gap in the middle raises.
+- **Forecasts are mapped back path by path.** Each simulated path is inverse-transformed using the last observed levels, never its quantiles or means.
+
+## Specify the model
+
+```python
+model = rb.BVAR(
+    mean=rb.Linear(prior=rb.Minnesota(lambda_=0.2, soc=1.0, sur=1.0)),
+    vol=rb.Constant(),        # the default
+    lags=4,                   # the default is 1
+    deterministic="c",        # "c" constant (default), "ct" constant and trend, "n" none
+    outliers=None,            # or "lenza-primiceri"
+)
+model.engine   # "analytic"
+model.name     # "BVAR(Minnesota(conjugate, eb, SOC+SUR), p=4)"
+```
+
+With `Constant()` volatility, `Minnesota(form="auto")` resolves to the conjugate form, and the model runs on the analytic engine. The conjugate prior forces the same tightness on own and cross lags, so `cross` must be 1 there: a value such as `cross=0.5` raises at construction and names the forms that allow it.
+
+### Hyperparameters
+
+The `hierarchy` argument decides how hyperparameters are set:
+
+| `hierarchy` | What happens |
+| --- | --- |
+| `"eb"` (default) | Empirical Bayes: the free hyperparameters are set to the mode of the log marginal likelihood plus the log hyperprior, with the GLP (2015) hyperpriors |
+| `"mh"` | Random-walk Metropolis-Hastings over the free hyperparameters, then exact draws of the coefficients given each hyperparameter draw |
+| `"fixed"` | The values you pass are used as they are |
+
+By default the free hyperparameters are `lambda`, plus `soc` and `sur` when you switch those dummies on. Pass `hyper=("lambda", "alpha", "soc", "sur", "psi")` or any subset of it to choose them yourself. The hyperpriors are in `GLPHyperpriors`; the Gamma prior on `lambda` has mode 0.2 and standard deviation 0.4.
+
+The MH chain uses `MHSettings()`: 4 chains of 2,500 draws after 1,000 burn-in. It counts as converged when every free hyperparameter has R-hat below 1.01 and bulk ESS above 400; `fit.converged` reports it, and a fit that misses it warns.
+
+### COVID observations
+
+`outliers="lenza-primiceri"` applies the Lenza and Primiceri (2022) residual scaling: the residual covariance is multiplied by `s_t²` from the period containing March 2020, with three free scales and a geometric decay that join the hyperparameters. Pass `rb.LenzaPrimiceri(start="2020Q2")` to move the start, or `fixed=(s0, s1, s2, rho)` to fix the values. This scaling runs on the analytic engine only.
+
+## Fit and inspect
+
+```python
+fit = model.fit(data)
+
+fit.summary()        # hyperparameter values in use (with MH: quantiles and diagnostics)
+fit.log_ml()         # log marginal likelihood at the hyperparameters in use
+fit.converged        # EB optimisation succeeded and, with MH, the chains passed
+fit.warnings         # every warning the fit raised
+```
+
+## Forecast
+
+```python
+fc = fit.forecast(horizon=8, draws=2000, seed=0)
+
+fc.quantiles([0.05, 0.5, 0.95])               # model scale
+fc.quantiles([0.05, 0.5, 0.95], level=True)   # original scale
+fc.mean(), fc.median()
+fc.to_dataframe(q=(0.05, 0.5, 0.95), level=True)
+```
+
+The draws are joint across horizons and variables: each draw is one path generated from one parameter draw. For the log predictive density of an outcome and the rest of the forecast object, see [The predictive contract](/predictive-contract).
+
+## Impulse responses and variance decompositions
+
+```python
+irf = fit.irf(horizon=20, draws=1000, seed=0, shock="sd")
+
+irf.median()                         # (horizon, response, shock)
+irf.quantiles([0.16, 0.84])
+irf.fevd()                           # variance shares per draw
+irf.to_dataframe(q=(0.05, 0.5, 0.95))
+```
+
+Responses are recursive (Cholesky) in the variable ordering. `shock="sd"` gives one-standard-deviation shocks, measured before the COVID scaling when it is on; `shock="unit"` gives unit shocks.
+
+## Cross-variable shrinkage on the analytic engine
+
+`AsymmetricConjugate` is the Chan (2022) prior: it shrinks cross lags more than own lags and keeps a closed-form posterior, so it also runs on the analytic engine. Its `cross` defaults to 0.5, and empirical Bayes frees `lambda` and `cross`.
+
+```python
+model = rb.BVAR(mean=rb.Linear(prior=rb.AsymmetricConjugate()), lags=4)
+model.engine   # "analytic"
+```
+
+It is available on `main` only, and it does not combine with Lenza-Primiceri scaling. See [Components](/components).
+
+## How long it takes
+
+Measured at `n = 100` variables, `p = 13` lags and `T = 300` simulated observations on a laptop CPU:
+
+| Hierarchy | Fit | Forecast, 1,000 draws × 8 steps |
+| --- | --- | --- |
+| `fixed` | 0.1 s | 3.7 s |
+| `eb`, λ only | 2.1 s | 3.6 s |
+| `eb`, λ, μ, δ | about 100 s (about 35 s on FRED-QD) | 3.6 s |
+
+Empirical Bayes with the dummy weights free runs a deterministic multistart, which dominates its cost. MH over hyperparameters at `n = 100` takes minutes and is meant for smaller systems or final fits, not wide backtests.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Stochastic volatility" icon="wave-square" href="/stochastic-volatility">
+    The MCMC engine, for time-varying volatility.
+  </Card>
+
+  <Card title="Conditional forecasts" icon="route" href="/conditional-forecasts">
+    Scenarios with fixed paths for some variables.
+  </Card>
+</Columns>

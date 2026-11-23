@@ -1,0 +1,129 @@
+---
+title: "Model components: means, volatilities and priors"
+sidebarTitle: "Components"
+description: "The catalogue of BVAR components available today: the Linear mean, Constant, SV and CommonSV volatilities, and the Minnesota, conjugate and global-local priors."
+icon: "puzzle-piece"
+keywords: ["components", "Linear", "Constant", "SV", "CommonSV", "Minnesota", "Horseshoe", "SSVS", "R2D2", "global-local"]
+---
+
+A BVAR model is `BVAR(mean=..., vol=..., lags=...)`, and each argument is a component. There are no model-specific classes: adding a component never changes the others. This page lists every component in the code today and what is planned.
+
+```python
+model = rb.BVAR(
+    mean=rb.Linear(prior=rb.Horseshoe()),   # mean and its prior
+    vol=rb.SV(outliers=True),                # volatility
+    lags=4,
+)
+model.axes
+# {'mean': 'Linear', 'prior': 'Horseshoe(structural, olcl-lagwise)', 'vol': 'SV(outliers)',
+#  'lags': '4', 'deterministic': 'c', 'outliers': 'none'}
+```
+
+`model.axes` is what the verdict engine reads: two models are comparable when exactly one of these values differs.
+
+## Mean
+
+| Component | Conditional mean | State |
+| --- | --- | --- |
+| `Linear(prior=...)` | A linear function of the lags and deterministic terms | Available |
+| `BART` | Sum of regression trees | Planned (Phase 4) |
+| `TVP`, `Threshold`, `MarkovSwitching` | Time-varying or regime-dependent coefficients | Planned (Phase 5) |
+
+`Linear` takes any of the priors below. The default is `Linear(prior=Minnesota())`.
+
+## Volatility
+
+| Component | Error variances | Engine |
+| --- | --- | --- |
+| `Constant()` | Constant over time | Analytic with a conjugate prior, MCMC otherwise |
+| `SV()` | AR(1) stochastic volatility per equation | MCMC |
+| `SV(rw=True)` | Random-walk stochastic volatility | MCMC |
+| `SV(outliers=True)` | SV with a mixture outlier component | MCMC |
+| `SV(tails="t")` | SV with Student-t errors, `ν` on the grid 3 to 40 | MCMC |
+| `CommonSV()` | One volatility factor shared by every variance | MCMC (`main` only) |
+
+`SV` flags combine, for example `SV(rw=True, outliers=True, tails="t")`. `FactorSV` and order-invariant SV are planned for Phase 5.
+
+### `Constant` priors
+
+`Constant(prior=...)` decides how the constant variances are modelled:
+
+| `prior` | Meaning |
+| --- | --- |
+| `"auto"` (default) | `"iw"` with the conjugate Minnesota form, `"ig"` otherwise |
+| `"iw"` | Conjugate inverse-Wishart. With a structural Minnesota prior on the MCMC engine, every coefficient prior is scaled by the variance: the MCMC twin of the conjugate model, labelled `scaling=conjugate` on the prior axis |
+| `"ig"` | Independent inverse-gamma variance per equation, with an independent coefficient prior |
+| `"iw_equivalent"` | Inverse-gamma variances with only the contemporaneous coefficients scaled by the variance (Chan 2022); the implied covariance is inverse-Wishart when `contemp = 1` |
+
+## Priors
+
+### `Minnesota`
+
+The Minnesota prior with the Giannone, Lenza and Primiceri (2015) hierarchy.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `lambda_` | 0.2 | Overall tightness |
+| `alpha` | 2.0 | Lag decay: the prior variance of lag `l` falls as `1/l^alpha` |
+| `psi` | `"ar"` | Residual variance scales: from a univariate AR(p) with constant per variable, or a tuple of values |
+| `soc`, `sur` | `None` | Sum-of-coefficients and single-unit-root dummy weights; `None` switches them off |
+| `soc_scope` | `"persistent"` | SOC rows only for variables with a non-zero own-lag prior mean; `"all"` for every variable |
+| `mean` | `None` | Own first-lag prior mean: from the transformation codes, or a number or `{variable: value}` |
+| `cross` | 1.0 | Scales the prior standard deviation of cross lags; must be 1 in conjugate form |
+| `contemp` | 1.0 | Scales the prior variance of contemporaneous coefficients; must be 1 in conjugate form |
+| `var_const` | 1e7 | Prior variance of deterministic terms |
+| `form` | `"auto"` | `"conjugate"`, `"structural"` or `"reduced"`; see [Engines](/engines) |
+| `hierarchy` | `"eb"` | `"eb"`, `"mh"` or `"fixed"` |
+| `hyper` | `"auto"` | Which hyperparameters are free: `lambda`, plus `soc` and `sur` when set |
+
+`form="structural"` and `form="reduced"` share the prior mean on the reduced-form coefficients but have different prior covariances, so they are different priors. Compare them only with matching forms.
+
+### `AsymmetricConjugate` (`main` only)
+
+The Chan (2022) asymmetric conjugate prior: per-equation normal-inverse-gamma priors in the recursive structural form, with separate tightness for cross lags (`cross`, default 0.5) and contemporaneous coefficients (`contemp`, default 1.0). The posterior is closed form, so it runs on the analytic engine with exact draws and an exact log marginal likelihood. At `cross = contemp = 1` it equals the conjugate Minnesota prior. It requires `Constant()` (or `Constant("iw")`) and does not combine with Lenza-Primiceri scaling.
+
+### Global-local and selection priors (`main` only)
+
+Five families shrink each lag coefficient's deviation from its Minnesota prior mean, with a local scale per coefficient and a global scale per group:
+
+| Prior | Own arguments and defaults |
+| --- | --- |
+| `Horseshoe` | `global_scale=1.0` |
+| `NormalGamma` | `a` (grid), `b=0.5`, `c="a/2"` |
+| `R2D2` | `a` (grid), `b=0.5` |
+| `DirichletLaplace` | `a` (grid) |
+| `SSVS` | `c0=0.01`, `c1=100.0`, `semiautomatic=True`, `p=0.5` |
+
+`a` is a fixed float or a `DiscreteGrid` hyperprior; the default is `DiscreteGrid.gruber_kastner()`, 1,000 equally spaced points on `[0.001, 1]` with weights proportional to the `Exp(1)` density. In `SSVS`, `p` is a fixed inclusion probability or a `sv_priors.Beta` hyperprior.
+
+All five share these keyword arguments:
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `groups` | `"olcl-lagwise"` | Coefficient groups: own lags and cross lags of each lag (2p groups), `"global"`, `"equation-wise"`, `"covariate-wise"`, or an explicit `(n, n·p)` array of group ids |
+| `scale` | `"psi"` | Puts the kernel in the units of the Minnesota prior at `λ = 1`; `"none"` for unit scale |
+| `form` | `"auto"` | Resolves to `"structural"`; `"reduced"` is also allowed |
+| `mean`, `psi`, `var_const`, `contemp` | as `Minnesota` | Prior mean, residual scales, deterministic and contemporaneous priors |
+
+Deterministic terms and contemporaneous coefficients keep fixed Normal priors. Global-local priors have no SOC/SUR dummies and no empirical Bayes. They run on the MCMC engine with `Constant("ig")`, `Constant("iw_equivalent")`, `SV(...)` or `CommonSV()`; `Constant("iw")` raises, because it would scale the prior by the variance.
+
+## Benchmarks
+
+Two simple models exercise the backtest without any prior:
+
+- `rb.RandomWalk(drift=False)`: a random walk, with an optional drift.
+- `rb.OLSVAR(lags=1, deterministic="c", uncertainty="flat")`: a least-squares VAR with flat-prior parameter draws, or plug-in estimates with `uncertainty="none"`.
+
+Their only axis is `model`, so the verdict engine calls them `not comparable` with any BVAR. Use them in the ablation table as reference rows.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Engines" icon="gears" href="/engines">
+    Which composition runs where, and the ones that raise.
+  </Card>
+
+  <Card title="API reference" icon="code" href="/api">
+    Every public object and its arguments.
+  </Card>
+</Columns>

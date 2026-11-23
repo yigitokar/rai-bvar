@@ -1,0 +1,227 @@
+---
+title: "rai_bvar API reference: public objects and their arguments"
+sidebarTitle: "API reference"
+description: "Reference for the public objects of rai_bvar: BVAR, components and priors, settings, fits, ForecastResult, IRFResult, compare, backtest and the data loaders."
+icon: "code"
+keywords: ["API", "BVAR", "MCMCSettings", "ForecastResult", "compare", "backtest", "VARData", "datasets.load"]
+---
+
+Everything below is exported from the top-level package, `import rai_bvar as rb`. Specifications, settings and priors are frozen dataclasses: build a new one with changed arguments instead of mutating it. Objects marked `main` only are not in the `v0.2.0` release.
+
+## Models
+
+### `BVAR`
+
+```python
+rb.BVAR(mean=rb.Linear(), vol=rb.Constant(), lags=1, deterministic="c", outliers=None, mcmc=None)
+```
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `mean` | `Linear()` | The mean component, with its prior |
+| `vol` | `Constant()` | `Constant`, `SV` or `CommonSV` |
+| `lags` | 1 | Lag order, a positive integer |
+| `deterministic` | `"c"` | `"c"` constant, `"ct"` constant and trend, `"n"` none |
+| `outliers` | `None` | `None`, `"lenza-primiceri"` or `LenzaPrimiceri(...)`; analytic engine only |
+| `mcmc` | `None` | `MCMCSettings` (or a mapping) for MCMC compositions; normalised to `None` on analytic ones |
+
+| Member | What it returns |
+| --- | --- |
+| `fit(data, *, seed=None, init=None, runtime=None, plan=None)` | An `AnalyticFit` or an `MCMCFit`. `init`, `runtime` and `plan` apply to MCMC compositions only |
+| `engine` | `"analytic"` or `"mcmc"` |
+| `name` | A readable label, such as `"BVAR(Minnesota(structural, eb), SV, p=4)"` |
+| `axes` | `{mean, prior, vol, lags, deterministic, outliers}`: what the verdict compares |
+| `spec()`, `BVAR.from_spec(spec)` | A plain-JSON description of the resolved model, and its inverse |
+
+### Benchmarks
+
+| Object | Arguments |
+| --- | --- |
+| `RandomWalk` | `drift=False` |
+| `OLSVAR` | `lags=1`, `deterministic="c"`, `uncertainty="flat"` (or `"none"` for plug-in estimates) |
+
+## Components
+
+### `Linear`
+
+`Linear(prior=Minnesota())`. The prior is a `Minnesota`, a global-local prior (`main` only) or `AsymmetricConjugate` (`main` only). See [Components](/components) for every prior argument.
+
+### `Constant`
+
+`Constant(prior="auto")`, with `prior` one of `"auto"`, `"iw"`, `"ig"`, `"iw_equivalent"`.
+
+### `SV`
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `rw` | `False` | Random-walk log volatility |
+| `outliers` | `False` | Mixture outlier component |
+| `tails` | `"normal"` | `"t"` for Student-t errors |
+| `mu_prior` | `"data"` | Prior on `μ`: centred per window on the data's scale, or a `sv_priors.Normal` |
+| `mu_var` | 10.0 | Variance of the `"data"` prior on `μ` |
+| `phi_prior` | `Beta(20.0, 1.5)` | Prior on `(φ + 1)/2` |
+| `sigma2_prior` | `None` | `ScaledChi2(1.0)`, or `ScaledChi2(0.1)` with `rw=True`; or a `ScaledChi2` / `InvGamma` |
+| `h0` | `"stationary"` | Initial log volatility from the stationary distribution, or a float `B₀` |
+| `rw_h0_var` | 4.0 | Initial-state variance with `rw=True` |
+| `outlier_max` | 20 | Largest outlier scale |
+| `outlier_prior` | `None` | `OutlierPrior(every_years=4, prior_years=10)`; `every_years=10` with `tails="t"` |
+| `nu_prior` | `DiscreteUniform(3, 40)` | Grid prior on the Student-t degrees of freedom |
+| `t_scale` | `"standardized"` | `"standardized"` (unit variance) or `"unit"` |
+| `mixture` | `"ocsn10"` | Omori et al. 10-component mixture, or `"ksc7"` |
+| `offset` | `"relative"` | Offset added before taking logs; a float gives an absolute offset |
+| `exact` | `True` | Metropolis-Hastings correction of the mixture approximation |
+| `asis` | `True` | ASIS interweaving of the SV parameters |
+
+Settings a variant does not use are reset to their defaults, so one model has one spec. The prior classes are in `rb.sv_priors`: `Normal`, `Beta`, `ScaledChi2`, `InvGamma`, `DiscreteUniform`, `OutlierPrior`, `TruncatedNormal`.
+
+### `CommonSV` (`main` only)
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `rho_prior` | `TruncatedNormal(0.9, 0.04)` on `(−1, 1)` | Prior on the persistence `ρ`; a `Beta` on `(ρ + 1)/2` is also accepted |
+| `sigma2_prior` | `InvGamma(5.0, 0.04)` | Prior on the innovation variance; a `ScaledChi2` is also accepted |
+| `block` | 100 | Block length of the log-volatility Metropolis-Hastings step, at least 2 |
+
+### `LenzaPrimiceri`
+
+`LenzaPrimiceri(start=None, fixed=None, scale_prior=ParetoPrior(), rho_prior=BetaPrior(mode=0.8, sd=0.2))`. `start` defaults to the period containing March 2020; `fixed=(s0, s1, s2, rho)` uses given values instead of estimating them. `ParetoPrior` defaults to `scale=1.0, shape=1.0, upper=1000.0`.
+
+## Settings
+
+### `MCMCSettings`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `chains` | 4 | Number of chains |
+| `draws` | `None` | Kept draws per chain; `None` resolves to 10,000 with `SV` or `CommonSV`, 2,000 with `Constant` |
+| `burn` | 1000 | Burn-in sweeps |
+| `thin` | 1 | Keep one sweep in `thin` |
+| `warm_burn` | `None` | Burn-in of warm-started backtest fits; `None` means `max(250, burn // 4)` |
+| `seed` | 0 | Sampler seed; `fit(seed=...)` overrides it |
+| `store` | `"params"` | `"paths"` also stores latent paths (needed for dated SV impulse responses) |
+| `store_max` | 2500 | Parameter draws are stored every `⌈draws/store_max⌉`-th kept draw, so at most this many per chain |
+| `path_thin` | 10 | With `store="paths"`, keep paths every `path_thin`-th stored draw |
+| `rhat_max`, `ess_min` | 1.01, 400.0 | Thresholds of the convergence gate |
+
+`MCMCSettings` is part of the model's spec, because results depend on every field. The remaining fields (`t_bucket`, `gram`, `const_path`) are performance settings.
+
+### `Runtime`
+
+Passed to `fit(runtime=...)`; never changes the draws, except that `devices` other than 1 agrees with the one-device fit only to rounding.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `devices` | 1 | Devices to shard the chains over, or `"auto"` |
+| `chunk` | 250 | Kept draws per compiled call |
+| `memory_budget_gb` | 2.0 | Raise if the storage plan exceeds it |
+| `storage_dir` | `None` | Directory for a memory-mapped draw store |
+| `replay` | `True` | Keep each chunk's start state so a numerical failure can be replayed |
+
+### `MHSettings`
+
+Metropolis-Hastings over hyperparameters with `hierarchy="mh"`: `draws=2500`, `burn=1000`, `chains=4`, `thin=1`, `target_acceptance=0.3`, `seed=0`, `rhat_max=1.01`, `ess_min=400.0`.
+
+## Fits
+
+`BVAR.fit()` returns an `AnalyticFit` (or, for `AsymmetricConjugate`, its structural closed-form equivalent) or an `MCMCFit`. They share this interface:
+
+| Member | Meaning |
+| --- | --- |
+| `engine` | `"analytic"` or `"mcmc"` |
+| `converged` | Analytic: EB succeeded and MH passed; MCMC: the R-hat and ESS gate |
+| `warnings` | Every warning the fit raised |
+| `summary()` | Analytic: hyperparameter values; MCMC: the primary diagnostics, with prior and ordering details in `attrs` |
+| `forecast(horizon, draws=1000, seed=None, *, lag_coefs=...)` | A `ForecastResult`. `lag_coefs` defaults to `False` on analytic fits; MCMC forecasts always carry it |
+| `irf(horizon=20, draws=1000, seed=None, shock="sd")` | An `IRFResult`. MCMC fits also take `date=None` and `which="persistent"` |
+| `conditional_forecast(horizon, conditions, draws=1000, seed=None)` | A `ConditionalForecastResult` (`main` only) |
+| `draw_parameters(size, rng=None)` | Coefficient draws `(S, k, n)` and covariance factors `(S, n, n)` |
+
+`AnalyticFit` also has `log_ml(hyper=None)`, `log_posterior(hyper=None)`, `posterior(hyper=None)`, `hyper` and `psi`. `MCMCFit` also has `diagnostics` (a `DataFrame`, one row per monitored quantity), `posterior` (an `xarray.DataTree` of the stored draws), `ordering`, `metadata`, `timing` and `final_state`.
+
+## Forecasts and responses
+
+### `ForecastResult`
+
+| Member | Meaning |
+| --- | --- |
+| `paths`, `paths_level`, `cond_mean`, `cond_chol` | The contract fields, as `xarray.DataArray` |
+| `dataset` | The underlying `xarray.Dataset`, with `attrs` |
+| `variables`, `horizon`, `origin`, `n_samples` | Shape and labels |
+| `quantiles(q, *, level=False)`, `mean(*, level=False)`, `median(*, level=False)` | Summaries over `(chain, draw)` |
+| `to_dataframe(q=(0.05, 0.5, 0.95), *, level=False)` | Quantiles with rows `(date, variable)` |
+| `log_pred_density(y, horizon, variables=None, *, return_mcse=False, lpd_method="conditioned")` | The Rao-Blackwellised log predictive density |
+| `stacked(name="paths")` | `(chain, draw)` flattened into one axis |
+
+See [The predictive contract](/predictive-contract).
+
+### `IRFResult`
+
+`quantiles(q)`, `median()`, `mean()`, `fevd()` and `to_dataframe(q=(0.05, 0.5, 0.95))`. Responses have dims `(chain, draw, horizon, response, shock)`.
+
+### `conditional_forecast` (`main` only)
+
+`rb.conditional_forecast(fit, horizon, conditions, draws=1000, seed=None, base=None)`. See [Conditional forecasts](/conditional-forecasts).
+
+## Evaluation
+
+| Function | Signature (defaults) |
+| --- | --- |
+| `compare` | `compare(models, data, *, origins, window=Expanding(), horizons=(1,), draws=1000, seed=0, baseline=None, cache=None, n_jobs=1, realized=None, lpd_method="conditioned")` |
+| `backtest` | `backtest(model, data, *, origins, window=Expanding(), horizon=8, draws=1000, seed=0, cache=None, n_jobs=1, realized=None, name=None, axes=None, warm_start=False, lpd_method="conditioned")` |
+| `grid` | `grid(factory, **axes)` |
+| `estimate_cost` | `estimate_cost(model, data, *, origins, window=Expanding(), horizon=8, draws=1000, realized=None, lpd_method="conditioned")` |
+| `score_forecast` | `score_forecast(fr, realized, *, rng=None, multivariate_max_samples=1000, qw_levels=99, tw_bounds=None, lpd_method="conditioned")` |
+| `diebold_mariano` | `diebold_mariano(loss_a, loss_b, horizon=1, *, hln=True, alternative="two-sided")` |
+| `model_confidence_set` | `model_confidence_set(losses, *, n_boot=2000, block_length=None, seed=0)` |
+| `ordering_sensitivity` | `ordering_sensitivity(model, data, n_perm=10, pinned=(), mode="forecast", ...)` with `mode` one of `"prior"`, `"forecast"`, `"backtest"` |
+
+| Object | Arguments |
+| --- | --- |
+| `Origins` | `start`, `end=None`, `step=1` |
+| `Expanding` | `min_size=None` |
+| `Rolling` | `size` |
+| `Cache` | `directory=".rai-bvar-cache"` |
+
+`compare()` returns a `CompareResult` with `table()`, `verdict(axis=None, horizons=None, *, test_level=0.10, mcs_alpha=0.25, mc_multiple=3.0, min_converged=0.95)`, `plot_cumulative_lpd(horizon=1, ax=None)`, `mcs(horizon)` and `scores(name)`. See [Compare models](/compare-models).
+
+## Data
+
+### `VARData`
+
+`VARData.from_frame(frame, tcodes=None, *, vintage=None)` builds a dataset from raw levels with a regular `PeriodIndex` or `DatetimeIndex`. `tcodes` is a mapping, a sequence or a single code; the default is 1 for every column. Useful members: `variables`, `index`, `first`, `last`, `values`, `prior_means()`, `upto(origin)` and `tail(n_obs)`.
+
+### `datasets.load`
+
+```python
+rb.datasets.load(name, vintage="2026-09", variables="small", tcodes="rai", *,
+                 cache_dir=None, url=None, verify=True, fill_gaps=True)
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `name` | `"fred-qd"` (quarterly) or `"fred-md"` (monthly) |
+| `vintage` | A published vintage label. `"2026-09"` is the only one with a registered checksum for each dataset; other vintages load with a warning that reports the computed hash |
+| `variables` | `"small"` (3 series), `"medium"` (7), `"large"` (20), or a list of series names in the order you want |
+| `tcodes` | `"rai"` (the named set's codes), `"official"` (the file's codes), or a mapping that overrides individual variables |
+| `fill_gaps` | Interpolate missing values inside a series' observed span, with a warning listing each one |
+
+The sets contain only series published by U.S. federal agencies. `rb.datasets.VARIABLE_SETS[name][size]` lists each set's series and codes; FRED-QD `"small"` is `GDPC1`, `GDPCTPI` and `FEDFUNDS`, FRED-MD `"small"` is `INDPRO`, `CPIAUCSL` and `FEDFUNDS`.
+
+## Process settings
+
+| Function | Meaning |
+| --- | --- |
+| `set_cpu_devices(k)` | Expose `k` CPU devices to JAX. Call before any fit |
+| `enable_compilation_cache(path, min_compile_secs=1.0)` | Store compiled samplers in `path` for later processes |
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Components" icon="puzzle-piece" href="/components">
+    Every prior and its arguments.
+  </Card>
+
+  <Card title="Engines" icon="gears" href="/engines">
+    Which composition runs where.
+  </Card>
+</Columns>

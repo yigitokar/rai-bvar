@@ -4,6 +4,8 @@ Ablation-ready Bayesian VARs for Python. Models are compositions of a **mean**, 
 
 > **Status: Phase 2 (analytic and MCMC engines).** The analytic engine (Phase 1) is the conjugate Minnesota BVAR: SOC/SUR dummies, the GLP (2015) hierarchy (empirical Bayes or Metropolis-Hastings over hyperparameters), Lenza-Primiceri COVID scaling and recursive IRFs/FEVD, at numerical parity with R `BVAR` and the Bank of England `bvar`. The MCMC engine (Phase 2) is a hand-written JAX Gibbs sampler for the `Linear` mean in structural or reduced form (the corrected CCCM 2022 sampler) × `Constant`, `SV`, `SV(rw=True)`, `SV(outliers=True)` and `SV(tails="t")`, with SOC/SUR dummies, empirical-Bayes Minnesota hyperparameters, runtime convergence diagnostics, an ordering-sensitivity check and an opt-in path-integrated log score (`lpd_method="integrated"`). Every composition has Geweke and SBC tests (some SBC rows are to be re-run after later kernel changes), and the engine is checked against R `stochvol` and, for the reduced form, an exact system-wide Gibbs oracle. Exit criteria, evidence and open items: [SPEC.md §13](SPEC.md#phase-2-mcmc-engine-and-the-volatility-axis); design: [docs/phase2/DESIGN.md](docs/phase2/DESIGN.md). Next: Phase 3 (global-local shrinkage, `CommonSV`, conditional forecasts).
 
+User documentation: [docs.careresearch.ai/bvar](https://docs.careresearch.ai/bvar). Its pages are in [docs/site/](docs/site/); the other folders under `docs/` are internal design notes.
+
 ## Quick start
 
 ```python
