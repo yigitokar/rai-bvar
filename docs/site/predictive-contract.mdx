@@ -1,0 +1,94 @@
+---
+title: "The predictive contract: ForecastResult and its scores"
+sidebarTitle: "Predictive contract"
+description: "What every BVAR forecast contains, the invariants both engines satisfy, how the log predictive density is estimated, and the scores the backtest computes."
+icon: "file-contract"
+keywords: ["ForecastResult", "log predictive density", "LPD", "CRPS", "energy score", "variogram score", "PIT", "xarray"]
+---
+
+Every BVAR model, on either engine, returns the same `ForecastResult` from `fit.forecast()`. Scoring, the backtest and the verdict only ever see this object, so they cannot depend on how a model was estimated. This page describes its fields, the invariants it satisfies and the scores computed from it.
+
+## Fields
+
+`ForecastResult` wraps an `xarray.Dataset`, available as `fc.dataset`:
+
+| Field | Dims | Meaning |
+| --- | --- | --- |
+| `paths` | `(chain, draw, horizon, variable)` | Joint simulated paths on the model (transformed) scale. Each `(chain, draw)` slice is one path from one parameter draw |
+| `paths_level` | same | The paths inverse-transformed to the original scale, path by path |
+| `cond_mean` | `(chain, draw, horizon, variable)` | The mean of `y_(T+h)` given the draw, its simulated path up to `T+h−1` and its volatility at `T+h` |
+| `cond_chol` | `(chain, draw, horizon, variable, variable_)` | The lower-triangular factor of the matching covariance |
+
+Analytic forecasts have a single chain. MCMC forecasts also carry accelerator variables, such as `cond_A`, `cond_scale` and `lag_coefs`, that make scoring faster.
+
+The dataset's `attrs` record the forecast origin, the model name and spec hash, the engine, the variable ordering, the transformation codes, the seed, the convergence flag, the warnings and the package version.
+
+## Invariants
+
+These hold for every registered composition and are tested:
+
+1. `paths[s, h]` is distributed as a normal with mean `cond_mean[s, h]` and covariance `cond_chol[s, h] cond_chol[s, h]ᵀ`.
+2. Draws are joint across horizons and variables, never assembled from marginals.
+3. `fc.stacked("paths")` flattens `(chain, draw)` into one sample axis, giving shape `(draws, horizon, variables)`.
+
+## Summaries
+
+```python
+fc.quantiles([0.05, 0.5, 0.95])           # over (chain, draw)
+fc.quantiles([0.05, 0.5, 0.95], level=True)
+fc.mean(), fc.median()
+fc.to_dataframe(q=(0.05, 0.5, 0.95), level=False)
+```
+
+Quantiles are plain sample quantiles. Their Monte Carlo standard errors are not attached.
+
+## The log predictive density
+
+`fc.log_pred_density(y, horizon, variables=None, *, return_mcse=False, lpd_method="conditioned")` is the primary score. It is Rao-Blackwellised: instead of a kernel density estimate, it averages the Gaussian density of `y` under each draw's conditional moments,
+
+```text
+log p̂(y_(T+h) | Y) = logsumexp_s log N(y; cond_mean[s,h], cond_chol[s,h] cond_chol[s,h]ᵀ) − log S
+```
+
+A subset of `variables` marginalises the Gaussian. With `return_mcse=True` it also returns a delta-method Monte Carlo standard error, inflated for autocorrelated MCMC draws. That standard error feeds the precision check of the verdict.
+
+### Two estimators
+
+- **`"conditioned"`** (default) uses the contract moments, which condition on the draw's simulated path up to `T+h−1`. For `h > 1` and outcomes far in the tail of the predictive, the weights can collapse onto the few draws whose paths wandered towards the outcome. The estimate is then biased low while its standard error stays small.
+- **`"integrated"`** conditions each draw only on its parameters and its drawn volatility path, and integrates the intermediate values out analytically. It needs the forecast's `lag_coefs`: MCMC forecasts always carry them, and on `main` analytic forecasts attach them with `forecast(..., lag_coefs=True)`. Benchmark models cannot provide them. At `h = 1` the two estimators are identical.
+
+Pass `lpd_method="integrated"` to `compare()` or `backtest()` to score and judge with it.
+
+## Scores
+
+`rb.score_forecast(fc, realized)` computes, and the backtest stores per origin and horizon:
+
+| Score | Scope | Notes |
+| --- | --- | --- |
+| `lpd`, `lpd_mcse` | joint | Rao-Blackwellised log predictive density and its MCSE. The primary score |
+| `lpd_marginal` | per variable | The same, one variable at a time |
+| `crps` | per variable | Sample-based fair CRPS |
+| `qwcrps_left`, `qwcrps_right`, `qwcrps_center` | per variable | Quantile-weighted CRPS for the tails and the centre (Gneiting and Ranjan 2011) |
+| `twcrps` | per variable | Threshold-weighted CRPS, only when you pass `tw_bounds={variable: (a, b)}` |
+| `energy` | joint | Energy score on a subsample of at most 1,000 draws |
+| `variogram` | joint | Variogram score (p = 0.5) on the same subsample; sensitive to misspecified correlations |
+| `sq_err`, `abs_err` | per variable | Errors of the posterior mean and median |
+| `pit`, `cover50`, `cover90` | per variable | PIT value and 50% and 90% interval coverage |
+
+CRPS, threshold-weighted CRPS, energy and variogram scores use `scoringrules`. PSIS-LOO and WAIC are not provided for VARs: leave-one-out conditions on the future to predict the past.
+
+## Memory
+
+`cond_chol` holds `S × H × n²` numbers: about 150 MB in float64 for 4,000 draws, 12 horizons and 20 variables. Every forecast materialises it. The analytic engine stores a zero-stride view when the factor does not depend on the horizon.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Compare models" icon="scale-balanced" href="/compare-models">
+    How these scores become a verdict.
+  </Card>
+
+  <Card title="Conditional forecasts" icon="route" href="/conditional-forecasts">
+    Scenarios built on the same contract.
+  </Card>
+</Columns>

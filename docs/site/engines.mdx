@@ -1,0 +1,83 @@
+---
+title: "How BVAR chooses the analytic or the MCMC engine"
+sidebarTitle: "Engines"
+description: "The analytic and MCMC engines of BVAR, how a composition is resolved to one of them, which combinations raise at construction, and what each engine computes."
+icon: "gears"
+keywords: ["engine", "analytic", "MCMC", "conjugate", "structural form", "reduced form", "Gibbs", "JAX"]
+---
+
+BVAR has two estimation engines, and you never choose between them directly. The composition decides: `BVAR` resolves its `auto` defaults when it is built, picks the engine, and reports it as `model.engine` and `fit.engine`. Invalid combinations raise at construction, before any data is touched.
+
+## Resolution
+
+Two defaults are resolved first:
+
+1. `Minnesota(form="auto")` becomes `"conjugate"` when the volatility is `Constant` with prior `"auto"` or `"iw"`, and `"structural"` otherwise. With `CommonSV` it becomes `"structural"`; the conjugate `CommonSV` screen must be asked for explicitly.
+2. `Constant(prior="auto")` becomes `"iw"` with the conjugate form and `"ig"` otherwise.
+
+The resolved components are stored, so `BVAR()` always means the same model and has the same spec hash. Then the first matching rule applies:
+
+| Resolved composition | Engine |
+| --- | --- |
+| Minnesota `conjugate` × `Constant("iw")` | Analytic |
+| Minnesota `conjugate` × `CommonSV` | MCMC, conjugate structure with a shared volatility factor |
+| Minnesota `conjugate` × anything else | Error |
+| Minnesota `structural` × `Constant("ig")`, `SV(...)` or `CommonSV` | MCMC, independent coefficient prior |
+| Minnesota `structural` × `Constant("iw")` | MCMC, variance-scaled prior: the conjugate posterior at `cross = contemp = 1` |
+| Minnesota `structural` × `Constant("iw_equivalent")` | MCMC, with Chan's (2022) prior on the contemporaneous coefficients and variances |
+| Minnesota `reduced` × `Constant("ig")`, `Constant("iw_equivalent")`, `SV(...)` or `CommonSV` | MCMC, corrected triangular sampler (CCCM 2022) |
+| Minnesota `reduced` × `Constant("iw")` | Error |
+| Global-local prior × `Constant("ig")`, `Constant("iw_equivalent")`, `SV(...)` or `CommonSV` | MCMC |
+| Global-local prior × `Constant("iw")` | Error |
+| `AsymmetricConjugate` × `Constant("iw")` | Analytic, structural normal-inverse-gamma closed form |
+| `AsymmetricConjugate` × anything else | Error |
+
+On the MCMC engine, Lenza-Primiceri scaling and `hierarchy="mh"` also raise, and empirical Bayes over `psi` is not available for the structural Minnesota prior with `cross != 1`. Every error message names a composition that works, for example:
+
+```text
+cross-variable shrinkage (cross != 1) is impossible in conjugate form (form='auto' resolves to it with Constant() volatility); use form='structural' or 'reduced'
+```
+
+## The analytic engine
+
+The conjugate normal-inverse-Wishart model. Its Kronecker structure forces the same tightness on own and cross lags.
+
+- The Minnesota, SOC and SUR priors are written as dummy observations stacked on the data, and the posterior is computed by a thin QR decomposition with triangular solves. No inverse is formed.
+- The log marginal likelihood is closed form, with log-determinants taken from triangular factors.
+- Given the hyperparameters, posterior draws are exact and independent. Only the Metropolis-Hastings chain of `hierarchy="mh"` needs convergence diagnostics.
+- Lenza-Primiceri scaling divides the rows of the data by the period scale, which keeps the model conjugate.
+
+`AsymmetricConjugate` runs on this engine through a separate closed form: independent normal-inverse-gamma priors per equation of the recursive structural form, whose posterior factorises.
+
+## The MCMC engine
+
+A Gibbs sampler written by hand in JAX, with no probabilistic programming language. Every model is written in recursive structural form, `A y_t = g(x_t) + Λ_t^(1/2) ε_t`, with `A` unit lower triangular and `Λ_t` diagonal.
+
+- **Equations sample in parallel.** Given the volatilities, and with priors independent across equations, the equations have independent posteriors, so one sweep costs `O(n⁴p³)` instead of `O(n⁶p³)` and the equations run under `jax.vmap`.
+- **The reduced-form prior** couples the equations. `Minnesota(form="reduced")` uses the corrected triangular algorithm of Carriero, Chan, Clark and Marcellino (2022), which keeps the `O(n⁴)` cost.
+- **Stochastic volatility** paths are drawn in `O(T)` with a banded precision sampler, using the 10-component mixture of Omori, Chib, Shephard and Nakajima (2007) and ASIS interweaving of the SV parameters. The mixture indicators are drawn immediately before the log volatilities, the step order corrected by Del Negro and Primiceri (2015).
+- **float64 everywhere**, positive-definiteness by construction and no silent jitter: a failed Cholesky factorisation raises with diagnostics.
+- **Empirical-Bayes hyperparameters** are fixed during sampling at a mode computed before it: from the conjugate twin when `cross = 1`, and from Chan's (2022) closed-form marginal likelihood for the structural form with `cross != 1`.
+
+## Design targets
+
+| | Analytic engine | MCMC engine |
+| --- | --- | --- |
+| Variables `n` | up to about 100 | up to about 30 (design target 20) |
+| Lags `p` | up to 13 | up to 13 |
+| Observations `T` | 100 to 800 | 100 to 800 |
+| Frequency | monthly, quarterly | monthly, quarterly |
+
+These are the sizes the engines are designed for, not limits the code enforces. For measured timings see [Fit and forecast](/fit-and-forecast) and [Stochastic volatility](/stochastic-volatility).
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Components" icon="puzzle-piece" href="/components">
+    Every component and its arguments.
+  </Card>
+
+  <Card title="What is verified" icon="circle-check" href="/verification">
+    How each engine is checked.
+  </Card>
+</Columns>

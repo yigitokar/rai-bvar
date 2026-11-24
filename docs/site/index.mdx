@@ -1,0 +1,78 @@
+---
+title: "BVAR: ablation-ready Bayesian VARs for Python"
+sidebarTitle: "Introduction"
+description: "BVAR (the rai-bvar package) builds Bayesian VARs from a mean, a volatility and a prior, and tests whether added complexity improves density forecasts."
+icon: "house"
+keywords: ["Bayesian VAR", "BVAR", "Minnesota prior", "stochastic volatility", "density forecasts", "ablation"]
+---
+
+BVAR is a Python library for Bayesian vector autoregressions, published as the package `rai-bvar` and imported as `rai_bvar`. It is built around one question: does added model complexity improve out-of-sample density forecasts once time-varying volatility is accounted for?
+
+Every model is a composition of three independent components. You never pick a model class such as "BVAR with SV": you pick a mean, a volatility and a prior, and the library chooses how to estimate them.
+
+| Axis | What it describes | Available now |
+| --- | --- | --- |
+| Mean | How the conditional mean depends on lagged data | `Linear` |
+| Volatility | How the error covariance evolves over time | `Constant`, `SV` (with random-walk, outlier and Student-t variants), `CommonSV` |
+| Prior | How the mean coefficients are shrunk | `Minnesota`, `AsymmetricConjugate`, `Horseshoe`, `NormalGamma`, `R2D2`, `DirichletLaplace`, `SSVS` |
+
+```python
+import rai_bvar as rb
+
+data = rb.datasets.load("fred-qd", vintage="2026-09", variables="small")
+
+constant = rb.BVAR(vol=rb.Constant("ig"), lags=4)
+sv = rb.BVAR(vol=rb.SV(outliers=True), lags=4)
+
+res = rb.compare(
+    {"Constant": constant, "SV(outliers)": sv},
+    data,
+    origins=rb.Origins(start="2016Q1", step=4),
+    window=rb.Rolling(size=120),
+    horizons=[1, 4],
+)
+res.verdict()   # "better", "worse" or "inconclusive", with the reasons, per horizon
+```
+
+## What you get
+
+- **Two engines behind one interface.** Conjugate models run on an analytic engine with exact, independent draws. Everything else runs on a hand-written JAX Gibbs sampler. The composition decides which one runs, and `fit.engine` tells you. See [Engines](/engines).
+- **One predictive contract.** Both engines return the same `ForecastResult`: joint simulated paths plus the conditional mean and covariance factor of every draw. Scores and the backtest never depend on how a model was estimated. See [The predictive contract](/predictive-contract).
+- **A backtest and a verdict engine.** `compare()` fits every model at the same forecast origins with the same windows, scores the forecasts, and runs Diebold-Mariano tests and a Model Confidence Set. `verdict()` only rules between two models that differ along exactly one axis.
+- **Convergence checks that gate the verdict.** MCMC fits report R-hat, ESS and MCSE per monitored quantity, and a verdict is `inconclusive` when either model converged at fewer than 95% of the origins.
+- **Reproducibility.** The same seed gives bitwise-identical results on the same platform and versions. Results across platforms agree only in distribution.
+
+## Status
+
+BVAR is pre-alpha (version 0.2.0). The project works in phases, each with exit criteria that are checked before the next one starts.
+
+| Phase | Content | State |
+| --- | --- | --- |
+| 1 | Analytic engine: conjugate Minnesota prior, SOC/SUR dummies, GLP hierarchy (empirical Bayes or Metropolis-Hastings), Lenza-Primiceri COVID scaling, recursive IRFs and FEVD | Exit criteria met |
+| 2 | MCMC engine: `Linear` in structural or reduced form × `Constant` and the `SV` family, convergence diagnostics, ordering-sensitivity check | Exit criteria met; released as `v0.2.0` |
+| 3 | Global-local priors, `AsymmetricConjugate`, `CommonSV`, conditional forecasts | In the code on `main`, not released; some exit criteria still open |
+| 4 | Nonlinear mean (BART) | Planned. The design spike is done; no BART mean is available |
+
+<Warning>
+  The Phase 3 features are in the repository's `main` branch but not in the `v0.2.0` release. Parity tests against R `bayesianVARs` for the global-local priors, and against an exact independent oracle for `CommonSV`, are not yet part of the test suite. See [What is verified](/verification).
+</Warning>
+
+## Start here
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Load a dataset, fit a model, forecast, and ask the verdict engine a question.
+  </Card>
+
+  <Card title="Installation" icon="box" href="/installation">
+    Python 3.12 or later, installing from GitHub, extras and JAX.
+  </Card>
+
+  <Card title="Components" icon="puzzle-piece" href="/components">
+    Every mean, volatility and prior you can use today.
+  </Card>
+
+  <Card title="Compare models" icon="scale-balanced" href="/compare-models">
+    Backtests, the ablation table and how the verdict is decided.
+  </Card>
+</Columns>

@@ -1,0 +1,94 @@
+---
+title: "What is verified in BVAR, and what is not yet"
+sidebarTitle: "What is verified"
+description: "How BVAR's engines and verdict engine are tested: Geweke and SBC, parity with R BVAR, stochvol and the Bank of England bvar, DGP size and power, and the gaps."
+icon: "circle-check"
+keywords: ["validation", "Geweke", "SBC", "parity", "stochvol", "R BVAR", "Bank of England bvar", "DGP", "size", "power"]
+---
+
+BVAR has a rule that no sampler is merged without Geweke and simulation-based calibration tests passing. A published, widely used VAR sampler once targeted the wrong posterior, and these are the tests that catch that kind of error. This page lists what the tests establish, the numbers they produced, and what is not yet checked.
+
+## Test tiers
+
+| Layer | What it checks | When it runs |
+| --- | --- | --- |
+| Unit | Linear algebra, transform round trips, dummy observations, shapes and dtypes | Every pull request |
+| Analytic | The conjugate posterior and log marginal likelihood against brute force | Every pull request |
+| Contract | The `ForecastResult` invariants | Every pull request for analytic, benchmark and two MCMC compositions; weekly for every MCMC composition |
+| Geweke | Joint-distribution tests for every block and composition | Every pull request (small configuration); weekly (full) |
+| SBC | Rank uniformity of parameters and test quantities | Weekly |
+| Parity | Committed fixtures from R packages and the Bank of England `bvar` | Every pull request (short runs); weekly (long runs) |
+| DGP | Size and power of the verdict engine | By hand, pre-registered |
+| Benchmarks | Speed and memory | Before a release, dispatched by hand |
+
+The fast suite runs on Python 3.12, 3.13 and 3.14 on Linux on every pull request. The slow, network and mutation tiers, and the macOS fast suite, run weekly.
+
+## The analytic engine
+
+- **Against quadrature.** At `n = 1`, `p = 1`, `T = 20`, posterior moments and the log marginal likelihood match numerical quadrature to a relative 1e-6.
+- **Against itself.** The QR path matches the normal equations to 1e-10 on well-conditioned designs and stays accurate at condition numbers around 1e12, where the normal equations fail. The posterior with dummy observations equals the one with the equivalent explicit prior moments.
+- **Against R `BVAR` and the Bank of England `bvar`.** Log marginal likelihoods agree to about 1e-11 relative, posterior moments to about 1e-9 and empirical-Bayes modes to 1e-3; MH quantiles agree within Monte Carlo error. The Bank of England package is MIT licensed and runs directly in CI.
+
+## The MCMC engine
+
+### Geweke and SBC
+
+- **Geweke (2004) tests** compare the marginal-conditional simulator with the successive-conditional simulator, testing moments of parameter functions with MCSE-based z-tests and a multiplicity correction. They need proper priors, and every test configuration has them.
+- **Simulation-based calibration** (Talts et al. 2018; Modrák et al. 2025) checks the rank uniformity of every parameter and of data-dependent quantities, including the log-likelihood, at 1% after a multiplicity correction.
+
+For the Phase 2 compositions (`Linear` in structural and reduced form × `Constant` and the `SV` family), the small Geweke configuration passes in CI on every pull request, the full configuration passes for every row, and SBC passes for every row. The SBC of some rows predates later kernel changes and is to be re-run. A mutation suite injects deliberate bugs into the kernels: 37 of 37 mutant checks were caught.
+
+For the Phase 3 compositions (global-local priors, `CommonSV`), the Geweke and SBC suites cover 30 rows. The Geweke suites and the mutation suite passed on a weekly run. Two of the 30 SBC rows are recorded as **not met**: a Dirichlet-Laplace composition and the conjugate × `CommonSV` composition with non-default priors. Both pass the uniformity test, but fail the pooled effective-sample-size gate, which is a mixing check.
+
+### Parity with R `stochvol`
+
+The univariate SV posterior of `μ`, `φ`, `σ` and the log-volatility quantiles are compared with R `stochvol` 3.2.1 on four datasets. The largest |z| was 1.63 to 2.59 in the pull-request runs and 1.64 to 3.57 in the long runs, against a bound of 4.00.
+
+`stochvol` 3.2.1's Student-t sampler does not target the standardised-t SV posterior, so the Student-t variant is checked against an exact importance-sampling oracle instead (largest |z| 1.83, bound 4.00).
+
+### The reduced-form sampler
+
+R `bayesianVARs` could not be installed for Phase 2. The corrected triangular sampler was checked instead against an exact system-wide Gibbs sampler written in R, which shares no code with the JAX engine. Largest |z| against the bound: 2.76 (4.05) at `n = 3` with constant volatility, 3.45 (4.15) at `n = 3` with SV, and 3.56 (4.51) at `n = 7` with SV. A second exact sampler in NumPy checks reduced form × `Constant` at `n` = 2, 3 and 4.
+
+### Analytic twins
+
+`Linear(form="structural") × Constant` on the MCMC engine has an exact closed-form twin (Chan 2022). The MCMC draws are tested against it, which checks the engine end to end at sizes where Geweke and SBC tests are too expensive.
+
+## The verdict engine
+
+A pre-registered study simulated known data-generating processes (`n = 3`, VAR(2), `T = 200`, 200 replications per process) and ran the full `compare()` with library defaults: `Rolling(120)`, 80 origins, horizons 1 and 4.
+
+| Process | Question | Result |
+| --- | --- | --- |
+| Linear, homoskedastic | How often is `SV` wrongly `better` than `Constant`? | 0 of 200 at h = 1; 3.0% at h = 4 |
+| Linear, homoskedastic | How often is `SV(outliers)` wrongly `better`? | 0 of 200 at h = 1; 0.5% at h = 4 |
+| Linear, SV | How often is `SV` correctly `better`? | 67.5% at h = 1; 51.0% at h = 4 |
+| Linear, SV + outliers | How often is `SV(outliers)` `worse` than `SV`? | 0 of 200 at both horizons |
+| Linear, SV + outliers | How often is `SV(outliers)` `better` than `SV`? | 40.5% at h = 1; 19.5% at h = 4 |
+
+No false-positive rate is above the nominal 10%. In the outlier process, the convergence gate decided most 1-step verdicts: with it switched off, `SV(outliers)` was `better` in 99.5% of replications at h = 1.
+
+## A replication
+
+A pre-registered Clark and Ravazzolo (2015)-style run on FRED-QD, at 4 × 20,000 draws with the path-integrated log score, met five of its six criteria. The SV verdict was `better` in 24 of 24 variable orderings. The criterion not met: the unemployment-rate gain grows from h = 1 to h = 8, where the rule needed it to shrink.
+
+## Not verified yet
+
+- **Phase 3 parity.** The parity comparisons against R `bayesianVARs` for the global-local priors and the reduced-form sampler, and against an exact independent oracle for `CommonSV`, are not yet in the test suite. Their fixtures are committed.
+- **Cross-platform results.** The same seed reproduces a fit bitwise on one platform. On another platform, or with another chain or device count, results agree only in distribution.
+- **Quantile MCSE.** `ForecastResult.quantiles` returns plain quantiles without Monte Carlo standard errors.
+- **DGP recovery tests** and DGP cells other than `n = 3`, `p = 2`, `T = 200`.
+- **Performance on other machines.** The Phase 2 benchmark (52.3 s against a 120 s target) was measured on an Apple M5 Max under load; no idle x86 laptop has been measured.
+- **Nonlinear means.** BART, TVP and regime-switching means are not implemented, so nothing about them is verified.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Engines" icon="gears" href="/engines">
+    What the tests are testing.
+  </Card>
+
+  <Card title="Compare models" icon="scale-balanced" href="/compare-models">
+    The verdict rule the DGP study measures.
+  </Card>
+</Columns>

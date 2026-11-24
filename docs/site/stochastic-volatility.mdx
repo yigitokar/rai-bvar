@@ -1,0 +1,135 @@
+---
+title: "Fit stochastic volatility models and check convergence"
+sidebarTitle: "Stochastic volatility"
+description: "Fit SV, SV with outliers or Student-t errors, and CommonSV on BVAR's MCMC engine, set the sampler budget, and read the R-hat and ESS convergence gate."
+icon: "wave-square"
+keywords: ["stochastic volatility", "SV", "CommonSV", "MCMC", "Gibbs", "R-hat", "ESS", "convergence", "JAX"]
+---
+
+Any BVAR composition that is not conjugate runs on the MCMC engine: a Gibbs sampler written by hand in JAX. This guide fits stochastic volatility models, sets the sampler budget and reads the convergence diagnostics that decide whether a fit counts in a comparison.
+
+## Fit an SV model
+
+Choose the volatility component; the rest of the model stays as it was.
+
+```python
+import rai_bvar as rb
+
+data = rb.datasets.load("fred-qd", vintage="2026-09", variables="small")
+
+model = rb.BVAR(vol=rb.SV(outliers=True), lags=4)
+model.engine   # "mcmc"
+model.name     # "BVAR(Minnesota(structural, eb), SV(outliers), p=4)"
+
+fit = model.fit(data)
+fit.converged      # the R-hat / ESS gate
+fit.diagnostics    # one row per monitored quantity
+fc = fit.forecast(horizon=8, draws=2000, seed=0)
+```
+
+With an SV volatility, `Minnesota()` resolves to its structural form: the prior sits on the coefficients of the recursive structural form, with the prior mean chosen so the reduced-form prior mean is the familiar Minnesota one. Its prior covariances differ from the conjugate prior's, so a structural and a conjugate Minnesota prior are different priors. Use `Minnesota(form="reduced")` for the prior on the reduced-form coefficients; it is sampled with the corrected triangular algorithm of Carriero, Chan, Clark and Marcellino (2022).
+
+## The SV family
+
+Each equation's log variance `h_t` follows `h_t = μ + φ(h_(t−1) − μ) + σ η_t`, in the parametrisation of R's `stochvol`.
+
+| Component | What it adds |
+| --- | --- |
+| `SV()` | AR(1) log volatility per equation |
+| `SV(rw=True)` | Random-walk log volatility (`φ = 1`) |
+| `SV(outliers=True)` | A mixture outlier component on top of SV (Carriero, Clark, Marcellino and Mertens). By default, one outlier every 4 years a priori |
+| `SV(tails="t")` | Student-t errors as a scale mixture, with `ν` estimated on the grid 3 to 40 |
+| `SV(outliers=True, tails="t")` | Both |
+
+The defaults follow `stochvol`: `(φ + 1)/2 ~ Beta(20, 1.5)` and `σ² ~ 1·χ²₁` (`0.1·χ²₁` with `rw=True`). By default the prior on `μ` is centred, in each estimation window, on the scale of that window's data (`mu_prior="data"`). See [API reference](/api) for every argument.
+
+## Sampler budget
+
+`MCMCSettings` sets the chains and draws. Its `draws` defaults to the composition's budget, fixed when the model is built and stored in its spec:
+
+| Volatility | Default kept draws per chain |
+| --- | --- |
+| `SV(...)` and `CommonSV` | 10,000 |
+| `Constant` | 2,000 |
+
+Both run 4 chains after 1,000 burn-in sweeps. An SV fit with fewer than 10,000 kept draws per chain warns, because the SV parameters mix slowly. Raise the budget for a comparison:
+
+```python
+mcmc = rb.MCMCSettings(draws=20_000)          # chains=4, burn=1000, thin=1, seed=0
+model = rb.BVAR(vol=rb.SV(outliers=True), lags=4, mcmc=mcmc)
+```
+
+`fit(seed=...)` overrides `MCMCSettings.seed`. The same seed gives bitwise-identical draws on the same platform, versions, chain count and device count.
+
+### Timing
+
+The pre-release benchmark fits `Linear × SV` at `n = 20`, `p = 4`, `T = 300` with 4 chains of 10,000 kept draws. It took 52.3 s end to end with a cold compilation cache on one device of an Apple M5 Max. JAX compiles the sampler on the first fit of each composition; `rb.enable_compilation_cache(path)` keeps compiled programs across processes (see [Installation](/installation)).
+
+## Read the convergence gate
+
+`fit.converged` is `True` when every **primary** monitored quantity has rank-normalised split R-hat below 1.01 and bulk ESS above 400, from at least two chains. The primary quantities are:
+
+- the log-likelihood;
+- per equation, the own first-lag reduced-form coefficient;
+- per equation, `log λ` (constant volatility) or `μ, φ, σ` and the last log volatility `h_T` (SV; for a random walk, `σ` and `h_T`).
+
+Other monitored quantities, such as the contemporaneous coefficients, are reported but do not gate. Change the thresholds with `MCMCSettings(rhat_max=..., ess_min=...)`.
+
+`fit.diagnostics` is a `DataFrame` indexed by quantity with the columns `field`, `variable`, `primary`, `mean`, `sd`, `mcse_mean`, `q5`, `q50`, `q95`, `mcse_q5`, `mcse_q50`, `mcse_q95`, `rhat`, `ess_bulk`, `ess_tail` and `escape`. `fit.summary()` returns the primary rows, with the prior form, the hyperparameters in use, the implied reduced-form prior moments and the ordering in its `attrs`.
+
+A fit that misses the gate warns with the worst quantities, for example `sigma[GDPC1] R-hat 1.202, ESS 9`, and suggests more draws, burn-in or thinning.
+
+<Warning>
+  The default budget does not guarantee the gate. On the FRED-QD 2026-09 vintage, the full-sample `SV(outliers=True)` fit at 4 × 10,000 misses it on one of 16 primary quantities (σ of GDP, R-hat 1.012). In a rolling backtest the SV arm converged at 10 of 11 origins at 4 × 10,000 and at all 11 at 4 × 20,000.
+</Warning>
+
+The R-hat, ESS and MCSE estimators are implemented in the package (`rai_bvar.diagnostics`) and tested against reference values computed with ArviZ. ArviZ is not a dependency.
+
+## Common stochastic volatility
+
+`CommonSV` gives every variance one shared volatility factor: `λ_(i,t) = λ_i e^(h_t)`, with `h_t` a stationary AR(1) with mean 0 (Carriero, Clark and Marcellino 2016; Chan 2020).
+
+```python
+screen = rb.BVAR(
+    mean=rb.Linear(prior=rb.Minnesota(form="conjugate")),
+    vol=rb.CommonSV(),
+    lags=4,
+)
+```
+
+With an explicit `Minnesota(form="conjugate")`, the sampler keeps the conjugate structure and runs at conjugate speed, which makes it a fast SV screen for many variables. With any other prior, including `Minnesota()` with `form="auto"`, each equation keeps its own variance and the model is a volatility-axis alternative to `SV`. `CommonSV` is available on `main` only.
+
+## Impulse responses under SV
+
+Under SV, the impact matrix depends on the date. `fit.irf()` takes a `date` and a `which`:
+
+```python
+irf = fit.irf(horizon=20, draws=1000, shock="sd")               # last in-sample period
+irf = fit.irf(horizon=20, shock="sd", date="2008Q4")            # needs stored latent paths
+irf = fit.irf(horizon=20, shock="unit")                          # unit shocks, date-free
+```
+
+A date other than the last in-sample period, or `which="effective"` (the variance including the outlier or Student-t scale), needs the latent paths: fit with `MCMCSettings(store="paths")`. Unit-shock responses do not depend on the date.
+
+## What the MCMC engine does not do yet
+
+These raise at construction with a message that names the alternative:
+
+- `outliers="lenza-primiceri"` on an MCMC composition. Use `SV(outliers=True)` instead.
+- `Minnesota(hierarchy="mh")` on an MCMC composition. Use `"eb"` or `"fixed"`. With `"eb"`, the hyperparameters are fixed during sampling at an empirical-Bayes mode computed before it.
+
+## Variable ordering
+
+Models with a triangular factorisation of the covariance depend on the variable ordering, and every result records it. `rb.ordering_sensitivity(model, data, n_perm=10, pinned=[...])` refits under permutations of the ordering, keeping pinned variables first, and measures the spread of forecast scores and quantiles against a Monte Carlo noise floor.
+
+## Related pages
+
+<Columns cols={2}>
+  <Card title="Compare models" icon="scale-balanced" href="/compare-models">
+    Does SV improve the density forecasts? Ask the verdict engine.
+  </Card>
+
+  <Card title="Engines" icon="gears" href="/engines">
+    How a composition is assigned to an engine.
+  </Card>
+</Columns>
